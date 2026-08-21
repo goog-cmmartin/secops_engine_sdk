@@ -3,9 +3,9 @@
 **Status:** `VERIFIED`  
 **Target:** Google SecOps (Chronicle) SIEM Search UI & Backend API  
 **Environment:**
-- **Customer ID:** `a556547c-1cff-43ef-a2e4-cf5b12a865df`
-- **Project ID:** `sdl-preview-americas` (`37679061640`)
-- **Location/Region:** `us`
+- **Customer ID:** `<SECOPS_CUSTOMER_ID>`
+- **Project ID:** `<GCP_PROJECT_ID>` (`<PROJECT_NUMBER>`)
+- **Location/Region:** `<SECOPS_REGION>`
 
 ---
 
@@ -82,7 +82,7 @@ Executing a UDM Search in Google SecOps consists of a multi-stage flow:
   ```json
   [
     {
-      "operation": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-0d54b0e8-bff3-49d0-ab24-c6a26ae876ce"
+      "operation": "projects/<PROJECT_NUMBER>/locations/<SECOPS_REGION>/instances/<SECOPS_CUSTOMER_ID>/operations/s-udm-0d54b0e8-bff3-49d0-ab24-c6a26ae876ce"
     }
   ]
   ```

@@ -1,7 +1,7 @@
 [
   {
     "operation": {
-      "name": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
+      "name": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
       "metadata": {
         "@type": "type.googleapis.com/google.cloud.chronicle.v1main.UdmSearchOperationMetadata",
         "startTime": "2026-08-18T05:00:45.437032192Z",
@@ -17705,7 +17705,7 @@
           ],
           "complete": true
         },
-        "operation": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
+        "operation": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
         "activityTimeline": {
           "buckets": [
             {
@@ -17796,7 +17796,7 @@
   },
   {
     "operation": {
-      "name": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
+      "name": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
       "metadata": {
         "@type": "type.googleapis.com/google.cloud.chronicle.v1main.UdmSearchOperationMetadata",
         "startTime": "2026-08-18T05:00:45.437032192Z",
@@ -35673,7 +35673,7 @@
             {}
           ]
         },
-        "operation": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
+        "operation": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-03997b6f-1a2f-4f68-9597-7611ede461d7",
         "aiOverview": {
           "complete": true
         },

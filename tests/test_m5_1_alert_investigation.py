@@ -52,7 +52,10 @@ class TestMilestone51AlertInvestigation(unittest.TestCase):
 
     def test_alert_inv_003_invalid_alert_strict_error(self):
         """Validates that non-existent alerts raise explicit errors without silent fallback."""
-        invalid_alert = "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/cases/104185/caseAlerts/999999999"
+        invalid_alert = (
+            f"projects/{self.adapter.config.project_id}/locations/{self.adapter.config.location}/"
+            f"instances/{self.adapter.config.customer_id}/cases/104185/caseAlerts/999999999"
+        )
         with self.assertRaises(Exception) as ctx:
             self.engine.investigate_alert(invalid_alert)
         self.assertTrue(len(str(ctx.exception)) > 0)

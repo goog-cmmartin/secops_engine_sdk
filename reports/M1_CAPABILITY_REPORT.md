@@ -4,7 +4,7 @@
 **Capability ID:** `search.udm` (Composed workflow)  
 **MCP Target:** `search_udm`  
 **Evaluation Date:** 2026-08-18  
-**Live Target:** Project `sdl-preview-americas` (`37679061640`), Customer `a556547c-1cff-43ef-a2e4-cf5b12a865df`, Region `us`
+**Live Target:** Project `<GCP_PROJECT_ID>` (`<PROJECT_NUMBER>`), Customer `<SECOPS_CUSTOMER_ID>`, Region `<SECOPS_REGION>`
 
 ---
 

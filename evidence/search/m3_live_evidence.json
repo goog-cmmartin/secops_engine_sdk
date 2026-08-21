@@ -16,7 +16,7 @@
           "value": "B_114"
         },
         "compiled_query": "metadata.event_type = \"USER_LOGIN\" AND (principal.hostname = \"B_114\")",
-        "operation_id": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-cf1e5e7c-6f95-437b-8835-e9a2c81d0652",
+        "operation_id": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-cf1e5e7c-6f95-437b-8835-e9a2c81d0652",
         "returned_matches": 2,
         "lifecycle": "completed"
       }
@@ -29,7 +29,7 @@
         "entity_type": "HOSTNAME",
         "entity_value": "B_114",
         "compiled_query": "principal.hostname = \"B_114\" OR target.hostname = \"B_114\"",
-        "operation_id": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/operations/s-udm-587f362e-6802-40ea-9813-4c0aae47de4d",
+        "operation_id": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/operations/s-udm-587f362e-6802-40ea-9813-4c0aae47de4d",
         "returned_matches": 2,
         "lifecycle": "completed"
       }

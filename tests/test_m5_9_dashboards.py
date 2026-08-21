@@ -88,9 +88,10 @@ class TestM59DashboardsLive(unittest.TestCase):
 
     def test_03_batch_get_dashboard_charts_live(self):
         """Verifies multi-chart batch resolution using repeatable names query parameters."""
+        config = self.engine.adapter.config
         chart_names = [
-            f"projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dashboardCharts/72682156-d55c-4a78-b71c-65af90f02ccb",
-            f"projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dashboardCharts/387469fd-f54f-4014-8315-03bc097dfe23",
+            f"projects/{config.project_number}/locations/{config.location}/instances/{config.customer_id}/dashboardCharts/72682156-d55c-4a78-b71c-65af90f02ccb",
+            f"projects/{config.project_number}/locations/{config.location}/instances/{config.customer_id}/dashboardCharts/387469fd-f54f-4014-8315-03bc097dfe23",
         ]
         res = self.engine.adapter.batch_get_dashboard_charts(chart_names)
         self.assertIn("dashboardCharts", res)

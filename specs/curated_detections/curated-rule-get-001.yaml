@@ -1,0 +1,46 @@
+version: "1.0.0"
+name: "curated-rule-get-001"
+description: "Declarative workflow contract for retrieving a specific Curated Rule and its executable YARA-L rule logic from Content Hub."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  rule_id:
+    type: string
+    required: true
+    description: "Curated Rule identifier (e.g., 'ur_025628f0-af2d-4a52-b899-4de31928edfc') or title."
+
+outputs:
+  rule:
+    type: object
+    properties:
+      id: string
+      title: string
+      severity: string
+      precision: string
+      rule_type: string
+      curated_rule_set_id: string
+      techniques: array
+      description: string
+      false_positives: string
+  rule_text:
+    type: string
+    description: "Raw YARA-L executable rule logic."
+  live_status_enabled:
+    type: boolean
+  tactics:
+    type: array
+  techniques:
+    type: array
+
+api_mappings:
+  curated_rules:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/curatedRules"
+  featured_content_rules:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/contentHub/featuredContentRules"
+    params:
+      filter: 'rule_id:"{rule_id}"'

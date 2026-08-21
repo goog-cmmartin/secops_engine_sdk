@@ -1,0 +1,66 @@
+id: content_pack.search
+version: 1.0.0
+title: Content Hub Content Packs Discovery & Multi-Facet Filtering
+description: >
+  Searches, lists, and filters Content Hub Marketplace Content Packs across categories,
+  pack types, deployment status, and bundled component counts.
+category: content_pack
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/contentHub/contentPacks
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Keyword search across pack title, description, categories, uploader, and bundled item titles.
+  category:
+    type: string
+    required: false
+    description: Filter by Content Hub category (e.g. 'Threat Intelligence', 'Cloud', 'Mail Security').
+  pack_type:
+    type: string
+    required: false
+    description: Filter by Content Pack type (e.g. 'ONBOARDING', 'SEC_OPS_USE_CASE', 'EXTERNAL').
+  deployed:
+    type: boolean
+    required: false
+    description: Filter by deployment/installation status in the tenant.
+  limit:
+    type: integer
+    default: 100
+    description: Maximum number of content pack summaries to return.
+
+outputs:
+  batch:
+    type: ContentPackBatch
+    properties:
+      results:
+        type: list[ContentPackSummary]
+        items:
+          id: string
+          identifier: string
+          name: string
+          title: string
+          pack_type: string
+          categories: list[string]
+          description: string
+          deployed: boolean
+          custom: boolean
+          community: boolean
+          uploader: string
+          playbooks_count: integer
+          integrations_count: integer
+          dashboards_count: integer
+          rulesets_count: integer
+          queries_count: integer
+          rules_count: integer
+      total_count: integer
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero synthetic or simulated data structures.
+  - Full provenance linking Content Pack catalog to live tenant state.

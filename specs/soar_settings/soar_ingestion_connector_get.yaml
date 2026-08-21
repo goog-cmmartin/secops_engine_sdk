@@ -1,0 +1,30 @@
+id: soar.ingestion.connector.get
+name: Get SOAR Ingestion Connector
+version: 1.0.0
+description: Deep inspection of a specific SOAR ingestion connector instance.
+category: soar_settings
+
+inputs:
+  - name: instance_id
+    type: string
+    required: true
+    description: The unique identifier or resource path of the connector instance.
+  - name: integration
+    type: string
+    required: false
+    default: "-"
+    description: Parent integration name or wildcard '-'.
+  - name: connector_id
+    type: string
+    required: false
+    default: "-"
+    description: Parent connector ID or wildcard '-'.
+
+outputs:
+  - name: connector
+    type: SoarIngestionConnectorDetail
+    description: Detailed connector instance configuration, timings, and parameters.
+
+api_mapping:
+  endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_id}/locations/{location}/instances/{customer_id}/integrations/{integration}/connectors/{connector_id}/connectorInstances/{instance_id}"
+  method: GET

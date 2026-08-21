@@ -1,0 +1,24 @@
+schema_version: "1.0"
+id: "soar-remote-agent-get-001"
+title: "Remote SOAR Agent Deep Inspection"
+category: "soar_settings"
+capability_id: "soar.remote_agent.get"
+description: "Retrieves deep configuration of a remote agent including public certificates, installer links, and environment bindings."
+
+invariants:
+  - "Requires valid remote agent numeric ID or resource name"
+
+inputs:
+  agent_id:
+    type: "string"
+    required: true
+    description: "Numeric ID or resource name of the remote agent"
+
+outputs:
+  remote_agent:
+    type: "RemoteAgentDetail"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/remoteAgents/{agent_id}"
+    classification: "VERIFIED"

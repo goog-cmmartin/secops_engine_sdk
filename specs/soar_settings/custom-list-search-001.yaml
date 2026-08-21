@@ -1,0 +1,31 @@
+name: soar-custom-list-search-v1
+version: "1.0.0"
+description: "Discovers and filters SOAR custom key-value style retention lists by query, category, and environment."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching entity identifier or category."
+  category:
+    type: string
+    required: false
+    description: "Optional category filter (e.g. malicious_domains, High Value, High Risk Users)."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of custom list records to return."
+outputs:
+  custom_lists:
+    type: array
+    items:
+      id: string
+      name: string
+      category: string
+      entity_identifier: string
+      environments: array
+  total_count: integer

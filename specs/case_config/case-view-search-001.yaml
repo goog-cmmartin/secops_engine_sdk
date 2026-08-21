@@ -1,0 +1,45 @@
+id: case-view-search-001
+name: Case and Alert Layout View Search & Discovery
+description: Discovers and filters SOAR case, alert, and detection overview layout views.
+version: 1.0.0
+
+trigger:
+  type: USER_ACTION
+  action: case_config.view.search
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Optional keyword search matching view displayName or identifier.
+  view_type:
+    type: string
+    required: false
+    description: Filter by view type (e.g., CASE_OVERVIEW_V2, ALERT_OVERVIEW_V2, DETECTION_OVERVIEW).
+  limit:
+    type: integer
+    default: 50
+    description: Maximum number of views to return.
+
+steps:
+  - id: fetch_views
+    action: api.secops.views.list
+    params:
+      pageSize: 1000
+    provenance:
+      endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/views"
+
+outputs:
+  views:
+    type: array
+    items:
+      type: object
+      properties:
+        id: string
+        name: string
+        displayName: string
+        identifier: string
+        type: string
+        isDefault: boolean
+  total_count:
+    type: integer

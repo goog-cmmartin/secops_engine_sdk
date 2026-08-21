@@ -1,0 +1,60 @@
+id: integration.get
+version: 1.0.0
+title: SOAR Integration Deep Inspection
+description: >
+  Retrieves complete details for a specific integration, including configured instances,
+  environment bindings, remote execution agents, marketplace documentation, and categories.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  identifier:
+    type: string
+    required: true
+    description: Integration identifier (e.g. CrowdStrikeFalcon, GoogleSecOpsAiAgents, Zscaler).
+
+outputs:
+  detail:
+    type: IntegrationDetail
+    properties:
+      identifier: string
+      display_name: string
+      description: string
+      version: string
+      custom: boolean
+      certified: boolean
+      staging: boolean
+      python_version: string
+      integration_type: string
+      documentation_uri: string (optional)
+      categories: list[string]
+      instances:
+        type: list[IntegrationInstance]
+        items:
+          identifier: string
+          integration_identifier: string
+          display_name: string
+          environment: string
+          is_configured: boolean
+          is_remote: boolean
+          is_system_default: boolean
+      remote_agents:
+        type: list[RemoteAgent]
+        items:
+          id: string
+          identifier: string
+          display_name: string
+          agent_state: string
+          environments: list[string]
+          logging_level: string
+          installer_link: string
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - Explicit error propagation on API failures.

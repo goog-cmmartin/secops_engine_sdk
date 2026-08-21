@@ -1,0 +1,27 @@
+id: data-access-scope-search-001
+version: "1.0.0"
+title: Search and Filter Data Access Scopes
+category: data_rbac
+description: Discovers Data Access RBAC scopes with allow/deny label counts, allow-all flags, and author metadata.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/dataAccessScopes
+    description: Lists tenant Data Access Scopes.
+
+inputs:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Keyword filter matching scope ID, display name, or description.
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of scope summaries to return.
+
+outputs:
+  - name: batch
+    type: DataAccessScopeBatch
+    description: Batch containing DataAccessScopeSummary objects and global scope status.

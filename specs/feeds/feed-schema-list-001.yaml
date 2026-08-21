@@ -1,0 +1,29 @@
+schema_version: "1.0"
+contract_id: "feed-schema-list-001"
+name: "List Feed Source Types and Log Type Schemas"
+description: "Discovers available feed source types and inspects log type schemas with lean performance optimization."
+category: "feed"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoints /feedSourceTypeSchemas and /feedSourceTypeSchemas/{type}/logTypeSchemas."
+  - "Zero mock, synthetic, or fallback data."
+
+inputs:
+  - name: "feed_source_type"
+    type: "Optional[str]"
+    description: "Target feed source type (e.g. AMAZON_S3, GCS) when retrieving log type schemas."
+  - name: "include_field_schemas"
+    type: "bool"
+    default: false
+    description: "Whether to include verbose detailsFieldSchemas in output."
+
+outputs:
+  - name: "source_types"
+    type: "Optional[List[FeedSourceTypeSchema]]"
+    description: "Catalog of supported feed source mechanisms."
+  - name: "log_types"
+    type: "Optional[List[FeedLogTypeSchema]]"
+    description: "Log types supported by the specified feed source."
+  - name: "retrieved_at"
+    type: "datetime"
+    description: "Timestamp when catalog was retrieved."

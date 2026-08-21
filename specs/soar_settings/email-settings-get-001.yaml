@@ -1,0 +1,26 @@
+schema_version: "1.0"
+id: "soar-email-settings-get-001"
+title: "Get SOAR Email Transport Settings"
+category: "soar_settings"
+capability_id: "soar.email_settings.get"
+description: "Retrieves composite email transport configuration combining custom SMTP configuration and Google default SMTP flags."
+
+invariants:
+  - "Composite workflow querying EmailSettingsType and EmailSettings module properties"
+
+outputs:
+  properties:
+    type: "array"
+    items: "EmailSettingProperty"
+  use_custom:
+    type: "boolean"
+  total_count:
+    type: "integer"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/EmailSettingsType/properties"
+    classification: "VERIFIED"
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/EmailSettings/properties"
+    classification: "VERIFIED"

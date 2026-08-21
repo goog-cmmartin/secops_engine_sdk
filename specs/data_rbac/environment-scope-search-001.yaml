@@ -1,0 +1,27 @@
+id: environment-scope-search-001
+version: "1.0.0"
+title: Search SOAR Environments and Data Access Scope Bindings
+category: data_rbac
+description: Discovers SOAR multi-tenant environments and inspects their bound Data Access Scopes.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/environments
+    description: Lists SOAR environments with dataAccessScopesJson.
+
+inputs:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Keyword filter matching environment display name or description.
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of environment summaries to return.
+
+outputs:
+  - name: batch
+    type: EnvironmentScopeBatch
+    description: Batch containing EnvironmentScopeSummary objects and total count.

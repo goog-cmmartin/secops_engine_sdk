@@ -1,0 +1,36 @@
+id: tenant-instance-get-001
+version: 1.0.0
+name: Get Tenant Instance Details
+description: Retrieves root tenant instance details including customer code, active URLs, feature flags, and workforce pool providers.
+category: siem_settings
+
+parameters: []
+
+steps:
+  - id: fetch_instance_details
+    action: secops.siem.get_instance
+    description: Retrieves root instance metadata via GET /instances/{customer_id}.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}"
+    output_key: raw_instance
+
+  - id: structure_instance_details
+    action: transform.structure_instance_details
+    description: Parses customer code, secops URLs, UI/RBAC/Triage enablement, and frontend workforce configurations.
+    inputs:
+      raw: "${steps.fetch_instance_details.output}"
+    output_key: tenant_details
+
+outputs:
+  id: "${steps.structure_instance_details.output.id}"
+  name: "${steps.structure_instance_details.output.name}"
+  state: "${steps.structure_instance_details.output.state}"
+  display_name: "${steps.structure_instance_details.output.display_name}"
+  customer_code: "${steps.structure_instance_details.output.customer_code}"
+  create_time: "${steps.structure_instance_details.output.create_time}"
+  secops_urls: "${steps.structure_instance_details.output.secops_urls}"
+  secops_ui_enabled: "${steps.structure_instance_details.output.secops_ui_enabled}"
+  data_rbac_enabled: "${steps.structure_instance_details.output.data_rbac_enabled}"
+  triage_agent_enabled: "${steps.structure_instance_details.output.triage_agent_enabled}"
+  frontend_paths: "${steps.structure_instance_details.output.frontend_paths}"
+  raw: "${steps.structure_instance_details.output.raw}"

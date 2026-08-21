@@ -1,0 +1,44 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-search-001
+  name: Google SecOps Parsers Discovery
+  category: parsers
+  status: VERIFIED
+  description: Discovers and filters parsers across all log types or for a specific log type with creator and state filters.
+parameters:
+  log_type:
+    type: string
+    required: false
+    default: "-"
+    description: Log type identifier (e.g. CS_EDR, GCP_IDS, or '-' for all).
+  creator:
+    type: string
+    required: false
+    default: "ALL"
+    description: Creator filter (GOOGLE, CUSTOMER, or ALL).
+  state:
+    type: string
+    required: false
+    default: "ALL"
+    description: Parser state filter (ACTIVE, INACTIVE, or ALL).
+  query:
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching parser ID or log type.
+  limit:
+    type: integer
+    required: false
+    default: 50
+    description: Maximum number of parsers to return.
+outputs:
+  batch:
+    type: ParserBatch
+    description: Matching parser summaries.
+api_mapping:
+  - step: list_parsers
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/parsers
+    parameters:
+      view: BASIC_VIEW
+      pageSize: 1000

@@ -1,0 +1,34 @@
+id: soc-role-list-001
+version: 1.0.0
+name: List SOC Roles
+description: Lists configured SOC roles and workflow assignment access hierarchy.
+category: soar_settings
+
+parameters:
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of roles to return.
+
+steps:
+  - id: list_roles
+    action: secops.soar.list_soc_roles
+    description: Retrieves roles via GET /socRoles.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/socRoles"
+      pageSize: 1000
+    output_key: raw_roles
+
+  - id: structure_roles
+    action: transform.structure_soc_roles
+    description: Normalizes SOC roles into SocRoleBatch.
+    inputs:
+      raw: "${steps.list_roles.output}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.structure_roles.output.total_count}"
+  roles: "${steps.structure_roles.output.roles}"
+  retrieved_at: "${steps.structure_roles.output.retrieved_at}"

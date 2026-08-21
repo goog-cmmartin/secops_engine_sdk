@@ -1,0 +1,26 @@
+schema_version: "1.0"
+id: "soar-environment-get-001"
+title: "Environment Deep Inspection"
+category: "soar_settings"
+capability_id: "soar.environment.get"
+description: "Retrieves deep configuration details of a single multi-tenancy environment including retention, aliases, and data access scopes."
+
+invariants:
+  - "Requires valid environment numeric ID or resource name"
+  - "Explicit error propagation on non-existent environment ID"
+
+inputs:
+  env_id:
+    type: "string"
+    required: true
+    description: "Numeric ID or resource name of the target environment"
+
+outputs:
+  environment:
+    type: "EnvironmentDetail"
+    description: "Deep configuration detail of the environment"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/environments/{env_id}"
+    classification: "VERIFIED"

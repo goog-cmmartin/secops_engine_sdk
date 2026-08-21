@@ -1,0 +1,39 @@
+id: case-view-get-001
+name: Case View Deep Inspection
+description: Retrieves deep inspection of a specific case or alert view template including all widget layouts and configurations.
+version: 1.0.0
+
+trigger:
+  type: USER_ACTION
+  action: case_config.view.get
+
+inputs:
+  view_id:
+    type: string
+    required: true
+    description: Numeric ID or UUID identifier of the view template (e.g., 5e3aa276-538e-4484-ae81-7a2b68b7ad09).
+
+steps:
+  - id: get_view_detail
+    action: api.secops.views.get
+    params:
+      viewId: "{{ inputs.view_id }}"
+    provenance:
+      endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/views/{viewId}"
+
+outputs:
+  summary:
+    type: object
+    properties:
+      id: string
+      name: string
+      displayName: string
+      identifier: string
+      type: string
+  widgets:
+    type: array
+    items:
+      type: object
+      properties:
+        metadata: object
+        config: object

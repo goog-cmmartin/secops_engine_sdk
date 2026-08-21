@@ -1,0 +1,36 @@
+schema_version: "1.0"
+id: "soar-environment-search-001"
+title: "Search Multi-Tenancy Environments"
+category: "soar_settings"
+capability_id: "soar.environment.search"
+description: "Discovers, lists, and filters multi-tenancy environment boundaries within the SOAR tenant."
+
+invariants:
+  - "Requires active Google SecOps authentication"
+  - "Zero mock data in production path"
+  - "Supports keyword filtering and client-side pagination limits"
+
+inputs:
+  query:
+    type: "string"
+    required: false
+    description: "Optional keyword filter matching display name or environment ID"
+  limit:
+    type: "integer"
+    required: false
+    default: 100
+    description: "Maximum number of environment records to return"
+
+outputs:
+  environments:
+    type: "array"
+    items: "EnvironmentSummary"
+    description: "List of discovered environment summaries"
+  total_count:
+    type: "integer"
+    description: "Total number of matching environments"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/environments"
+    classification: "VERIFIED"

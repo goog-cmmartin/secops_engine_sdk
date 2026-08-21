@@ -1,0 +1,36 @@
+id: case-close-parameter-list-001
+version: 1.0.0
+name: List Case Close Dynamic Parameters
+description: Discovers dynamic form fields and custom field schemas required when closing cases.
+category: case_config
+
+parameters:
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of dynamic parameters to return.
+
+steps:
+  - id: list_close_parameters
+    action: secops.case_config.list_close_parameters
+    description: Retrieves dynamic parameters via GET /formDynamicParameters.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/formDynamicParameters"
+      filter: "formType = 'CLOSE_CASE'"
+      expand: "relatedCustomField"
+      pageSize: 1000
+    output_key: raw_params
+
+  - id: structure_close_parameters
+    action: transform.structure_close_parameters
+    description: Normalizes dynamic parameters into CaseCloseDynamicParameterBatch.
+    inputs:
+      raw: "${steps.list_close_parameters.output}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.structure_close_parameters.output.total_count}"
+  parameters: "${steps.structure_close_parameters.output.parameters}"
+  retrieved_at: "${steps.structure_close_parameters.output.retrieved_at}"

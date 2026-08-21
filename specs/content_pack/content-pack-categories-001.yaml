@@ -1,0 +1,26 @@
+id: content_pack.categories
+version: 1.0.0
+title: Content Hub Categories Taxonomy & Distribution
+description: >
+  Discovers and aggregates the taxonomy of Content Hub categories with the count of
+  available Content Packs in each category.
+category: content_pack
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/contentHub/contentPacks
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs: {}
+
+outputs:
+  categories:
+    type: list[dict]
+    properties:
+      category: string
+      pack_count: integer
+
+invariants:
+  - Aggregated strictly from live Content Hub catalog data.
+  - Zero hardcoded category taxonomy tables.

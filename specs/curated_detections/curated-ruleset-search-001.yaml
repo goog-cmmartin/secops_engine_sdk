@@ -1,0 +1,63 @@
+version: "1.0.0"
+name: "curated-ruleset-search-001"
+description: "Declarative workflow contract for discovering and searching Google SecOps Curated Rule Sets."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Free-text search across rule set title, description, and authors."
+  category:
+    type: string
+    required: false
+    description: "Curated Rule Set category name or ID (e.g., 'Cloud Threats', 'Windows Threats')."
+  mitre_tactic:
+    type: string
+    required: false
+    description: "MITRE ATT&CK Tactic identifier (e.g., 'TA0005') or display name."
+  mitre_technique:
+    type: string
+    required: false
+    description: "MITRE ATT&CK Technique identifier (e.g., 'T1562') or display name."
+  log_source:
+    type: string
+    required: false
+    description: "Target log source (e.g., 'Azure Activity', 'Windows Event Log')."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of curated rule sets to return."
+
+outputs:
+  curated_rulesets:
+    type: array
+    items:
+      id: string
+      title: string
+      description: string
+      category_id: string
+      category_name: string
+      log_sources: array
+      tactics: array
+      techniques: array
+      authors: array
+      quota_size: integer
+      detection_count: integer
+  total_count:
+    type: integer
+  retrieved_at:
+    type: string
+
+api_mappings:
+  categories:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/curatedRuleSetCategories"
+  rulesets:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/curatedRuleSetCategories/-/curatedRuleSets"
+    params:
+      pageSize: 1000

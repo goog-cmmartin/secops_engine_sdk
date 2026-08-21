@@ -1,0 +1,38 @@
+version: "1.0.0"
+kind: "WorkflowSpec"
+metadata:
+  id: "dashboard-get-001"
+  name: "Google SecOps Dashboard Deep Inspection"
+  category: "dashboard"
+  description: "Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries."
+
+inputs:
+  identifier:
+    type: "string"
+    required: true
+    description: "Dashboard UUID, resource name, or title"
+  include_queries:
+    type: "boolean"
+    required: false
+    default: true
+    description: "Whether to resolve and embed underlying query syntax for all charts"
+
+outputs:
+  detail:
+    type: "DashboardDetail"
+    description: "Complete composite dashboard detail"
+
+steps:
+  - id: "get_dashboard"
+    type: "adapter_call"
+    adapter_method: "get_native_dashboard"
+
+  - id: "batch_get_charts"
+    type: "adapter_call"
+    adapter_method: "batch_get_dashboard_charts"
+    description: "Fetches all dashboard charts in a single round-trip"
+
+  - id: "resolve_queries"
+    type: "adapter_call"
+    adapter_method: "get_dashboard_query"
+    description: "Resolves query definition for each chart"

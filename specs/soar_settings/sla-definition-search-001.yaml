@@ -1,0 +1,35 @@
+name: soar-sla-definition-search-v1
+version: "1.0.0"
+description: "Discovers and filters Service Level Agreement definitions across stages and priorities."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching SLA type or target values."
+  sla_type:
+    type: string
+    required: false
+    description: "Optional SLA type filter (e.g. CASE_STAGE, CASE_PRIORITY)."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of SLA definitions to return."
+outputs:
+  sla_definitions:
+    type: array
+    items:
+      id: string
+      name: string
+      sla_type: string
+      sla_type_values: array
+      sla_period: integer
+      sla_period_time_unit: string
+      critical_sla_period: integer
+      critical_sla_period_time_unit: string
+      environments: array
+  total_count: integer

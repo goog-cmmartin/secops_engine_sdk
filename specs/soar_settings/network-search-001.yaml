@@ -1,0 +1,28 @@
+name: soar-network-search-v1
+version: "1.0.0"
+description: "Discovers and filters customer-defined CIDR network address ranges and environment mappings."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching display name or CIDR address."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of networks to return."
+outputs:
+  networks:
+    type: array
+    items:
+      id: string
+      name: string
+      display_name: string
+      address: string
+      environments: array
+      priority: integer
+  total_count: integer

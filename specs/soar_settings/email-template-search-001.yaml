@@ -1,0 +1,32 @@
+name: soar-email-template-search-v1
+version: "1.0.0"
+description: "Discovers and filters plain text (TEMPLATE) and HTML (HTML_FORMAT) email templates used in SOAR playbooks."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching display name or content."
+  template_type:
+    type: string
+    required: false
+    description: "Optional template type filter (e.g. TEMPLATE, HTML_FORMAT)."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of email templates to return."
+outputs:
+  email_templates:
+    type: array
+    items:
+      id: string
+      name: string
+      display_name: string
+      template_type: string
+      author: string
+      environments: array
+  total_count: integer

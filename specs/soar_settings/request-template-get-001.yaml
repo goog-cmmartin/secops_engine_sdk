@@ -1,0 +1,26 @@
+name: soar-request-template-get-v1
+version: "1.0.0"
+description: "Retrieves complete form field definitions and options for a single request template."
+category: soar_settings
+inputs:
+  template_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the request template."
+outputs:
+  summary:
+    id: string
+    name: string
+    display_name: string
+    visual_family: string
+    allow_description: boolean
+    environments: array
+    field_count: integer
+  event_field_definitions:
+    type: array
+    items:
+      name: string
+      entity_types: array
+      watermark: string
+      type: string
+  raw: object

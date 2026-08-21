@@ -1,0 +1,41 @@
+version: "1.0.0"
+kind: "WorkflowSpec"
+metadata:
+  id: "dashboard-query-execute-001"
+  name: "Google SecOps Dashboard Query Execution"
+  category: "dashboard"
+  description: "Executes a dashboard widget query against live telemetry and transforms columnar results into tabular records."
+
+inputs:
+  query_name:
+    type: "string"
+    required: true
+    description: "Full query resource name or UUID"
+  filters:
+    type: "array"
+    required: false
+    description: "Optional dashboard filters to apply during execution"
+  use_previous_time_range:
+    type: "boolean"
+    required: false
+    default: false
+    description: "Whether to execute against previous historical comparison window"
+  query_source:
+    type: "string"
+    required: false
+    default: "DASHBOARD"
+    description: "Contextual query source identifier"
+
+outputs:
+  result:
+    type: "DashboardQueryResult"
+    description: "Hydrated query result with tabular rows and metadata"
+
+steps:
+  - id: "execute_query"
+    type: "adapter_call"
+    adapter_method: "execute_dashboard_query"
+
+  - id: "tabular_transformation"
+    type: "in_memory_transform"
+    description: "Transforms columnar value vectors into row-oriented dictionaries."

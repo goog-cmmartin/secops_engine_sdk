@@ -1,0 +1,41 @@
+id: soar.ingestion.webhook.search
+name: Search SOAR Webhooks
+version: 1.0.0
+description: Discovers and filters configured SOAR event ingestion webhooks.
+category: soar_settings
+
+inputs:
+  - name: query
+    type: string
+    required: false
+    description: Substring filter matching webhook display name, description, or ID.
+  - name: environment
+    type: string
+    required: false
+    description: Filter webhooks by assigned environment name.
+  - name: enabled_only
+    type: boolean
+    required: false
+    default: false
+    description: If true, only returns enabled webhooks.
+  - name: page_size
+    type: integer
+    required: false
+    default: 1000
+    description: Maximum number of webhooks to retrieve per page.
+  - name: page_token
+    type: string
+    required: false
+    description: Pagination token for next page.
+
+outputs:
+  - name: batch
+    type: SoarWebhookBatch
+    description: Batch containing normalized webhook summaries, total count, and pagination token.
+
+api_mapping:
+  endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_id}/locations/{location}/instances/{customer_id}/webhooks"
+  method: GET
+  params:
+    pageSize: "{page_size}"
+    pageToken: "{page_token}"

@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+workflow_id: "case_config.alert_grouping.rule.get"
+title: "Get Alert Grouping Rule Deep Inspection"
+description: "Retrieves complete configuration, entity types, and category details of a single alert grouping rule."
+
+classification: VERIFIED
+
+triggers:
+  - type: manual
+  - type: api_invocation
+
+inputs:
+  - name: rule_id
+    type: string
+    required: true
+    description: "Numeric ID or resource name of the alert grouping rule."
+
+outputs:
+  - name: summary
+    type: object
+    description: "Core rule attributes."
+  - name: category_details
+    type: array
+    description: "Specific alert types or products matched by this rule."
+  - name: raw
+    type: object
+    description: "Full verbatim Google SecOps API response."
+
+api_calls:
+  - service: chronicle_v1alpha
+    method: GET
+    path: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/alertGroupingRules/{rule_id}"

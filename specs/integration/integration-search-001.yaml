@@ -1,0 +1,59 @@
+id: integration.search
+version: 1.0.0
+title: SOAR Integration Discovery & Filtering
+description: >
+  Searches, lists, and filters SOAR integrations across environments, configuration
+  status, certification, and remote agent bindings.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Keyword search across integration display name, identifier, and description.
+  environment:
+    type: string
+    required: false
+    description: Filter integrations that have instances bound to a specific environment or global (*).
+  is_configured:
+    type: boolean
+    required: false
+    description: Filter integrations that have at least one active configured instance.
+  is_certified:
+    type: boolean
+    required: false
+    description: Filter Google-certified integrations.
+  limit:
+    type: integer
+    default: 100
+    description: Maximum number of integration summaries to return.
+
+outputs:
+  batch:
+    type: IntegrationBatch
+    properties:
+      results:
+        type: list[IntegrationSummary]
+        items:
+          identifier: string
+          display_name: string
+          description: string
+          version: string
+          custom: boolean
+          certified: boolean
+          staging: boolean
+          python_version: string
+          integration_type: string
+          instances_count: integer
+      total_count: integer
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - Explicit error propagation on API failures.

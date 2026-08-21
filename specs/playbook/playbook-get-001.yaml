@@ -1,0 +1,42 @@
+schema_version: "1.0"
+capability_id: "playbook.get"
+description: "Retrieve complete Google SecOps SOAR Playbook definition including trigger conditions, step execution DAG, and integration actions."
+maturity: "VERIFIED"
+
+provider_mapping:
+  provider: "google_secops"
+  endpoint: "legacyPlaybooks:legacyGetWorkflowFullInfoWithEnvFilterByIdentifier"
+  http_method: "GET"
+  url_template: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacyPlaybooks:legacyGetWorkflowFullInfoWithEnvFilterByIdentifier"
+
+request_parameters:
+  identifier:
+    type: "string"
+    description: "UUID workflow identifier or numeric playbook ID."
+    required: true
+
+response_fields:
+  id:
+    type: "string"
+  identifier:
+    type: "string"
+  name:
+    type: "string"
+  description:
+    type: "string"
+  is_enabled:
+    type: "boolean"
+  priority:
+    type: "integer"
+  category_name:
+    type: "string"
+  trigger:
+    type: "object"
+    description: "Playbook trigger configuration and match conditions."
+  steps:
+    type: "array"
+    description: "Ordered execution steps/actions with integration details and parameters."
+
+invariants:
+  - "Zero mocks: Playbook details originate exclusively from live SecOps endpoints."
+  - "Preserves full step graph, integration actions, and configuration parameters."

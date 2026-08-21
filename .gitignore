@@ -1,0 +1,108 @@
+# =====================================================================
+# Google SecOps Workflow Engine & SDK — .gitignore
+# =====================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions & build artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Node.js & Web UI Dependencies & Builds
+node_modules/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Secrets, Credentials, Tokens & Keys
+*.env
+*.env.*
+*.pem
+*.key
+*.p12
+*.crt
+*credential*.json
+*service_account*.json
+.secret*
+token.json
+
+# Databases, SQLite & Cache stores
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs, Diagnostics & Local Run Outputs
+*.log
+logs/
+*.pid
+
+# OS & Editor configurations
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing, Coverage & Type Checking
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Antigravity & Agent workspace artifacts
+.agents/
+.gemini/
+
+# Legacy / Prototype Scratch Folders
+secops_rewrite/
+secops_rewrite_ui/
+take2/
+plan.md
+test_qt_app.py
+secops_state_graph*

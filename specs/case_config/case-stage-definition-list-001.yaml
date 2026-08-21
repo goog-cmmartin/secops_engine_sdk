@@ -1,0 +1,35 @@
+id: case-stage-definition-list-001
+version: 1.0.0
+name: List Case Stage Definitions
+description: Lists ordered SOC case lifecycle pipeline stages.
+category: case_config
+
+parameters:
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of stages to return.
+
+steps:
+  - id: list_stages
+    action: secops.case_config.list_stages
+    description: Retrieves stage definitions via GET /caseStageDefinitions?orderBy=order.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/caseStageDefinitions"
+      orderBy: "order"
+      pageSize: 1000
+    output_key: raw_stages
+
+  - id: structure_stages
+    action: transform.structure_case_stages
+    description: Normalizes case stages into CaseStageDefinitionBatch.
+    inputs:
+      raw: "${steps.list_stages.output}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.structure_stages.output.total_count}"
+  stages: "${steps.structure_stages.output.stages}"
+  retrieved_at: "${steps.structure_stages.output.retrieved_at}"

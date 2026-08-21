@@ -1,0 +1,21 @@
+name: soar-sla-definition-get-v1
+version: "1.0.0"
+description: "Retrieves complete SLA parameters for a single SLA rule."
+category: soar_settings
+inputs:
+  sla_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the SLA definition."
+outputs:
+  summary:
+    id: string
+    name: string
+    sla_type: string
+    sla_type_values: array
+    sla_period: integer
+    sla_period_time_unit: string
+    critical_sla_period: integer
+    critical_sla_period_time_unit: string
+    environments: array
+  raw: object

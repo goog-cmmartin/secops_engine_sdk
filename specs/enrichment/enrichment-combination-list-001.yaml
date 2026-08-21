@@ -1,0 +1,45 @@
+id: enrichment-combination-list-001
+version: 1.0.0
+name: List Available Enrichment Combinations
+description: Discovers all available enrichment combinations across log types and enrichment sources.
+category: enrichment
+
+parameters:
+  - name: enrichment_type
+    type: string
+    required: false
+    default: "ALL"
+    description: Optional filter by enrichment type (e.g. USER_ENRICHMENT, ASSET_ENRICHMENT, GEO_IP_ENRICHMENT, GOOGLE_THREAT_INTEL_ENRICHMENT, or ALL).
+  - name: target_log_type
+    type: string
+    required: false
+    default: ""
+    description: Optional filter by target log type (e.g. CB_EDR, GCP_SECURITYCENTER_THREAT).
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of records to return.
+
+steps:
+  - id: fetch_enrichment_combinations
+    action: secops.enrichment.get_combination
+    description: Fetches available enrichment combinations from live Google SecOps endpoint.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/enrichmentCombination"
+    output_key: raw_combinations
+
+  - id: filter_and_map_records
+    action: transform.filter_enrichment_combinations
+    description: Filters combinations by enrichment type and target log type, normalizing resource names.
+    inputs:
+      raw: "${steps.fetch_enrichment_combinations.output}"
+      enrichment_type: "${parameters.enrichment_type}"
+      target_log_type: "${parameters.target_log_type}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.filter_and_map_records.output.total_count}"
+  records: "${steps.filter_and_map_records.output.records}"
+  retrieved_at: "${steps.filter_and_map_records.output.retrieved_at}"

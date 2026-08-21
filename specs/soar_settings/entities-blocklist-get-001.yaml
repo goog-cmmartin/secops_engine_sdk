@@ -1,0 +1,18 @@
+name: soar-entities-blocklist-get-v1
+version: "1.0.0"
+description: "Retrieves complete configuration for a single entity blocklist entry."
+category: soar_settings
+inputs:
+  blocklist_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the blocklist entry."
+outputs:
+  summary:
+    id: string
+    name: string
+    entity_identifier: string
+    entity_type: string
+    action: string
+    environments: array
+  raw: object

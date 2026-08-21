@@ -1,0 +1,27 @@
+id: data-access-label-search-001
+version: "1.0.0"
+title: Search and Filter Data Access Labels
+category: data_rbac
+description: Discovers Data Access Labels and their associated UDM filter query definitions.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/dataAccessLabels
+    description: Lists tenant Data Access Labels.
+
+inputs:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Keyword filter matching label ID, display name, description, or UDM query text.
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of label summaries to return.
+
+outputs:
+  - name: batch
+    type: DataAccessLabelBatch
+    description: Batch containing DataAccessLabelSummary objects and total count.

@@ -1,0 +1,70 @@
+id: event.investigate.v1
+name: Event Investigation & Raw Log Workflow
+version: 1.0.0
+description: |
+  Normalized workflow contract for investigating a single SecOps event.
+  Provides structured UDM field exploration, schema-aware traversal,
+  provenance tracking, and lazy/eager Raw Log retrieval without UI coupling.
+
+status_taxonomy:
+  - capability: "Retrieve enriched UDM event by ID"
+    status: VERIFIED
+    endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{customer}/events/{id}:fetchEnrichedEvent"
+  - capability: "Retrieve unparsed raw log by Event ID & Log Token"
+    status: VERIFIED
+    endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{customer}/legacy:legacyFindRawLogs"
+  - capability: "Inspect structured fields from active SearchSession"
+    status: VERIFIED
+    endpoint: "In-memory extraction from search.udm streamSearch event payload"
+
+workflow:
+  inputs:
+    event_ref:
+      type: EventReference
+      description: |
+        Either an event dictionary from a SearchBatchResult (containing structured event + eventLogToken),
+        or a standalone EventReference(event_id, log_token).
+      required: true
+    eager_load_raw_log:
+      type: boolean
+      default: false
+      description: If true, fetches unparsed raw log immediately during investigation initialization.
+
+  steps:
+    - step: 1
+      name: Initialize Investigation Session
+      action: parse_and_validate_reference
+      description: Validates event ID and extracts available in-memory structured fields.
+
+    - step: 2
+      name: Resolve Structured UDM Event
+      action: resolve_udm_event
+      description: |
+        If structured UDM event was provided via SearchBatchResult, use it directly.
+        Otherwise, call adapter.fetch_enriched_event(event_id).
+
+    - step: 3
+      name: Decompose and Flatten Fields
+      action: build_field_dictionary
+      description: |
+        Extracts dot-notated field mappings (e.g. metadata.event_type, principal.hostname,
+        target.user.userid, security_result.action) for fast lookup and pivot query generation.
+
+    - step: 4
+      name: Retrieve Raw Log (On-Demand or Eager)
+      action: fetch_raw_log
+      description: |
+        Calls adapter.get_raw_log(event_id, log_token).
+        Base64-decodes logBytes to return verbatim unparsed log content, format type,
+        source product, and ingestion timestamp.
+
+  outputs:
+    investigation_session:
+      type: EventInvestigationSession
+      fields:
+        - event_id: str
+        - log_token: Optional[str]
+        - event: Dict[str, Any]
+        - fields: Dict[str, Any]
+        - raw_log: Optional[RawLogPayload]
+        - provenance: InvestigationProvenance

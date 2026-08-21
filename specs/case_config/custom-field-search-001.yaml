@@ -1,0 +1,49 @@
+id: custom-field-search-001
+name: Custom Fields Search & Discovery
+description: Lists and filters custom typed fields across Case and Alert scopes.
+version: 1.0.0
+
+trigger:
+  type: USER_ACTION
+  action: case_config.custom_field.search
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Optional keyword search matching field displayName.
+  field_type:
+    type: string
+    required: false
+    description: Filter by custom field type (e.g. LIST, MULTIPLE_CHOICE_LIST, DATE_TIME, FREE_TEXT).
+  scope:
+    type: string
+    required: false
+    description: Filter by target scope (e.g. Case, Alert).
+  limit:
+    type: integer
+    default: 50
+    description: Maximum number of custom fields to return.
+
+steps:
+  - id: fetch_custom_fields
+    action: api.secops.customFields.list
+    params:
+      pageSize: 1000
+    provenance:
+      endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/customFields"
+
+outputs:
+  custom_fields:
+    type: array
+    items:
+      type: object
+      properties:
+        id: string
+        name: string
+        displayName: string
+        type: string
+        scopes: string
+        values: array
+  total_count:
+    type: integer

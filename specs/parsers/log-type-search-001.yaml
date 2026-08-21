@@ -1,0 +1,28 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: log-type-search-001
+  name: Google SecOps Log Types Catalog Discovery
+  category: parsers
+  status: VERIFIED
+  description: Discovers and filters supported ingestion log types cataloged in Google SecOps.
+parameters:
+  query:
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching log type ID or display name.
+  limit:
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of log types to return.
+outputs:
+  batch:
+    type: LogTypeBatch
+    description: Catalog of matching log type definitions.
+api_mapping:
+  - step: list_log_types
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes
+    parameters:
+      pageSize: 1000

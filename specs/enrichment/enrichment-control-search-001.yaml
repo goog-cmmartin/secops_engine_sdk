@@ -1,0 +1,46 @@
+id: enrichment-control-search-001
+version: 1.0.0
+name: Search Deployed Enrichment Controls
+description: Discovers and filters deployed enrichment controls that restrict entity enrichments.
+category: enrichment
+
+parameters:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching control ID, description, or target log type.
+  - name: enrichment_type
+    type: string
+    required: false
+    default: "ALL"
+    description: Optional filter by enrichment type (e.g. GEO_IP_ENRICHMENT or ALL).
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of controls to return.
+
+steps:
+  - id: list_enrichment_controls
+    action: secops.enrichment.list_controls
+    description: Retrieves deployed enrichment controls via GET /enrichmentControls.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/enrichmentControls"
+      pageSize: 1000
+    output_key: raw_controls
+
+  - id: filter_and_map_controls
+    action: transform.filter_enrichment_controls
+    description: Applies query filter and structures summary records.
+    inputs:
+      raw: "${steps.list_enrichment_controls.output}"
+      query: "${parameters.query}"
+      enrichment_type: "${parameters.enrichment_type}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.filter_and_map_controls.output.total_count}"
+  controls: "${steps.filter_and_map_controls.output.controls}"
+  retrieved_at: "${steps.filter_and_map_controls.output.retrieved_at}"

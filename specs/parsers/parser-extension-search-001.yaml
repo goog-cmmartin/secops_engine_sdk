@@ -1,0 +1,33 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-extension-search-001
+  name: Google SecOps Parser Extensions Discovery
+  category: parsers
+  status: VERIFIED
+  description: Discovers and filters parser extensions (dynamic parsing & CBN custom snippets) across log types.
+parameters:
+  log_type:
+    type: string
+    required: false
+    default: "-"
+    description: Target log type or '-' for all log types.
+  query:
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching extension ID or log type.
+  limit:
+    type: integer
+    required: false
+    default: 50
+    description: Maximum number of parser extensions to return.
+outputs:
+  batch:
+    type: ParserExtensionBatch
+    description: Catalog of matching parser extensions.
+api_mapping:
+  - step: list_parser_extensions
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/parserExtensions
+    parameters:
+      pageSize: 1000

@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+workflow_id: "marketplace_integration.search"
+title: "Search Content Hub Marketplace Response Integrations"
+description: "Discovers, searches, and filters Marketplace Response Integrations across 60+ categories, installed status, and update availability."
+
+invariants:
+  strict_origin: true
+  zero_synthetic_data: true
+  error_visibility: true
+
+triggers:
+  - type: "MANUAL_OR_AGENT"
+    description: "Invoked to discover SOAR Response Integrations available in the Content Hub Marketplace."
+
+inputs:
+  query:
+    type: "string"
+    required: false
+    description: "Keyword matching title, identifier, description, or categories."
+  category:
+    type: "string"
+    required: false
+    description: "Filter by category name (e.g., 'Cloud', 'EDR', 'Email Security')."
+  installed:
+    type: "boolean"
+    required: false
+    description: "Filter only installed integrations if true, or uninstalled if false."
+  update_available:
+    type: "boolean"
+    required: false
+    description: "Filter integrations that have pending version updates."
+  certified:
+    type: "boolean"
+    required: false
+    description: "Filter certified integrations."
+  limit:
+    type: "integer"
+    required: false
+    default: 50
+    description: "Maximum results to return."
+
+outputs:
+  batch:
+    type: "MarketplaceIntegrationBatch"
+    description: "Collection of matching integration summaries, total count, installed count, and updates available count."
+
+steps:
+  - id: "fetch_marketplace_integrations"
+    action: "adapters.google_secops.list_marketplace_integrations"
+    description: "Query Google SecOps Marketplace Integrations endpoint with powerUp filter."
+    params:
+      query_filter: "powerUp = false"
+      order_by: "identifier asc"
+      page_size: 1000
+
+  - id: "filter_and_rank"
+    action: "engine.workflows.marketplace_integrations._filter_integrations"
+    description: "Apply client-side filtering for keywords, categories, installed status, and updates."

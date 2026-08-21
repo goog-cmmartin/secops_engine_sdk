@@ -1,0 +1,97 @@
+# SecOps Workflow Specification: UDM Search Execution & Lifecycle
+# Spec ID: search.udm.v1.2.0
+# Capability ID: search.udm
+# MCP Tool Name: search_udm
+
+metadata:
+  spec_version: "1.2.0"
+  capability_id: "search.udm"
+  name: "UDM Search Execution, Streaming & Session Lifecycle"
+  author: "Antigravity Agent"
+  updated_at: "2026-08-18"
+  classification: "VERIFIED"
+  oracle: "Google SecOps Live Instance (37679061640 / a556547c-1cff-43ef-a2e4-cf5b12a865df)"
+
+evidence:
+  validation:
+    - "evidence/search/udm/validate-query.json"
+  initiation:
+    - "evidence/search/udm/initiate-search.json"
+  streaming:
+    - "evidence/search/udm/stream-batch.json"
+  cancellation:
+    - "evidence/search/udm/cancellation.json"
+
+domain_primitives:
+  validate: "query.validate"
+  start: "search.start"
+  events: "search.events"
+  cancel: "search.cancel"
+
+lifecycle_states:
+  - validating: "Checking UDM syntax against compiler"
+  - starting: "Initiating asynchronous LRO search"
+  - running: "Streaming event batches incrementally"
+  - cancelling: "Signaling backend operation cancellation"
+  - completed: "Search finished naturally or limit reached"
+  - cancelled: "Search halted early by consumer; partial events retained"
+  - failed: "Compiler error, HTTP failure, or instance error surfaced explicitly"
+
+completeness_states:
+  - empty: "Zero events retrieved"
+  - partial: "Subset of events retrieved (limit reached, cancelled, or mid-stream error)"
+  - complete: "All available matching events retrieved from provider"
+
+structural_provenance:
+  invariant: "Every SearchBatchResult must originate directly from a live provider operation."
+  fields:
+    - operation_id: "Unique live operation name assigned by Google SecOps LRO"
+    - start_index: "1-based integer index of first event in batch"
+    - end_index: "1-based integer index of last event in batch"
+    - retrieved_at: "UTC timestamp when batch was received from provider"
+
+test_inventory:
+  - id: "UDM-EXEC-001"
+    name: "Valid Query Happy Path & Multi-Batch Streaming"
+    type: "happy_path"
+    description: "Validates query, starts LRO, streams genuine UDM events, completes successfully."
+
+  - id: "UDM-EXEC-002"
+    name: "Compiler / Syntax Error Explicit Propagation"
+    type: "unhappy_path"
+    description: "Invalid query syntax causes explicit compilation error; state becomes failed; zero mock fallback."
+
+  - id: "UDM-EXEC-003"
+    name: "Provider / API Failure Propagation"
+    type: "unhappy_path"
+    description: "Backend HTTP 400/403/500 error surfaces verbatim; state becomes failed; zero mock fallback."
+
+  - id: "UDM-EXEC-004"
+    name: "Early Cancellation Before Stream"
+    type: "unhappy_path"
+    description: "Cancel token active before fetch; operation transitions to cancelled."
+
+  - id: "UDM-EXEC-005"
+    name: "Mid-Stream Cancellation & Partial Data Retention"
+    type: "unhappy_path"
+    description: "Cancellation during stream halts backend and retains all prior batches."
+
+  - id: "UDM-EXEC-006"
+    name: "Zero-Result Search Completeness"
+    type: "edge_case"
+    description: "Query with no matches completes with count=0 and completeness=complete."
+
+  - id: "UDM-EXEC-007"
+    name: "Receive Limit Enforcement & Partial Completeness"
+    type: "edge_case"
+    description: "Engine halts stream when receive_limit is reached; marks completeness=partial."
+
+  - id: "UDM-EXEC-008"
+    name: "Structural Provenance Verification"
+    type: "invariant"
+    description: "Verifies every batch has non-empty operation_id and valid start/end index range."
+
+  - id: "UDM-EXEC-009"
+    name: "Static Anti-Mock Audit"
+    type: "invariant"
+    description: "Zero banned mock identifiers in any production source file."

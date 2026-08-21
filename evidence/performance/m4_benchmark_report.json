@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-08-18T06:37:54.089932+00:00",
+  "query": "metadata.event_type = \"USER_LOGIN\"",
+  "batch_size": 500,
+  "system": {
+    "os": "linux",
+    "python_version": "3.11.2 (main, May 12 2026, 05:17:27) [GCC 12.2.0]",
+    "cpu_count": 4
+  },
+  "runs": [
+    {
+      "requested_limit": 500,
+      "emitted_event_count": 500,
+      "time_to_first_row_sec": 15.3054,
+      "total_elapsed_sec": 15.3279,
+      "events_per_second": 32.62,
+      "batches_received": 1,
+      "memory_initial_rss_mb": 35.64,
+      "memory_final_rss_mb": 52.5,
+      "memory_delta_mb": 16.86,
+      "lifecycle": "completed",
+      "completeness": "partial"
+    },
+    {
+      "requested_limit": 1000,
+      "emitted_event_count": 1000,
+      "time_to_first_row_sec": 13.0914,
+      "total_elapsed_sec": 13.1079,
+      "events_per_second": 76.29,
+      "batches_received": 1,
+      "memory_initial_rss_mb": 51.5,
+      "memory_final_rss_mb": 75.66,
+      "memory_delta_mb": 24.16,
+      "lifecycle": "completed",
+      "completeness": "partial"
+    },
+    {
+      "requested_limit": 2500,
+      "emitted_event_count": 1500,
+      "time_to_first_row_sec": 13.6848,
+      "total_elapsed_sec": 13.7018,
+      "events_per_second": 109.47,
+      "batches_received": 1,
+      "memory_initial_rss_mb": 74.66,
+      "memory_final_rss_mb": 72.34,
+      "memory_delta_mb": -2.32,
+      "lifecycle": "completed",
+      "completeness": "complete"
+    }
+  ],
+  "cancellation_benchmark": {
+    "cancel_latency_ms": 1.94,
+    "lifecycle": "completed",
+    "events_before_halt": 1100
+  },
+  "model_overhead_benchmark": {
+    "virtual_rows_loaded": 1000,
+    "total_insertion_time_ms": 2.83,
+    "ms_per_thousand_rows": 2.83
+  }
+}

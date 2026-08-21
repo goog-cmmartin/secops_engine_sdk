@@ -1,0 +1,31 @@
+id: agent-settings-get-001
+version: 1.0.0
+name: Get Gemini Triage & Investigation Agent Settings
+description: Retrieves tenant configuration for automated alert investigations, triage filters, delays, and quota limits.
+category: siem_settings
+
+parameters: []
+
+steps:
+  - id: fetch_agent_settings
+    action: secops.siem.get_agent_settings
+    description: Retrieves agent configuration via GET /agentSettings.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/agentSettings"
+    output_key: raw_settings
+
+  - id: structure_agent_settings
+    action: transform.structure_agent_settings
+    description: Parses auto-investigation enablement, alert filter expression, delay, and quota limits.
+    inputs:
+      raw: "${steps.fetch_agent_settings.output}"
+    output_key: settings
+
+outputs:
+  name: "${steps.structure_agent_settings.output.name}"
+  auto_investigation_enabled: "${steps.structure_agent_settings.output.auto_investigation_enabled}"
+  alert_filter: "${steps.structure_agent_settings.output.alert_filter}"
+  auto_investigation_delay: "${steps.structure_agent_settings.output.auto_investigation_delay}"
+  auto_quota_limit: "${steps.structure_agent_settings.output.auto_quota_limit}"
+  manual_quota_limit: "${steps.structure_agent_settings.output.manual_quota_limit}"
+  raw: "${steps.structure_agent_settings.output.raw}"

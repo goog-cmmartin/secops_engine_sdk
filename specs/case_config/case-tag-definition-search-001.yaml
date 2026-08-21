@@ -1,0 +1,46 @@
+id: case-tag-definition-search-001
+version: 1.0.0
+name: Search Case Tag Definitions
+description: Discovers and filters case tag classification rules and criteria.
+category: case_config
+
+parameters:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching tag display name or criteria.
+  - name: match_criteria
+    type: string
+    required: false
+    default: "ALL"
+    description: Optional match criteria filter (e.g. DATA_DRIVEN, BY_VENDOR, BY_PRODUCT, or ALL).
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of tag definitions to return.
+
+steps:
+  - id: list_tag_definitions
+    action: secops.case_config.list_tags
+    description: Retrieves tag definitions via GET /caseTagDefinitions.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/caseTagDefinitions"
+      pageSize: 1000
+    output_key: raw_tags
+
+  - id: filter_tag_definitions
+    action: transform.filter_case_tags
+    description: Filters and normalizes tag rules into CaseTagDefinitionBatch.
+    inputs:
+      raw: "${steps.list_tag_definitions.output}"
+      query: "${parameters.query}"
+      match_criteria: "${parameters.match_criteria}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.filter_tag_definitions.output.total_count}"
+  tags: "${steps.filter_tag_definitions.output.tags}"
+  retrieved_at: "${steps.filter_tag_definitions.output.retrieved_at}"

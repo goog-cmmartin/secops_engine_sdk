@@ -1,0 +1,27 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-get-001
+  name: Google SecOps Parser Deep Inspection
+  category: parsers
+  status: VERIFIED
+  description: Retrieves complete parser metadata, changelogs, validation report, and decoded Logstash CBN code.
+parameters:
+  log_type:
+    type: string
+    required: true
+    description: Target log type identifier (e.g. AQUA_TRACEE_CUSTOM, GCP_IDS).
+  parser_id:
+    type: string
+    required: false
+    description: Specific parser UUID or resource name. If omitted, retrieves the active/latest parser.
+outputs:
+  detail:
+    type: ParserDetail
+    description: Full parser configuration and decoded CBN Logstash definition.
+api_mapping:
+  - step: get_parser_full
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/parsers
+    parameters:
+      view: FULL_VIEW
+      pageSize: 1000

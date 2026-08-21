@@ -1,0 +1,38 @@
+version: "1.0.0"
+kind: "WorkflowSpec"
+metadata:
+  id: "dashboard-search-001"
+  name: "Google SecOps Native Dashboards Discovery"
+  category: "dashboard"
+  description: "Discovers and filters native dashboards in Google SecOps."
+
+inputs:
+  query:
+    type: "string"
+    required: false
+    description: "Keyword filter matching display name or description"
+  dashboard_type:
+    type: "string"
+    required: false
+    description: "Filter by dashboard type (e.g. 'CUSTOM', 'DEFAULT')"
+  limit:
+    type: "integer"
+    required: false
+    default: 50
+    description: "Maximum results to return"
+
+outputs:
+  batch:
+    type: "DashboardBatch"
+    description: "Batch of native dashboard summaries"
+
+steps:
+  - id: "list_dashboards"
+    type: "adapter_call"
+    adapter_method: "list_native_dashboards"
+    params:
+      page_size: 1000
+
+  - id: "filter_and_rank"
+    type: "in_memory_transform"
+    description: "Applies keyword matching, type filtering, and pagination limits."

@@ -1,0 +1,40 @@
+id: calculated-field-search-001
+name: Calculated Field Definitions Search & Discovery
+description: Lists and filters logical formula definitions used to derive case and alert properties.
+version: 1.0.0
+
+trigger:
+  type: USER_ACTION
+  action: case_config.calculated_field.search
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Optional keyword search matching target field or formula.
+  limit:
+    type: integer
+    default: 50
+    description: Maximum number of calculated field definitions to return.
+
+steps:
+  - id: fetch_calculated_fields
+    action: api.secops.calculatedFieldDefinitions.list
+    params:
+      pageSize: 1000
+    provenance:
+      endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/calculatedFieldDefinitions"
+
+outputs:
+  definitions:
+    type: array
+    items:
+      type: object
+      properties:
+        id: string
+        name: string
+        targetField: string
+        formula: string
+        enabled: boolean
+  total_count:
+    type: integer

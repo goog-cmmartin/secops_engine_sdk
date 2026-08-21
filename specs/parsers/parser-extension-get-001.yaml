@@ -1,0 +1,26 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-extension-get-001
+  name: Google SecOps Parser Extension Deep Inspection
+  category: parsers
+  status: VERIFIED
+  description: Retrieves full parser extension configuration, decoded CBN snippet, decoded test log, and dynamic parsing opted fields.
+parameters:
+  log_type:
+    type: string
+    required: true
+    description: Target log type identifier (e.g. CS_EDR, AQUA_TRACEE_CUSTOM).
+  extension_id:
+    type: string
+    required: true
+    description: Specific parser extension UUID or resource name.
+outputs:
+  detail:
+    type: ParserExtensionDetail
+    description: Detailed extension structure with decoded Logstash snippet and sample logs.
+api_mapping:
+  - step: get_parser_extension
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/parserExtensions
+    parameters:
+      pageSize: 1000

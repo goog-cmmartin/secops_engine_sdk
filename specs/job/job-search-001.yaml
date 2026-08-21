@@ -1,0 +1,59 @@
+id: job.search
+version: 1.0.0
+title: SOAR Scheduled Jobs Discovery & Filtering
+description: >
+  Searches, lists, and filters SOAR scheduled jobs across integrations,
+  status (enabled/disabled), schedule intervals, and runtime instance counts.
+category: job
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/-/jobs
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Keyword search across job display name, integration name, and description.
+  integration:
+    type: string
+    required: false
+    description: Filter jobs by parent integration identifier (e.g. Demoverse, Splunk, CrowdStrikeFalcon).
+  enabled:
+    type: boolean
+    required: false
+    description: Filter enabled or disabled jobs.
+  limit:
+    type: integer
+    default: 100
+    description: Maximum number of job summaries to return.
+
+outputs:
+  batch:
+    type: JobBatch
+    properties:
+      results:
+        type: list[JobSummary]
+        items:
+          id: string
+          name: string
+          display_name: string
+          description: string
+          integration: string
+          enabled: boolean
+          cron_expression: string
+          recurring_type: string
+          interval: integer
+          timeout: integer
+          instances_count: integer
+          author: string
+          creation_time: string
+          modification_time: string
+      total_count: integer
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero synthetic or simulated data structures.
+  - Explicit error propagation on API failures.

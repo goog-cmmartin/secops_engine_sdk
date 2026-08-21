@@ -1,0 +1,23 @@
+schema_version: "1.0.0"
+workflow_id: "soar.data_retention.get"
+title: "Get Data Retention Settings"
+description: "Retrieves SOAR data retention configuration including retention duration in months and per-environment policy settings."
+
+classification: VERIFIED
+
+triggers:
+  - type: manual
+  - type: api_invocation
+
+outputs:
+  - name: properties
+    type: array
+    description: "List of data retention module settings properties."
+  - name: total_count
+    type: integer
+    description: "Total number of properties returned."
+
+api_calls:
+  - service: chronicle_v1alpha
+    method: GET
+    path: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/DataRetention/properties"

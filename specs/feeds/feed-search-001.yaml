@@ -1,0 +1,37 @@
+schema_version: "1.0"
+contract_id: "feed-search-001"
+name: "Search and Filter Feeds"
+description: "Discovers, lists, and filters push/pull ingestion feeds across feed source types, log types, and states."
+category: "feed"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoint /feeds."
+  - "Zero mock, synthetic, or fallback feed records."
+
+inputs:
+  - name: "query"
+    type: "Optional[str]"
+    description: "Keyword search against feed display name or ID."
+  - name: "feed_source_type"
+    type: "Optional[str]"
+    description: "Filter by source type (e.g. AMAZON_S3_V2, GOOGLE_CLOUD_STORAGE)."
+  - name: "log_type"
+    type: "Optional[str]"
+    description: "Filter by associated log type (e.g. CS_EDR, WIZ)."
+  - name: "state"
+    type: "Optional[str]"
+    description: "Filter by feed state (e.g. ACTIVE, INACTIVE)."
+  - name: "limit"
+    type: "int"
+    default: 50
+
+outputs:
+  - name: "feeds"
+    type: "List[FeedSummary]"
+    description: "List of matched feeds."
+  - name: "total_count"
+    type: "int"
+    description: "Total matching feeds count."
+  - name: "retrieved_at"
+    type: "datetime"
+    description: "Timestamp when batch was retrieved."

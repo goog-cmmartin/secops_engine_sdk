@@ -1,0 +1,30 @@
+id: entity-risk-config-get-001
+version: 1.0.0
+name: Get Entity Risk Scoring Configuration
+description: Retrieves UEBA entity risk scoring configuration parameters including detection/alert scores and weighting factors.
+category: siem_settings
+
+parameters: []
+
+steps:
+  - id: fetch_risk_config
+    action: secops.siem.get_risk_config
+    description: Retrieves UEBA risk config via GET /riskConfig.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/riskConfig"
+    output_key: raw_config
+
+  - id: structure_risk_config
+    action: transform.structure_risk_config
+    description: Maps default detection risk score, alert risk score, weighting factor, and closed alert coefficient.
+    inputs:
+      raw: "${steps.fetch_risk_config.output}"
+    output_key: config
+
+outputs:
+  name: "${steps.structure_risk_config.output.name}"
+  default_detection_risk_score: "${steps.structure_risk_config.output.default_detection_risk_score}"
+  default_alert_risk_score: "${steps.structure_risk_config.output.default_alert_risk_score}"
+  default_weighting_factor: "${steps.structure_risk_config.output.default_weighting_factor}"
+  default_closed_alert_coefficient: "${steps.structure_risk_config.output.default_closed_alert_coefficient}"
+  raw: "${steps.structure_risk_config.output.raw}"

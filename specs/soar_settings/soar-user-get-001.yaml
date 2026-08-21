@@ -1,0 +1,30 @@
+id: soar-user-get-001
+version: 1.0.0
+name: Get SOAR User Details
+description: Retrieves deep profile details of a single SOAR user including roles, permission groups, and environment access.
+category: soar_settings
+
+parameters:
+  - name: user_id
+    type: string
+    required: true
+    description: SOAR user numeric ID or resource name.
+
+steps:
+  - id: fetch_user
+    action: secops.soar.get_user
+    description: Retrieves single user via GET /legacySoarUsers/{userId}.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacySoarUsers/{user_id}"
+    output_key: raw_user
+
+  - id: structure_user
+    action: transform.structure_soar_user
+    description: Parses and structures single user record into SoarUserDetail.
+    inputs:
+      raw: "${steps.fetch_user.output}"
+    output_key: user_detail
+
+outputs:
+  summary: "${steps.structure_user.output.summary}"
+  raw: "${steps.structure_user.output.raw}"

@@ -1,0 +1,17 @@
+name: soar-custom-list-get-v1
+version: "1.0.0"
+description: "Retrieves complete configuration for a single SOAR custom list record."
+category: soar_settings
+inputs:
+  list_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the custom list record."
+outputs:
+  summary:
+    id: string
+    name: string
+    category: string
+    entity_identifier: string
+    environments: array
+  raw: object

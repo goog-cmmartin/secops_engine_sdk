@@ -1,0 +1,29 @@
+schema_version: "1.0.0"
+workflow_id: "marketplace_integration.affected_items"
+title: "Get Downstream Affected Integration Instances and Playbooks"
+description: "Resolves downstream environment instances and active playbooks that depend on an integration and could be impacted by version upgrades or modifications."
+
+invariants:
+  strict_origin: true
+  zero_synthetic_data: true
+  error_visibility: true
+
+triggers:
+  - type: "MANUAL_OR_AGENT"
+    description: "Invoked to perform impact analysis before upgrading or updating an integration."
+
+inputs:
+  identifier:
+    type: "string"
+    required: true
+    description: "Integration identifier or title (e.g. 'Wiz')."
+
+outputs:
+  affected_items:
+    type: "MarketplaceAffectedItems"
+    description: "List of affected downstream environment instances and playbooks."
+
+steps:
+  - id: "fetch_affected_items"
+    action: "adapters.google_secops.get_integration_affected_items"
+    description: "Calls :fetchAffectedItems on the integrations resource."

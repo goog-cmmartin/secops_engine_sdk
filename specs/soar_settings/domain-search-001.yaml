@@ -1,0 +1,26 @@
+name: soar-domain-search-v1
+version: "1.0.0"
+description: "Discovers and filters customer-approved domain names and environment mappings."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching display name."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of domains to return."
+outputs:
+  domains:
+    type: array
+    items:
+      id: string
+      name: string
+      display_name: string
+      environments: array
+  total_count: integer

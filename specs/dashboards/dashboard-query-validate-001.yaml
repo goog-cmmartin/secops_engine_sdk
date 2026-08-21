@@ -1,0 +1,28 @@
+version: "1.0.0"
+kind: "WorkflowSpec"
+metadata:
+  id: "dashboard-query-validate-001"
+  name: "Google SecOps Dashboard Query Validation"
+  category: "dashboard"
+  description: "Validates statistical / dashboard widget query syntax against the live Google SecOps query compiler."
+
+inputs:
+  raw_query:
+    type: "string"
+    required: true
+    description: "Statistical or UDM widget query string to validate"
+  dialect:
+    type: "string"
+    required: false
+    default: "DIALECT_STATS"
+    description: "Dialect compiler mode (DIALECT_STATS, DIALECT_UDM_SEARCH)"
+
+outputs:
+  validation:
+    type: "ValidationResult"
+    description: "Query validation outcome and syntax diagnostics"
+
+steps:
+  - id: "validate_query"
+    type: "adapter_call"
+    adapter_method: "validate_stats_query"

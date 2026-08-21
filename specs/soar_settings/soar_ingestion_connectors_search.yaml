@@ -1,0 +1,51 @@
+id: soar.ingestion.connector.search
+name: Search SOAR Ingestion Connectors
+version: 1.0.0
+description: Discovers and filters configured SOAR ingestion connector instances across integrations and environments.
+category: soar_settings
+
+inputs:
+  - name: query
+    type: string
+    required: false
+    description: Substring filter matching connector display name, identifier, definition, or integration.
+  - name: integration
+    type: string
+    required: false
+    default: "-"
+    description: Specific parent integration name or wildcard '-' for all integrations.
+  - name: connector_id
+    type: string
+    required: false
+    default: "-"
+    description: Specific connector ID or wildcard '-' for all connectors.
+  - name: environment
+    type: string
+    required: false
+    description: Filter connectors by assigned environment name.
+  - name: enabled_only
+    type: boolean
+    required: false
+    default: false
+    description: If true, only returns enabled connector instances.
+  - name: page_size
+    type: integer
+    required: false
+    default: 1000
+    description: Maximum number of connector instances to retrieve per page.
+  - name: page_token
+    type: string
+    required: false
+    description: Pagination token for next page.
+
+outputs:
+  - name: batch
+    type: SoarIngestionConnectorBatch
+    description: Batch containing normalized connector summaries, total count, and pagination token.
+
+api_mapping:
+  endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_id}/locations/{location}/instances/{customer_id}/integrations/{integration}/connectors/{connector_id}/connectorInstances"
+  method: GET
+  params:
+    pageSize: "{page_size}"
+    pageToken: "{page_token}"

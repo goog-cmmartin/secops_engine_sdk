@@ -1,0 +1,61 @@
+# ==============================================================================
+# SEC-SPEC-SRCH-002: UDM Search Refinement & Entity/Field Pivot
+# ==============================================================================
+metadata:
+  spec_id: SEC-SPEC-SRCH-002
+  version: "1.0.0"
+  status: VERIFIED
+  domain: search
+  capabilities:
+    - id: search.refine.v1
+      name: UDM Search Query Refinement
+      description: Refines an existing UDM query or active search session by adding inclusive/exclusive field filters and time windows.
+    - id: search.from_entity.v1
+      name: Entity Canonical Pivot Search
+      description: Automatically constructs multi-field canonical UDM searches for high-fidelity entity investigations (IPs, Hostnames, Users, Hashes, Domains).
+
+contract:
+  refinement_operators:
+    - name: EQUALS
+      symbol: "="
+      syntax_template: '{field} = "{value}"'
+    - name: NOT_EQUALS
+      symbol: "!="
+      syntax_template: '{field} != "{value}"'
+    - name: NOCASE_EQUALS
+      symbol: "= ... nocase"
+      syntax_template: '{field} = "{value}" nocase'
+    - name: REGEX_MATCH
+      symbol: "=~"
+      syntax_template: '{field} =~ "{value}"'
+
+  canonical_entity_mappings:
+    IP:
+      description: Searches for IP address occurrences across principal, target, and intermediary nodes.
+      template: 'principal.ip = "{value}" OR target.ip = "{value}"'
+    HOSTNAME:
+      description: Searches for asset hostnames across principal and target fields.
+      template: 'principal.hostname = "{value}" OR target.hostname = "{value}"'
+    USER:
+      description: Searches for user identity / account names across principal and target.
+      template: 'principal.user.userid = "{value}" OR target.user.userid = "{value}"'
+    SHA256:
+      description: Searches for file hashes across principal and target processes.
+      template: 'principal.process.file.sha256 = "{value}" OR target.process.file.sha256 = "{value}"'
+    DOMAIN:
+      description: Searches for DNS query resolution requests.
+      template: 'network.dns.questions.name = "{value}"'
+
+  execution_phases:
+    - step: 1
+      name: BUILD_QUERY
+      description: Constructs the compound UDM query string from base parameters and filter clauses.
+    - step: 2
+      name: VALIDATE_SYNTAX
+      description: Validates compiled query syntax against live Google SecOps :validateQuery endpoint.
+    - step: 3
+      name: INITIATE_STREAM
+      description: Dispatches validated search request via SearchUDMWorkflow with full provenance linking to parent session/event.
+    - step: 4
+      name: STREAM_RESULTS
+      description: Delivers batches incrementally with lifecycle events and cancellation support.

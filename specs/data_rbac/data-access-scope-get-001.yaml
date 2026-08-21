@@ -1,0 +1,21 @@
+id: data-access-scope-get-001
+version: "1.0.0"
+title: Get Data Access Scope Deep Configuration
+category: data_rbac
+description: Retrieves deep configuration of a Data Access Scope including allowed and denied data access labels and ingestion labels.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/dataAccessScopes/{scope_id}
+    description: Retrieves full configuration for a Data Access Scope.
+
+inputs:
+  - name: scope_id
+    type: string
+    required: true
+    description: Identifier or resource name of the Data Access Scope.
+
+outputs:
+  - name: detail
+    type: DataAccessScopeDetail
+    description: Full scope metadata, allowed labels, and denied labels.

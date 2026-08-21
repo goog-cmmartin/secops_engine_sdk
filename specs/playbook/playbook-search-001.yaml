@@ -1,0 +1,56 @@
+schema_version: "1.0"
+capability_id: "playbook.search"
+description: "Search and filter Google SecOps SOAR Playbooks with multi-faceted filtering across category, type, and enabled status."
+maturity: "VERIFIED"
+
+provider_mapping:
+  provider: "google_secops"
+  endpoint: "legacyPlaybooks:legacyGetWorkflowMenuCardsWithEnvFilter"
+  http_method: "POST"
+  url_template: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacyPlaybooks:legacyGetWorkflowMenuCardsWithEnvFilter"
+
+request_parameters:
+  query:
+    type: "string"
+    description: "Free-form text query to filter playbooks by name or creator."
+    required: false
+  category:
+    type: "string"
+    description: "Filter playbooks by category name (e.g. 'GSA', 'Blocks', 'Cymbal')."
+    required: false
+  playbook_type:
+    type: "string"
+    enum: ["REGULAR", "NESTED"]
+    description: "Filter playbooks by type (REGULAR or NESTED)."
+    required: false
+  is_enabled:
+    type: "boolean"
+    description: "Filter playbooks by enabled status."
+    required: false
+  limit:
+    type: "integer"
+    default: 50
+    description: "Maximum number of playbooks to return."
+    required: false
+
+response_fields:
+  results:
+    type: "array"
+    items:
+      id: "string"
+      identifier: "string"
+      name: "string"
+      priority: "integer"
+      is_enabled: "boolean"
+      category_name: "string"
+      playbook_type: "string"
+      creator_full_name: "string"
+      environments: "array"
+      created_at: "string"
+  total_count:
+    type: "integer"
+    description: "Total number of matching playbooks."
+
+invariants:
+  - "Zero mocks: Playbook data originates exclusively from live legacyGetWorkflowMenuCardsWithEnvFilter endpoint."
+  - "Preserves full classification metadata (id, identifier, originalWorkflowIdentifier, categoryId, creator)."

@@ -1,0 +1,40 @@
+id: soar-user-search-001
+version: 1.0.0
+name: Search SOAR Users
+description: Discovers and filters SOAR users and external identities.
+category: soar_settings
+
+parameters:
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Optional keyword filter matching user full name, email, or login identifier.
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of users to return.
+
+steps:
+  - id: list_users
+    action: secops.soar.list_users
+    description: Retrieves users via GET /legacySoarUsers.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacySoarUsers"
+      pageSize: 1000
+    output_key: raw_users
+
+  - id: filter_users
+    action: transform.filter_soar_users
+    description: Applies query filter and structures summary records.
+    inputs:
+      raw: "${steps.list_users.output}"
+      query: "${parameters.query}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.filter_users.output.total_count}"
+  users: "${steps.filter_users.output.users}"
+  retrieved_at: "${steps.filter_users.output.retrieved_at}"

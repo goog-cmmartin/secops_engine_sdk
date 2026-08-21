@@ -1,0 +1,45 @@
+version: "1.0.0"
+name: "curated-metrics-001"
+description: "Declarative workflow contract for retrieving tenant-wide rule engine quotas and curated detection firing telemetry."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  start_time:
+    type: string
+    required: false
+    description: "Start timestamp for detection counting (defaults to 7 days ago)."
+  end_time:
+    type: string
+    required: false
+    description: "End timestamp for detection counting (defaults to now)."
+
+outputs:
+  tenant_metrics:
+    type: object
+    properties:
+      total_active_count: integer
+      total_archived_count: integer
+      total_live_rule_count: integer
+      max_live_rule_count: integer
+      chronicle_rules_quota_limit: integer
+      chronicle_rules_quota_usage: integer
+      counts_per_rule_type: array
+  top_firing_rulesets:
+    type: array
+    items:
+      ruleset_id: string
+      ruleset_name: string
+      count: integer
+  retrieved_at:
+    type: string
+
+api_mappings:
+  legacy_counts:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacy:legacyGetRuleCounts"
+  detection_counts:
+    endpoint: "POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}:countAllCuratedRuleSetDetections"

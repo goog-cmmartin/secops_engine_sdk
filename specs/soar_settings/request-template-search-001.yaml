@@ -1,0 +1,29 @@
+name: soar-request-template-search-v1
+version: "1.0.0"
+description: "Discovers and filters SOAR manual case request form templates."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching display name or field names."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of request templates to return."
+outputs:
+  request_templates:
+    type: array
+    items:
+      id: string
+      name: string
+      display_name: string
+      visual_family: string
+      allow_description: boolean
+      environments: array
+      field_count: integer
+  total_count: integer

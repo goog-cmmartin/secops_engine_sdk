@@ -1,0 +1,80 @@
+provider: google_secops
+description: >
+  Maps canonical SecOps workflow operations to Google SecOps (Chronicle) REST/LRO APIs,
+  normalizing JSON structures, error formats, and parameter mappings.
+
+operations:
+  query.validate:
+    method: GET
+    path: "/v1alpha/projects/{projectId}/locations/{location}/instances/{customerId}:validateQuery"
+    params:
+      dialect: DIALECT_UDM_SEARCH
+      allowUnreplacedPlaceholders: false
+      rawQuery: "$args.query"
+    response_mapping:
+      valid: "$.queryType == 'QUERY_TYPE_UDM_QUERY'"
+      dialect: "udm"
+      raw_query_type: "$.queryType"
+
+  search.start:
+    method: POST
+    path: "/v1alpha/projects/{projectId}/locations/{location}/instances/{customerId}/legacy:legacyFetchUdmSearchView"
+    body:
+      baselineQuery: "$args.query"
+      baselineTimeRange:
+        startTime: "$args.start_time"
+        endTime: "$args.end_time"
+      eventList:
+        maxReturnedEvents: "$args.max_events"
+      fieldAggregations:
+        maxValuesPerField: 60
+      detectionOptions:
+        detectionList:
+          maxReturnedDetections: 1000
+        snapshotQuery: 'feedback_summary.status != "CLOSED"'
+        fieldAggregations:
+          maxValuesPerField: 60
+        fetchNonAlertingDetections: true
+      prevalence:
+        bucketSize:
+          resolutionInSeconds: 900
+        getPrevalence: true
+      caseInsensitive: true
+      generateAiOverview: true
+      returnOperationIdOnly: true
+    response_mapping:
+      operation_id: "$[0].operation"
+
+  search.events:
+    method: GET
+    path: "/v1alpha/{args.session_id}:streamSearch"
+    params:
+      eventIndexStart: "$args.start_index"
+      eventIndexEnd: "$args.start_index + $args.batch_size - 1"
+      pageRequest: false
+      paginationEnabled: true
+    response_mapping:
+      events: "$.events"
+      batch_count: "length($.events)"
+      more_data_available: "$.moreDataAvailable"
+
+  search.cancel:
+    method: POST
+    path: "/v1alpha/{args.session_id}:cancel"
+    response_mapping:
+      cancelled: true
+
+policies:
+  secops_standard_read:
+    retry_on:
+      - status_code: 429
+        name: RATE_LIMITED
+      - status_code: 503
+        name: SERVICE_UNAVAILABLE
+      - name: TIMEOUT
+    backoff:
+      type: exponential
+      initial_delay_ms: 500
+      multiplier: 2.0
+      max_delay_ms: 10000
+    max_attempts: 4

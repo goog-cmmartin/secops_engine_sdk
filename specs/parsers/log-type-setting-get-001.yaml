@@ -1,0 +1,20 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: log-type-setting-get-001
+  name: Google SecOps Log Type Setting Retrieval
+  category: parsers
+  status: VERIFIED
+  description: Retrieves autonomous parsing settings and extraction type (e.g. OPT_IN) for a specific log type.
+parameters:
+  log_type:
+    type: string
+    required: true
+    description: Target log type identifier (e.g. POWERSHELL).
+outputs:
+  setting:
+    type: LogTypeSetting
+    description: Configuration options and autonomous parsing status.
+api_mapping:
+  - step: get_log_type_setting
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/logTypeSetting

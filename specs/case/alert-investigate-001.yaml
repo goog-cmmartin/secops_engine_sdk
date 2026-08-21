@@ -1,0 +1,25 @@
+capability_id: alert.investigate
+version: 1.0.0
+name: SecOps Alert Deep-Dive Investigation
+description: >
+  Orchestrates deep inspection of a specific SecOps alert, including its rule match
+  context, severity, status, involved entities, and linked detection events.
+
+provider_mapping:
+  engine: GoogleSecOpsAdapter
+  endpoints:
+    alert_details: GET /v1alpha/{alert_name}
+    alert_entities: GET /v1alpha/{alert_name}/involvedEntities
+
+execution:
+  mode: PARALLEL_EAGER
+  subresources:
+    - name: alert_details
+      concurrency: immediate
+    - name: involved_entities
+      concurrency: immediate
+
+invariants:
+  - zero_mock_data: true
+  - strict_error_visibility: true
+  - provenance_tracking: true

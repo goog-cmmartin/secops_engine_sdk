@@ -1,0 +1,19 @@
+name: soar-email-template-get-v1
+version: "1.0.0"
+description: "Retrieves complete email template definition including markup / body content."
+category: soar_settings
+inputs:
+  template_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the email template."
+outputs:
+  summary:
+    id: string
+    name: string
+    display_name: string
+    template_type: string
+    author: string
+    environments: array
+  content: string
+  raw: object

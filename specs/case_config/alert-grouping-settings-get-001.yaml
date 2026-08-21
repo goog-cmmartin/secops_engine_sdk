@@ -1,0 +1,23 @@
+schema_version: "1.0.0"
+workflow_id: "case_config.alert_grouping.settings.get"
+title: "Get Alert Grouping Global Settings"
+description: "Retrieves global SOAR alert grouping configuration parameters including timeframes, max grouping limits, and algorithms."
+
+classification: VERIFIED
+
+triggers:
+  - type: manual
+  - type: api_invocation
+
+outputs:
+  - name: properties
+    type: array
+    description: "List of alert grouping module settings properties."
+  - name: total_count
+    type: integer
+    description: "Total number of properties returned."
+
+api_calls:
+  - service: chronicle_v1alpha
+    method: GET
+    path: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/AlertGroupingSettings/properties"

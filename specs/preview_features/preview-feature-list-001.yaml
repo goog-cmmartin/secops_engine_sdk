@@ -1,0 +1,27 @@
+id: preview-feature-list-001
+version: "1.0.0"
+title: List and Filter Tenant Preview Features
+category: preview_feature
+description: Discovers customer-specific preview feature flags, enablement states, retirement dates, and documentation links.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/features
+    description: Retrieves all tenant preview features.
+
+inputs:
+  - name: enabled_only
+    type: boolean
+    required: false
+    default: false
+    description: When true, filters results to only enabled preview features.
+  - name: query
+    type: string
+    required: false
+    default: ""
+    description: Case-insensitive search keyword matching feature name or display name.
+
+outputs:
+  - name: batch
+    type: PreviewFeatureBatch
+    description: Batch containing normalized PreviewFeatureSummary objects, total count, and enabled count.

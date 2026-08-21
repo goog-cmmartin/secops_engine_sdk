@@ -1,0 +1,21 @@
+schema_version: "1.0"
+id: "soar-support-settings-get-001"
+title: "Get Google Support Access Settings"
+category: "soar_settings"
+capability_id: "soar.support_settings.get"
+description: "Retrieves Google Support access delegation parameters including roles, environments, and expiry."
+
+invariants:
+  - "Module settings properties structure"
+
+outputs:
+  properties:
+    type: "array"
+    items: "SupportSettingProperty"
+  total_count:
+    type: "integer"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/Support/properties"
+    classification: "VERIFIED"

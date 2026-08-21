@@ -1,0 +1,20 @@
+id: soar.ingestion.webhook.get
+name: Get SOAR Webhook
+version: 1.0.0
+description: Deep inspection of a specific SOAR event ingestion webhook.
+category: soar_settings
+
+inputs:
+  - name: webhook_id
+    type: string
+    required: true
+    description: The unique UUID or resource path of the webhook.
+
+outputs:
+  - name: webhook
+    type: SoarWebhookDetail
+    description: Detailed webhook properties, payload mapping dictionary, and URL postfix endpoint.
+
+api_mapping:
+  endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_id}/locations/{location}/instances/{customer_id}/webhooks/{webhook_id}"
+  method: GET

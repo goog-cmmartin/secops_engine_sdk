@@ -1,0 +1,132 @@
+# yaml-language-server: $schema=../../schemas/workflow-spec.json
+schema_version: "1.0.0"
+capability_id: "case.search"
+name: "SOAR Case Search & Filtering"
+description: "Executes free-form text search and structured multi-facet filtering across SOAR cases."
+version: "1.0.0"
+category: "case"
+
+input_schema:
+  type: "object"
+  properties:
+    query_text:
+      type: "string"
+      description: "Free-form search term or title keyword (e.g., 'File IoCs', 'Caseids:104182', 'Ports:443')"
+      default: ""
+    start_time:
+      type: "string"
+      format: "date-time"
+      description: "Start of search time window in UTC (ISO-8601)"
+    end_time:
+      type: "string"
+      format: "date-time"
+      description: "End of search time window in UTC (ISO-8601)"
+    tags:
+      type: "array"
+      items:
+        type: "string"
+      description: "Filter cases containing specific tags"
+    priorities:
+      type: "array"
+      items:
+        type: "string"
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+      description: "Filter cases by priority levels"
+    stages:
+      type: "array"
+      items:
+        type: "string"
+      description: "Filter cases by workflow stage"
+    environments:
+      type: "array"
+      items:
+        type: "string"
+      description: "Filter cases by environment name"
+    assigned_users:
+      type: "array"
+      items:
+        type: "string"
+      description: "Filter cases by assignee user GUID or SOC role"
+    is_important:
+      type: "boolean"
+      description: "Filter by high priority importance flag"
+    page_size:
+      type: "integer"
+      minimum: 1
+      maximum: 200
+      default: 50
+    page_number:
+      type: "integer"
+      minimum: 0
+      default: 0
+
+output_schema:
+  type: "object"
+  required:
+    - "results"
+    - "total_count"
+    - "page_size"
+    - "page_number"
+  properties:
+    results:
+      type: "array"
+      items:
+        type: "object"
+        required:
+          - "case_id"
+          - "title"
+          - "create_time"
+          - "priority"
+          - "stage"
+          - "tags"
+          - "products"
+          - "alerts_count"
+          - "environment"
+        properties:
+          case_id:
+            type: "string"
+          title:
+            type: "string"
+          create_time:
+            type: "string"
+            format: "date-time"
+          priority:
+            type: "string"
+          stage:
+            type: "string"
+          tags:
+            type: "array"
+            items:
+              type: "string"
+          products:
+            type: "array"
+            items:
+              type: "string"
+          user_assigned:
+            type: ["string", "null"]
+          is_important:
+            type: "boolean"
+          is_incident:
+            type: "boolean"
+          is_closed:
+            type: "boolean"
+          alerts_count:
+            type: "integer"
+          environment:
+            type: "string"
+    total_count:
+      type: "integer"
+    page_size:
+      type: "integer"
+    page_number:
+      type: "integer"
+
+provider_mapping:
+  endpoint: "legacySearches:legacyCaseSearchEverything"
+  method: "POST"
+  time_range_filter: "CUSTOM"
+
+provenance:
+  verified_against: "Google SecOps Live v1alpha REST API"
+  observed_behavior_ref: "take2/case_search.md"
+  verification_date: "2026-08-18"

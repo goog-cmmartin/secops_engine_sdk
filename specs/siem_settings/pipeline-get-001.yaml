@@ -1,0 +1,25 @@
+schema_version: "1.0"
+contract_id: "pipeline-get-001"
+name: "Get Log Processing Pipeline Detail"
+description: "Retrieves complete transformation processor rules, stream bindings, and Bindplane URLs for a single pipeline."
+category: "siem_settings"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoint /logProcessingPipelines/{id}."
+  - "Zero mock, synthetic, or fallback data."
+
+inputs:
+  - name: "identifier_or_title"
+    type: "str"
+    description: "Pipeline UUID, resource name, or display name."
+
+outputs:
+  - name: "summary"
+    type: "LogProcessingPipelineSummary"
+    description: "Summary metadata of the pipeline."
+  - name: "processors"
+    type: "List[Dict[str, Any]]"
+    description: "List of transformation statements and rules."
+  - name: "raw"
+    type: "Dict[str, Any]"
+    description: "Full verbatim JSON response."

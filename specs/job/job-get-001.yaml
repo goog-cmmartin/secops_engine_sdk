@@ -1,0 +1,54 @@
+id: job.get
+version: 1.0.0
+title: SOAR Scheduled Job Deep Inspection
+description: >
+  Retrieves complete details of a SOAR job, its deployed runtime instances across environments,
+  schedule configurations, and recent execution history.
+category: job
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}/jobs/{job_id}
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  integration:
+    type: string
+    required: true
+    description: Parent integration identifier (e.g. Demoverse, Splunk, CrowdStrikeFalcon).
+  job_id:
+    type: string
+    required: true
+    description: Unique numeric identifier of the job (e.g. 667).
+
+outputs:
+  detail:
+    type: JobDetail
+    properties:
+      job:
+        type: JobSummary
+      instances:
+        type: list[JobInstance]
+        items:
+          id: string
+          name: string
+          display_name: string
+          job_id: string
+          job_name: string
+          integration: string
+          environment: string
+          status: string
+          last_run_status: string
+          last_run_time: string
+          remote_agent_id: string
+          schedule_type: string
+          advanced_config: object
+          unique_identifier: string
+      recent_logs:
+        type: list[JobExecutionLog]
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero synthetic or simulated data structures.
+  - Full provenance linking job -> runtime instances -> execution logs.

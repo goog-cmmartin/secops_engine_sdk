@@ -1,0 +1,28 @@
+id: case-title-settings-get-001
+version: 1.0.0
+name: Get Case Title Naming Rules
+description: Retrieves priority rules for automated SOAR case naming.
+category: case_config
+
+parameters: []
+
+steps:
+  - id: fetch_title_settings
+    action: secops.case_config.get_title_settings
+    description: Retrieves case title properties via GET /moduleSettings/CaseTitleSettings/properties?orderBy=displayName.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/CaseTitleSettings/properties"
+      orderBy: "displayName"
+    output_key: raw_props
+
+  - id: structure_title_settings
+    action: transform.structure_case_title_settings
+    description: Normalizes case title properties into CaseTitleSettingsBatch.
+    inputs:
+      raw: "${steps.fetch_title_settings.output}"
+    output_key: settings_batch
+
+outputs:
+  total_count: "${steps.structure_title_settings.output.total_count}"
+  properties: "${steps.structure_title_settings.output.properties}"
+  retrieved_at: "${steps.structure_title_settings.output.retrieved_at}"

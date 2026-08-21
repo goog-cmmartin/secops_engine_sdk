@@ -1,0 +1,31 @@
+schema_version: "1.0"
+contract_id: "pipeline-search-001"
+name: "Search Log Processing Pipelines"
+description: "Discovers and lists Data Processing Pipelines configured with parser transformations and Bindplane SaaS links."
+category: "siem_settings"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoint /logProcessingPipelines."
+  - "Zero mock, synthetic, or fallback pipeline records."
+
+inputs:
+  - name: "query"
+    type: "Optional[str]"
+    description: "Keyword search against pipeline display name or description."
+  - name: "log_type"
+    type: "Optional[str]"
+    description: "Filter by associated stream log type."
+  - name: "limit"
+    type: "int"
+    default: 50
+
+outputs:
+  - name: "pipelines"
+    type: "List[LogProcessingPipelineSummary]"
+    description: "List of matched pipelines."
+  - name: "total_count"
+    type: "int"
+    description: "Total matching pipelines count."
+  - name: "retrieved_at"
+    type: "datetime"
+    description: "Timestamp when batch was retrieved."

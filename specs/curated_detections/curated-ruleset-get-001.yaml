@@ -1,0 +1,61 @@
+version: "1.0.0"
+name: "curated-ruleset-get-001"
+description: "Declarative workflow contract for deep-inspecting a Google SecOps Curated Rule Set, its deployments, member rules, and detection telemetry."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  ruleset_id_or_title:
+    type: string
+    required: true
+    description: "Curated Rule Set UUID, resource name, or exact display name."
+
+outputs:
+  rule_set:
+    type: object
+    properties:
+      id: string
+      title: string
+      description: string
+      category_id: string
+      category_name: string
+      log_sources: array
+      tactics: array
+      techniques: array
+      authors: array
+  deployments:
+    type: array
+    items:
+      precision: string
+      enabled: boolean
+      alerting: boolean
+      resource_name: string
+  rules:
+    type: array
+    items:
+      id: string
+      title: string
+      severity: string
+      precision: string
+      rule_type: string
+      techniques: array
+      description: string
+      false_positives: string
+  detection_count:
+    type: integer
+
+api_mappings:
+  ruleset_detail:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/curatedRuleSetCategories/-/curatedRuleSets"
+  deployments:
+    endpoint: "GET /v1alpha/{curated_rule_set_name}/curatedRuleSetDeployments"
+  member_rules:
+    endpoint: "GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/curatedRules"
+    params:
+      pageSize: 1000
+  detection_count:
+    endpoint: "POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}:countAllCuratedRuleSetDetections"

@@ -1,0 +1,32 @@
+name: soar-entities-blocklist-search-v1
+version: "1.0.0"
+description: "Discovers and filters entity extraction noise-reduction blocklists."
+category: soar_settings
+inputs:
+  query:
+    type: string
+    required: false
+    description: "Optional keyword filter matching entity identifier or entity type."
+  entity_type:
+    type: string
+    required: false
+    description: "Optional entity type filter (e.g. FILENAME, USERUNIQNAME)."
+  environment:
+    type: string
+    required: false
+    description: "Optional environment filter."
+  limit:
+    type: integer
+    default: 50
+    description: "Maximum number of blocklist entries to return."
+outputs:
+  blocklist_entries:
+    type: array
+    items:
+      id: string
+      name: string
+      entity_identifier: string
+      entity_type: string
+      action: string
+      environments: array
+  total_count: integer

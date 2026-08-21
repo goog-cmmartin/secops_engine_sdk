@@ -1,0 +1,41 @@
+schema_version: "1.0"
+id: "soar-remote-agent-search-001"
+title: "Search Remote SOAR Agents"
+category: "soar_settings"
+capability_id: "soar.remote_agent.search"
+description: "Discovers and filters remote execution agents, their environment bindings, active health state, and logging levels."
+
+invariants:
+  - "Requires active Google SecOps authentication"
+  - "Supports filtering by bound environment and agent state"
+
+inputs:
+  query:
+    type: "string"
+    required: false
+    description: "Optional keyword filter matching display name or identifier"
+  environment:
+    type: "string"
+    required: false
+    description: "Optional environment filter"
+  agent_state:
+    type: "string"
+    required: false
+    description: "Optional agent state filter (e.g. ACTIVE, INACTIVE)"
+  limit:
+    type: "integer"
+    required: false
+    default: 100
+    description: "Maximum number of remote agents to return"
+
+outputs:
+  remote_agents:
+    type: "array"
+    items: "RemoteAgentSummary"
+  total_count:
+    type: "integer"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/remoteAgents"
+    classification: "VERIFIED"

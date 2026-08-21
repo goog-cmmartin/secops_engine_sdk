@@ -1,0 +1,19 @@
+schema_version: "1.0"
+contract_id: "siem-managed-domains-get-001"
+name: "Get Managed Domain Settings"
+description: "Retrieves approved email domains configured for SIEM report deliveries and alerts."
+category: "siem_settings"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoint /managedDomainSettings."
+  - "Zero mock, synthetic, or fallback domain records."
+
+inputs: []
+
+outputs:
+  - name: "domains"
+    type: "List[ManagedDomain]"
+    description: "List of approved email domains."
+  - name: "retrieved_at"
+    type: "datetime"
+    description: "Timestamp when domain settings were retrieved."

@@ -1,0 +1,16 @@
+name: soar-domain-get-v1
+version: "1.0.0"
+description: "Retrieves complete configuration for a single approved customer domain."
+category: soar_settings
+inputs:
+  domain_id:
+    type: string
+    required: true
+    description: "Numeric identifier or resource name of the domain."
+outputs:
+  summary:
+    id: string
+    name: string
+    display_name: string
+    environments: array
+  raw: object

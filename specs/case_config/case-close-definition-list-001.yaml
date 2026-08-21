@@ -1,0 +1,34 @@
+id: case-close-definition-list-001
+version: 1.0.0
+name: List Case Close Definitions
+description: Catalogs predefined close reasons and root causes for closing cases.
+category: case_config
+
+parameters:
+  - name: limit
+    type: integer
+    required: false
+    default: 100
+    description: Maximum number of definitions to return.
+
+steps:
+  - id: list_close_definitions
+    action: secops.case_config.list_close_definitions
+    description: Retrieves close definitions via GET /caseCloseDefinitions.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/caseCloseDefinitions"
+      pageSize: 1000
+    output_key: raw_defs
+
+  - id: structure_close_definitions
+    action: transform.structure_close_definitions
+    description: Normalizes close definitions into CaseCloseDefinitionBatch.
+    inputs:
+      raw: "${steps.list_close_definitions.output}"
+      limit: "${parameters.limit}"
+    output_key: result_batch
+
+outputs:
+  total_count: "${steps.structure_close_definitions.output.total_count}"
+  definitions: "${steps.structure_close_definitions.output.definitions}"
+  retrieved_at: "${steps.structure_close_definitions.output.retrieved_at}"

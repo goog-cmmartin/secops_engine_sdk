@@ -1,0 +1,27 @@
+id: company-settings-get-001
+version: 1.0.0
+name: Get Company Rebranding Settings
+description: Retrieves tenant branding, report customizations, and system email settings.
+category: soar_settings
+
+parameters: []
+
+steps:
+  - id: fetch_company_settings
+    action: secops.soar.get_company_settings
+    description: Retrieves properties via GET /moduleSettings/CompanySetting/properties.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/moduleSettings/CompanySetting/properties"
+    output_key: raw_props
+
+  - id: structure_company_settings
+    action: transform.structure_company_settings
+    description: Normalizes properties into CompanySettingsBatch.
+    inputs:
+      raw: "${steps.fetch_company_settings.output}"
+    output_key: settings_batch
+
+outputs:
+  total_count: "${steps.structure_company_settings.output.total_count}"
+  properties: "${steps.structure_company_settings.output.properties}"
+  retrieved_at: "${steps.structure_company_settings.output.retrieved_at}"

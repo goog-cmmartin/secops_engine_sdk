@@ -1,0 +1,51 @@
+{
+  "workflow_id": "event.investigate.v1",
+  "event_id": "AAAAAICwI1S+IYJDRr3ekPAIj5EAAAAADgAAAIoAAAA=",
+  "event_metadata": {
+    "productLogId": "927be794-9cc0-4275-a6e0-0033c6a22dea",
+    "eventTimestamp": "2026-08-16T22:54:56.789Z",
+    "eventType": "USER_LOGIN",
+    "vendorName": "Crowdstrike",
+    "productName": "Falcon",
+    "productEventType": "UserLogonFailed2",
+    "description": "UserLogonFailed2V3",
+    "ingestedTimestamp": "2026-08-16T23:16:13.702908Z",
+    "productDeploymentId": "7015a549d5a5464f894353a509408606",
+    "id": "AAAAAICwI1S+IYJDRr3ekPAIj5EAAAAADgAAAIoAAAA=",
+    "enrichmentState": "ENRICHED",
+    "logType": "CS_EDR",
+    "baseLabels": {
+      "logTypes": [
+        "CS_EDR"
+      ],
+      "allowScopedAccess": true
+    },
+    "enrichmentLabels": {
+      "logTypes": [
+        "CS_EDR"
+      ],
+      "customLabels": [
+        "user-login"
+      ],
+      "allowScopedAccess": true
+    },
+    "parserVersion": "25.0"
+  },
+  "sample_fields": {
+    "metadata.eventType": "USER_LOGIN",
+    "principal.hostname": "MANAGED-COMPUTE",
+    "target.user.userid": "PC"
+  },
+  "raw_log_summary": {
+    "source_product": "CrowdStrike Falcon",
+    "log_type": "CS_EDR",
+    "raw_bytes_size": 846,
+    "raw_text_preview": "{\"ContextThreadId\":\"571008430216728\",\"aip\":\"35.223.42.171\",\"LogonDomain\":\"\",\"event_platform\":\"Win\",\"ClientComputerName\":\"-\",\"EventOrigin\":\"1\",\"id\":\"927be794-9cc0-4275-a6e0-0033c6a22dea\",\"SubStatus\":\"3"
+  },
+  "provenance": {
+    "provider": "google_secops",
+    "workflow_id": "event.investigate",
+    "event_id": "AAAAAICwI1S+IYJDRr3ekPAIj5EAAAAADgAAAIoAAAA=",
+    "retrieved_at": "2026-08-18T05:48:27.755286+00:00"
+  }
+}

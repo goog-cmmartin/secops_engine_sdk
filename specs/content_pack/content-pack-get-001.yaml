@@ -1,0 +1,47 @@
+id: content_pack.get
+version: 1.0.0
+title: Content Hub Content Pack Deep Inspection
+description: >
+  Retrieves complete details for a specific Content Pack including bundled playbooks,
+  integrations, dashboards, curated detection rulesets, search queries, and installation guidance.
+category: content_pack
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/contentHub/contentPacks/{pack_id}
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  pack_id_or_title:
+    type: string
+    required: true
+    description: Unique UUID identifier, resource name, or exact title of the Content Pack.
+
+outputs:
+  detail:
+    type: ContentPackDetail
+    properties:
+      pack:
+        type: ContentPackSummary
+      playbooks:
+        type: list[ContentPackItem]
+      integrations:
+        type: list[ContentPackItem]
+      dashboards:
+        type: list[ContentPackItem]
+      rulesets:
+        type: list[ContentPackItem]
+      queries:
+        type: list[ContentPackItem]
+      rules:
+        type: list[ContentPackItem]
+      pre_guidance:
+        type: string
+      post_guidance:
+        type: string
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero synthetic or simulated data structures.
+  - Complete extraction and typing of bundled SecOps components.

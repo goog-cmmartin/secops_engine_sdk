@@ -1,0 +1,25 @@
+schema_version: "1.0"
+contract_id: "feed-get-001"
+name: "Get Feed Detail"
+description: "Retrieves complete configuration, source settings, authentication parameters, and schedule for a single feed."
+category: "feed"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps REST endpoint /feeds/{feedId}."
+  - "Zero mock, synthetic, or fallback data."
+
+inputs:
+  - name: "identifier_or_title"
+    type: "str"
+    description: "Feed UUID, resource name, or display name."
+
+outputs:
+  - name: "summary"
+    type: "FeedSummary"
+    description: "Summary metadata of the feed."
+  - name: "details"
+    type: "Dict[str, Any]"
+    description: "Detailed source settings (e.g. S3 URI, deletion options, credentials)."
+  - name: "raw"
+    type: "Dict[str, Any]"
+    description: "Full verbatim JSON response."

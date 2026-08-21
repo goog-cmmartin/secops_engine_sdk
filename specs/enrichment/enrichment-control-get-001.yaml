@@ -1,0 +1,31 @@
+id: enrichment-control-get-001
+version: 1.0.0
+name: Enrichment Control Deep Inspection
+description: Retrieves deep configuration, timing rules, and records for a deployed enrichment control.
+category: enrichment
+
+parameters:
+  - name: control_id
+    type: string
+    required: true
+    description: Unique identifier or resource name of the enrichment control (e.g. ec_f10b30de-dae3-4227-8ae8-5959c16a31a8).
+
+steps:
+  - id: fetch_enrichment_control
+    action: secops.enrichment.get_control
+    description: Retrieves control details via GET /enrichmentControls/{control_id}.
+    inputs:
+      endpoint: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/enrichmentControls/{control_id}"
+    output_key: raw_control
+
+  - id: structure_control_detail
+    action: transform.structure_enrichment_control_detail
+    description: Parses timing rules, enrichment options, and metadata.
+    inputs:
+      raw: "${steps.fetch_enrichment_control.output}"
+    output_key: control_detail
+
+outputs:
+  summary: "${steps.structure_control_detail.output.summary}"
+  records: "${steps.structure_control_detail.output.records}"
+  raw: "${steps.structure_control_detail.output.raw}"

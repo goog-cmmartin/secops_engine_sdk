@@ -1,0 +1,21 @@
+id: preview-feature-get-001
+version: "1.0.0"
+title: Get Tenant Preview Feature Details
+category: preview_feature
+description: Retrieves deep configuration and enablement status for a specific preview feature by ID.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/features/{feature_id}
+    description: Retrieves specific preview feature details.
+
+inputs:
+  - name: feature_id
+    type: string
+    required: true
+    description: Identifier or resource name of the preview feature.
+
+outputs:
+  - name: feature
+    type: PreviewFeatureSummary
+    description: Full metadata for the specified preview feature.

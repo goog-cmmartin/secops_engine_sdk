@@ -1,0 +1,32 @@
+schema_version: "1.0"
+id: "soar-environment-group-search-001"
+title: "Search Environment Groups"
+category: "soar_settings"
+capability_id: "soar.environment_group.search"
+description: "Discovers and lists logical groupings of multi-tenancy environments."
+
+invariants:
+  - "Handles empty tenant configurations cleanly"
+
+inputs:
+  query:
+    type: "string"
+    required: false
+    description: "Optional keyword filter"
+  limit:
+    type: "integer"
+    required: false
+    default: 100
+    description: "Maximum number of groups to return"
+
+outputs:
+  groups:
+    type: "array"
+    items: "EnvironmentGroupSummary"
+  total_count:
+    type: "integer"
+
+api_mappings:
+  - method: "GET"
+    endpoint: "https://us-chronicle.googleapis.com/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/environmentGroups"
+    classification: "VERIFIED"

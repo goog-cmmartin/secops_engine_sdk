@@ -1,0 +1,45 @@
+capability_id: case.investigate
+version: 1.0.0
+name: SecOps Case Investigation Workspace Orchestration
+description: >
+  Orchestrates parallel retrieval of case metadata, associated alerts,
+  involved entities across all alerts, and case wall comments into a unified
+  strongly typed CaseInvestigation aggregate.
+
+provider_mapping:
+  engine: GoogleSecOpsAdapter
+  endpoints:
+    case_metadata: GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/cases/{case_id}
+    case_alerts: GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/cases/{case_id}/caseAlerts
+    alert_entities: GET /v1alpha/{alert_name}/involvedEntities
+    case_comments: GET /v1alpha/projects/{project}/locations/{location}/instances/{instance}/cases/{case_id}/caseComments
+    add_comment: POST /v1alpha/projects/{project}/locations/{location}/instances/{instance}/cases/{case_id}/caseComments
+
+execution:
+  mode: PARALLEL_EAGER
+  subresources:
+    - name: metadata
+      concurrency: immediate
+    - name: alerts
+      concurrency: immediate
+    - name: comments
+      concurrency: immediate
+    - name: involved_entities
+      concurrency: alert_fanout
+      dependency: alerts
+
+mutations:
+  - id: case.add_comment
+    method: POST
+    endpoint: case_comments
+    validation:
+      - rule: comment_non_empty
+        assert: "len(comment.strip()) > 0"
+    confirmation:
+      returns: CaseCommentRecord
+      optimistic_fallback: false
+
+invariants:
+  - zero_mock_data: true
+  - strict_error_visibility: true
+  - provenance_tracking: true

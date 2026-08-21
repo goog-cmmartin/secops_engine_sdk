@@ -1,0 +1,21 @@
+id: data-access-label-get-001
+version: "1.0.0"
+title: Get Data Access Label Deep Configuration
+category: data_rbac
+description: Retrieves full configuration for a Data Access Label including UDM query expression.
+
+api_dependencies:
+  - method: GET
+    path: /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/dataAccessLabels/{label_id}
+    description: Retrieves full configuration for a Data Access Label.
+
+inputs:
+  - name: label_id
+    type: string
+    required: true
+    description: Identifier or resource name of the Data Access Label.
+
+outputs:
+  - name: detail
+    type: DataAccessLabelDetail
+    description: Full label metadata and UDM query expression.

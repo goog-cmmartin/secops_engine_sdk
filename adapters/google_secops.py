@@ -12,25 +12,41 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Dict, List, Optional
 
+from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
 from engine.domain import RawLogPayload, SearchBatchResult, ValidationResult
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleSecOpsAdapter:
     def __init__(
         self,
-        project_id: str = "sdl-preview-americas",
-        project_number: str = "37679061640",
-        customer_id: str = "a556547c-1cff-43ef-a2e4-cf5b12a865df",
-        location: str = "us",
-        api_base: str = "https://us-chronicle.googleapis.com",
+        config: Optional[SecOpsConfig] = None,
+        project_id: Optional[str] = None,
+        project_number: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        location: Optional[str] = None,
+        api_base: Optional[str] = None,
     ):
-        self.project_id = project_id
-        self.project_number = project_number
-        self.customer_id = customer_id
-        self.location = location
-        self.api_base = api_base
+        if config is not None:
+            self.config = config
+        else:
+            self.config = load_config(
+                project_id=project_id,
+                customer_id=customer_id,
+                project_number=project_number,
+                location=location,
+                api_base=api_base,
+            )
+
+        self.project_id = self.config.project_id
+        self.project_number = self.config.project_number
+        self.customer_id = self.config.customer_id
+        self.location = self.config.location
+        self.api_base = self.config.api_base
         self._token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None
 
@@ -96,6 +112,8 @@ class GoogleSecOpsAdapter:
                     time.sleep(1.0 * attempt)
                     continue
                 raise RuntimeError(f"Network error connecting to Google SecOps: {e}") from e
+
+        raise RuntimeError(f"Google SecOps API request to {url} failed after {max_retries} attempts.")
 
     def validate_query(self, query: str, dialect: str = "udm") -> ValidationResult:
         """Translates query.validate domain operation to :validateQuery API."""
@@ -275,9 +293,13 @@ class GoogleSecOpsAdapter:
 
         try:
             self._request("POST", path, body={})
-        except Exception as e:
-            # Cancellation should be idempotent; log/preserve if failed
-            pass
+        except RuntimeError as e:
+            # If the operation is already done/cancelled/expired (HTTP 404 or not found), cancellation is idempotent
+            err_str = str(e).lower()
+            if "404" in err_str or "not found" in err_str or "already finished" in err_str:
+                return
+            logger.warning(f"Error cancelling operation {operation_id}: {e}")
+            raise
 
     def fetch_enriched_event(self, event_id: str) -> Dict[str, Any]:
         """Fetches full enriched UDM event by event ID from Google SecOps."""

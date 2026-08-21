@@ -123,12 +123,17 @@ CAMEL_TO_CANONICAL_UDM: Dict[str, str] = {
 }
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def canonicalize_udm_field(field_path: str) -> str:
     """Resolves a field path into canonical UDM query dialect format using explicit schema knowledge.
 
     If the field is already canonical, it is returned directly.
     If it is a known camelCase or alias path, the canonical mapping is returned.
-    If unknown, converts camelCase segments to snake_case while preserving path structure.
+    If unknown, logs a diagnostic warning and returns the path unmodified to uphold explicit schema invariants.
     """
     cleaned = field_path.strip()
 
@@ -140,10 +145,6 @@ def canonicalize_udm_field(field_path: str) -> str:
     if cleaned in CAMEL_TO_CANONICAL_UDM:
         return CAMEL_TO_CANONICAL_UDM[cleaned]
 
-    # 3. Fallback segment normalization with structural preservation
-    import re
-    parts = cleaned.split(".")
-    normalized_parts = [re.sub(r"(?<!^)(?=[A-Z])", "_", p).lower() for p in parts]
-    candidate = ".".join(normalized_parts)
-
-    return candidate
+    # 3. Unmapped/Unknown field path
+    logger.debug("UDM field '%s' is not in canonical schema dictionary; passing through unmodified.", cleaned)
+    return cleaned

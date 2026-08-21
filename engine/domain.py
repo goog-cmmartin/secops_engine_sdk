@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -93,7 +94,8 @@ class FieldFilter:
         elif self.operator == FilterOperator.REGEX_MATCH:
             return f'{canonical_path} =~ "{val_str}"'
         elif self.operator == FilterOperator.CONTAINS:
-            return f'{canonical_path} =~ ".*{val_str}.*"'
+            escaped_val = re.escape(str(self.value)).replace('"', '\\"')
+            return f'{canonical_path} =~ ".*{escaped_val}.*"'
         else:
             return f'{canonical_path} = "{val_str}"'
 

@@ -12,51 +12,14 @@ from engine.domain import (
 )
 
 
-def _parse_timestamp(val: Any) -> Optional[datetime]:
-    if not val:
-        return None
-    if isinstance(val, (int, float)):
-        # Milliseconds or seconds epoch
-        if val > 1e11:
-            return datetime.fromtimestamp(val / 1000.0, tz=timezone.utc)
-        return datetime.fromtimestamp(float(val), tz=timezone.utc)
-    if isinstance(val, str):
-        try:
-            if val.isdigit():
-                num = int(val)
-                if num > 1e11:
-                    return datetime.fromtimestamp(num / 1000.0, tz=timezone.utc)
-                return datetime.fromtimestamp(float(num), tz=timezone.utc)
-            return datetime.fromisoformat(val.replace("Z", "+00:00"))
-        except Exception:
-            return None
-    return None
-
-
-def _parse_status(status_str: Optional[str]) -> CaseStatus:
-    if not status_str:
-        return CaseStatus.UNKNOWN
-    s = status_str.upper()
-    if "OPEN" in s:
-        return CaseStatus.OPEN
-    if "CLOSE" in s:
-        return CaseStatus.CLOSED
-    return CaseStatus.UNKNOWN
-
-
-def _parse_priority(priority_str: Optional[str]) -> CasePriority:
-    if not priority_str:
-        return CasePriority.UNKNOWN
-    p = priority_str.upper()
-    if "CRITICAL" in p:
-        return CasePriority.CRITICAL
-    if "HIGH" in p:
-        return CasePriority.HIGH
-    if "MEDIUM" in p:
-        return CasePriority.MEDIUM
-    if "LOW" in p:
-        return CasePriority.LOW
-    return CasePriority.UNKNOWN
+from engine.parsing import (
+    parse_priority,
+    parse_priority as _parse_priority,
+    parse_status,
+    parse_status as _parse_status,
+    parse_timestamp,
+    parse_timestamp as _parse_timestamp,
+)
 
 
 class InvestigateCaseWorkflow:

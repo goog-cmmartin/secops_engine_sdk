@@ -6,7 +6,7 @@ from engine.domain import (
     AlertInvestigation,
     InvolvedEntitySummary,
 )
-from engine.workflows.case_investigation import _parse_timestamp
+from engine.parsing import parse_timestamp, parse_timestamp as _parse_timestamp
 
 
 class InvestigateAlertWorkflow:

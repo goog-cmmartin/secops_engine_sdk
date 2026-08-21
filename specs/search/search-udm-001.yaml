@@ -10,7 +10,7 @@ metadata:
   author: "Antigravity Agent"
   updated_at: "2026-08-18"
   classification: "VERIFIED"
-  oracle: "Google SecOps Live Instance (37679061640 / a556547c-1cff-43ef-a2e4-cf5b12a865df)"
+  oracle: "Google SecOps Live Instance (Configured Tenant Environment)"
 
 evidence:
   validation:

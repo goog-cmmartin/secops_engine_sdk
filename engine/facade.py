@@ -332,113 +332,124 @@ class SecOpsEngine:
             adapter = GoogleSecOpsAdapter()
         self.adapter = adapter
         self.registry = custom_registry or registry
-        self._search_udm_wf = SearchUDMWorkflow(self.adapter)
-        self._investigate_event_wf = InvestigateEventWorkflow(self.adapter)
-        self._refine_search_wf = RefineSearchWorkflow(self._search_udm_wf)
-        self._search_from_entity_wf = SearchFromEntityWorkflow(self._search_udm_wf)
-        self._investigate_case_wf = InvestigateCaseWorkflow(self.adapter)
-        self._add_case_comment_wf = AddCaseCommentWorkflow(self.adapter)
-        self._investigate_alert_wf = InvestigateAlertWorkflow(self.adapter)
-        self._search_cases_wf = SearchCasesWorkflow(self.adapter)
-        self._search_playbooks_wf = SearchPlaybooksWorkflow(self.adapter)
-        self._get_playbook_wf = GetPlaybookWorkflow(self.adapter)
-        self._list_playbook_cats_wf = ListPlaybookCategoriesWorkflow(self.adapter)
-        self._search_integrations_wf = SearchIntegrationsWorkflow(self.adapter)
-        self._get_integration_wf = GetIntegrationDetailWorkflow(self.adapter)
-        self._list_integration_instances_wf = ListIntegrationInstancesWorkflow(self.adapter)
-        self._list_remote_agents_wf = ListRemoteAgentsWorkflow(self.adapter)
-        self._search_jobs_wf = SearchJobsWorkflow(self.adapter)
-        self._get_job_wf = GetJobDetailWorkflow(self.adapter)
-        self._list_job_instances_wf = ListJobInstancesWorkflow(self.adapter)
-        self._get_job_instance_logs_wf = GetJobInstanceLogsWorkflow(self.adapter)
-        self._search_content_packs_wf = SearchContentPacksWorkflow(self.adapter)
-        self._get_content_pack_wf = GetContentPackDetailWorkflow(self.adapter)
-        self._list_content_pack_cats_wf = ListContentPackCategoriesWorkflow(self.adapter)
-        self._search_curated_rulesets_wf = SearchCuratedRuleSetsWorkflow(self.adapter)
-        self._get_curated_ruleset_wf = GetCuratedRuleSetDetailWorkflow(self.adapter)
-        self._get_curated_rule_wf = GetCuratedRuleDetailWorkflow(self.adapter)
-        self._get_curated_metrics_wf = GetCuratedDetectionMetricsWorkflow(self.adapter)
-        self._search_marketplace_integrations_wf = SearchMarketplaceIntegrationsWorkflow(self.adapter)
-        self._get_marketplace_integration_wf = GetMarketplaceIntegrationDetailWorkflow(self.adapter)
-        self._get_marketplace_integration_diff_wf = GetMarketplaceIntegrationDiffWorkflow(self.adapter)
-        self._get_marketplace_affected_items_wf = GetMarketplaceIntegrationAffectedItemsWorkflow(self.adapter)
-        self._search_dashboards_wf = SearchDashboardsWorkflow(self.adapter)
-        self._get_dashboard_wf = GetDashboardDetailWorkflow(self.adapter)
-        self._execute_dashboard_query_wf = ExecuteDashboardQueryWorkflow(self.adapter)
-        self._validate_dashboard_query_wf = ValidateDashboardQueryWorkflow(self.adapter)
-        self._get_managed_domains_wf = GetManagedDomainSettingsWorkflow(self.adapter)
-        self._search_feeds_wf = SearchFeedsWorkflow(self.adapter)
-        self._get_feed_wf = GetFeedDetailWorkflow(self.adapter)
-        self._search_pipelines_wf = SearchLogProcessingPipelinesWorkflow(self.adapter)
-        self._get_pipeline_wf = GetLogProcessingPipelineDetailWorkflow(self.adapter)
-        self._list_feed_source_types_wf = ListFeedSourceTypeSchemasWorkflow(self.adapter)
-        self._list_feed_log_types_wf = ListFeedLogTypeSchemasWorkflow(self.adapter)
-        self._list_log_types_wf = ListLogTypesWorkflow(self.adapter)
-        self._search_parsers_wf = SearchParsersWorkflow(self.adapter)
-        self._get_parser_wf = GetParserDetailWorkflow(self.adapter)
-        self._search_parser_extensions_wf = SearchParserExtensionsWorkflow(self.adapter)
-        self._get_parser_extension_wf = GetParserExtensionDetailWorkflow(self.adapter)
-        self._get_log_type_setting_wf = GetLogTypeSettingWorkflow(self.adapter)
-        self._list_preview_features_wf = ListPreviewFeaturesWorkflow(self.adapter)
-        self._get_preview_feature_wf = GetPreviewFeatureWorkflow(self.adapter)
-        self._search_data_access_scopes_wf = SearchDataAccessScopesWorkflow(self.adapter)
-        self._get_data_access_scope_wf = GetDataAccessScopeWorkflow(self.adapter)
-        self._search_data_access_labels_wf = SearchDataAccessLabelsWorkflow(self.adapter)
-        self._get_data_access_label_wf = GetDataAccessLabelWorkflow(self.adapter)
-        self._search_environment_scopes_wf = SearchEnvironmentScopesWorkflow(self.adapter)
-        self._list_enrichment_combinations_wf = ListEnrichmentCombinationsWorkflow(self.adapter)
-        self._search_enrichment_controls_wf = SearchEnrichmentControlsWorkflow(self.adapter)
-        self._get_enrichment_control_wf = GetEnrichmentControlWorkflow(self.adapter)
-        self._get_agent_settings_wf = GetAgentSettingsWorkflow(self.adapter)
-        self._get_entity_risk_config_wf = GetEntityRiskConfigWorkflow(self.adapter)
-        self._get_tenant_instance_wf = GetTenantInstanceWorkflow(self.adapter)
-        self._search_soar_users_wf = SearchSoarUsersWorkflow(self.adapter)
-        self._get_soar_user_wf = GetSoarUserWorkflow(self.adapter)
-        self._list_soc_roles_wf = ListSocRolesWorkflow(self.adapter)
-        self._get_company_settings_wf = GetCompanySettingsWorkflow(self.adapter)
-        self._search_case_tags_wf = SearchCaseTagDefinitionsWorkflow(self.adapter)
-        self._list_case_stages_wf = ListCaseStageDefinitionsWorkflow(self.adapter)
-        self._list_case_close_defs_wf = ListCaseCloseDefinitionsWorkflow(self.adapter)
-        self._list_case_close_params_wf = ListCaseCloseDynamicParametersWorkflow(self.adapter)
-        self._get_case_title_settings_wf = GetCaseTitleSettingsWorkflow(self.adapter)
-        self._search_case_views_wf = SearchCaseViewsWorkflow(self.adapter)
-        self._get_case_view_wf = GetCaseViewWorkflow(self.adapter)
-        self._search_custom_fields_wf = SearchCustomFieldsWorkflow(self.adapter)
-        self._get_custom_field_wf = GetCustomFieldWorkflow(self.adapter)
-        self._search_calculated_fields_wf = SearchCalculatedFieldsWorkflow(self.adapter)
-        self._get_calculated_field_wf = GetCalculatedFieldWorkflow(self.adapter)
-        self._search_alert_grouping_rules_wf = SearchAlertGroupingRulesWorkflow(self.adapter)
-        self._get_alert_grouping_rule_wf = GetAlertGroupingRuleWorkflow(self.adapter)
-        self._get_alert_grouping_settings_wf = GetAlertGroupingSettingsWorkflow(self.adapter)
-        self._get_data_retention_settings_wf = GetDataRetentionSettingsWorkflow(self.adapter)
-        self._search_environments_wf = SearchEnvironmentsWorkflow(self.adapter)
-        self._get_environment_wf = GetEnvironmentWorkflow(self.adapter)
-        self._search_environment_groups_wf = SearchEnvironmentGroupsWorkflow(self.adapter)
-        self._search_remote_agents_wf = SearchRemoteAgentsWorkflow(self.adapter)
-        self._get_remote_agent_wf = GetRemoteAgentWorkflow(self.adapter)
-        self._get_email_settings_wf = GetEmailSettingsWorkflow(self.adapter)
-        self._get_support_settings_wf = GetSupportSettingsWorkflow(self.adapter)
-        self._search_soar_networks_wf = SearchSoarNetworksWorkflow(self.adapter)
-        self._get_soar_network_wf = GetSoarNetworkWorkflow(self.adapter)
-        self._search_soar_domains_wf = SearchSoarDomainsWorkflow(self.adapter)
-        self._get_soar_domain_wf = GetSoarDomainWorkflow(self.adapter)
-        self._search_soar_custom_lists_wf = SearchSoarCustomListsWorkflow(self.adapter)
-        self._get_soar_custom_list_wf = GetSoarCustomListWorkflow(self.adapter)
-        self._search_email_templates_wf = SearchEmailTemplatesWorkflow(self.adapter)
-        self._get_email_template_wf = GetEmailTemplateWorkflow(self.adapter)
-        self._search_entities_blocklists_wf = SearchEntitiesBlocklistsWorkflow(self.adapter)
-        self._get_entities_blocklist_wf = GetEntitiesBlocklistWorkflow(self.adapter)
-        self._search_sla_definitions_wf = SearchSlaDefinitionsWorkflow(self.adapter)
-        self._get_sla_definition_wf = GetSlaDefinitionWorkflow(self.adapter)
-        self._search_request_templates_wf = SearchRequestTemplatesWorkflow(self.adapter)
-        self._get_request_template_wf = GetRequestTemplateWorkflow(self.adapter)
-        self._search_soar_ingestion_connectors_wf = SearchSoarIngestionConnectorsWorkflow(self.adapter)
-        self._get_soar_ingestion_connector_wf = GetSoarIngestionConnectorWorkflow(self.adapter)
-        self._search_soar_webhooks_wf = SearchSoarWebhooksWorkflow(self.adapter)
-        self._get_soar_webhook_wf = GetSoarWebhookWorkflow(self.adapter)
+        self._wf_cache: Dict[str, Any] = {}
 
         # Register default capabilities
         self._register_default_capabilities()
+
+    _WORKFLOW_MAP = {
+        "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
+        "_investigate_event_wf": lambda e: InvestigateEventWorkflow(e.adapter),
+        "_refine_search_wf": lambda e: RefineSearchWorkflow(e._search_udm_wf),
+        "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
+        "_investigate_case_wf": lambda e: InvestigateCaseWorkflow(e.adapter),
+        "_add_case_comment_wf": lambda e: AddCaseCommentWorkflow(e.adapter),
+        "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
+        "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
+        "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
+        "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
+        "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
+        "_search_integrations_wf": lambda e: SearchIntegrationsWorkflow(e.adapter),
+        "_get_integration_wf": lambda e: GetIntegrationDetailWorkflow(e.adapter),
+        "_list_integration_instances_wf": lambda e: ListIntegrationInstancesWorkflow(e.adapter),
+        "_list_remote_agents_wf": lambda e: ListRemoteAgentsWorkflow(e.adapter),
+        "_search_jobs_wf": lambda e: SearchJobsWorkflow(e.adapter),
+        "_get_job_wf": lambda e: GetJobDetailWorkflow(e.adapter),
+        "_list_job_instances_wf": lambda e: ListJobInstancesWorkflow(e.adapter),
+        "_get_job_instance_logs_wf": lambda e: GetJobInstanceLogsWorkflow(e.adapter),
+        "_search_content_packs_wf": lambda e: SearchContentPacksWorkflow(e.adapter),
+        "_get_content_pack_wf": lambda e: GetContentPackDetailWorkflow(e.adapter),
+        "_list_content_pack_cats_wf": lambda e: ListContentPackCategoriesWorkflow(e.adapter),
+        "_search_curated_rulesets_wf": lambda e: SearchCuratedRuleSetsWorkflow(e.adapter),
+        "_get_curated_ruleset_wf": lambda e: GetCuratedRuleSetDetailWorkflow(e.adapter),
+        "_get_curated_rule_wf": lambda e: GetCuratedRuleDetailWorkflow(e.adapter),
+        "_get_curated_metrics_wf": lambda e: GetCuratedDetectionMetricsWorkflow(e.adapter),
+        "_search_marketplace_integrations_wf": lambda e: SearchMarketplaceIntegrationsWorkflow(e.adapter),
+        "_get_marketplace_integration_wf": lambda e: GetMarketplaceIntegrationDetailWorkflow(e.adapter),
+        "_get_marketplace_integration_diff_wf": lambda e: GetMarketplaceIntegrationDiffWorkflow(e.adapter),
+        "_get_marketplace_affected_items_wf": lambda e: GetMarketplaceIntegrationAffectedItemsWorkflow(e.adapter),
+        "_search_dashboards_wf": lambda e: SearchDashboardsWorkflow(e.adapter),
+        "_get_dashboard_wf": lambda e: GetDashboardDetailWorkflow(e.adapter),
+        "_execute_dashboard_query_wf": lambda e: ExecuteDashboardQueryWorkflow(e.adapter),
+        "_validate_dashboard_query_wf": lambda e: ValidateDashboardQueryWorkflow(e.adapter),
+        "_get_managed_domains_wf": lambda e: GetManagedDomainSettingsWorkflow(e.adapter),
+        "_search_feeds_wf": lambda e: SearchFeedsWorkflow(e.adapter),
+        "_get_feed_wf": lambda e: GetFeedDetailWorkflow(e.adapter),
+        "_search_pipelines_wf": lambda e: SearchLogProcessingPipelinesWorkflow(e.adapter),
+        "_get_pipeline_wf": lambda e: GetLogProcessingPipelineDetailWorkflow(e.adapter),
+        "_list_feed_source_types_wf": lambda e: ListFeedSourceTypeSchemasWorkflow(e.adapter),
+        "_list_feed_log_types_wf": lambda e: ListFeedLogTypeSchemasWorkflow(e.adapter),
+        "_list_log_types_wf": lambda e: ListLogTypesWorkflow(e.adapter),
+        "_search_parsers_wf": lambda e: SearchParsersWorkflow(e.adapter),
+        "_get_parser_wf": lambda e: GetParserDetailWorkflow(e.adapter),
+        "_search_parser_extensions_wf": lambda e: SearchParserExtensionsWorkflow(e.adapter),
+        "_get_parser_extension_wf": lambda e: GetParserExtensionDetailWorkflow(e.adapter),
+        "_get_log_type_setting_wf": lambda e: GetLogTypeSettingWorkflow(e.adapter),
+        "_list_preview_features_wf": lambda e: ListPreviewFeaturesWorkflow(e.adapter),
+        "_get_preview_feature_wf": lambda e: GetPreviewFeatureWorkflow(e.adapter),
+        "_search_data_access_scopes_wf": lambda e: SearchDataAccessScopesWorkflow(e.adapter),
+        "_get_data_access_scope_wf": lambda e: GetDataAccessScopeWorkflow(e.adapter),
+        "_search_data_access_labels_wf": lambda e: SearchDataAccessLabelsWorkflow(e.adapter),
+        "_get_data_access_label_wf": lambda e: GetDataAccessLabelWorkflow(e.adapter),
+        "_search_environment_scopes_wf": lambda e: SearchEnvironmentScopesWorkflow(e.adapter),
+        "_list_enrichment_combinations_wf": lambda e: ListEnrichmentCombinationsWorkflow(e.adapter),
+        "_search_enrichment_controls_wf": lambda e: SearchEnrichmentControlsWorkflow(e.adapter),
+        "_get_enrichment_control_wf": lambda e: GetEnrichmentControlWorkflow(e.adapter),
+        "_get_agent_settings_wf": lambda e: GetAgentSettingsWorkflow(e.adapter),
+        "_get_entity_risk_config_wf": lambda e: GetEntityRiskConfigWorkflow(e.adapter),
+        "_get_tenant_instance_wf": lambda e: GetTenantInstanceWorkflow(e.adapter),
+        "_search_soar_users_wf": lambda e: SearchSoarUsersWorkflow(e.adapter),
+        "_get_soar_user_wf": lambda e: GetSoarUserWorkflow(e.adapter),
+        "_list_soc_roles_wf": lambda e: ListSocRolesWorkflow(e.adapter),
+        "_get_company_settings_wf": lambda e: GetCompanySettingsWorkflow(e.adapter),
+        "_search_case_tags_wf": lambda e: SearchCaseTagDefinitionsWorkflow(e.adapter),
+        "_list_case_stages_wf": lambda e: ListCaseStageDefinitionsWorkflow(e.adapter),
+        "_list_case_close_defs_wf": lambda e: ListCaseCloseDefinitionsWorkflow(e.adapter),
+        "_list_case_close_params_wf": lambda e: ListCaseCloseDynamicParametersWorkflow(e.adapter),
+        "_get_case_title_settings_wf": lambda e: GetCaseTitleSettingsWorkflow(e.adapter),
+        "_search_case_views_wf": lambda e: SearchCaseViewsWorkflow(e.adapter),
+        "_get_case_view_wf": lambda e: GetCaseViewWorkflow(e.adapter),
+        "_search_custom_fields_wf": lambda e: SearchCustomFieldsWorkflow(e.adapter),
+        "_get_custom_field_wf": lambda e: GetCustomFieldWorkflow(e.adapter),
+        "_search_calculated_fields_wf": lambda e: SearchCalculatedFieldsWorkflow(e.adapter),
+        "_get_calculated_field_wf": lambda e: GetCalculatedFieldWorkflow(e.adapter),
+        "_search_alert_grouping_rules_wf": lambda e: SearchAlertGroupingRulesWorkflow(e.adapter),
+        "_get_alert_grouping_rule_wf": lambda e: GetAlertGroupingRuleWorkflow(e.adapter),
+        "_get_alert_grouping_settings_wf": lambda e: GetAlertGroupingSettingsWorkflow(e.adapter),
+        "_get_data_retention_settings_wf": lambda e: GetDataRetentionSettingsWorkflow(e.adapter),
+        "_search_environments_wf": lambda e: SearchEnvironmentsWorkflow(e.adapter),
+        "_get_environment_wf": lambda e: GetEnvironmentWorkflow(e.adapter),
+        "_search_environment_groups_wf": lambda e: SearchEnvironmentGroupsWorkflow(e.adapter),
+        "_search_remote_agents_wf": lambda e: SearchRemoteAgentsWorkflow(e.adapter),
+        "_get_remote_agent_wf": lambda e: GetRemoteAgentWorkflow(e.adapter),
+        "_get_email_settings_wf": lambda e: GetEmailSettingsWorkflow(e.adapter),
+        "_get_support_settings_wf": lambda e: GetSupportSettingsWorkflow(e.adapter),
+        "_search_soar_networks_wf": lambda e: SearchSoarNetworksWorkflow(e.adapter),
+        "_get_soar_network_wf": lambda e: GetSoarNetworkWorkflow(e.adapter),
+        "_search_soar_domains_wf": lambda e: SearchSoarDomainsWorkflow(e.adapter),
+        "_get_soar_domain_wf": lambda e: GetSoarDomainWorkflow(e.adapter),
+        "_search_soar_custom_lists_wf": lambda e: SearchSoarCustomListsWorkflow(e.adapter),
+        "_get_soar_custom_list_wf": lambda e: GetSoarCustomListWorkflow(e.adapter),
+        "_search_email_templates_wf": lambda e: SearchEmailTemplatesWorkflow(e.adapter),
+        "_get_email_template_wf": lambda e: GetEmailTemplateWorkflow(e.adapter),
+        "_search_entities_blocklists_wf": lambda e: SearchEntitiesBlocklistsWorkflow(e.adapter),
+        "_get_entities_blocklist_wf": lambda e: GetEntitiesBlocklistWorkflow(e.adapter),
+        "_search_sla_definitions_wf": lambda e: SearchSlaDefinitionsWorkflow(e.adapter),
+        "_get_sla_definition_wf": lambda e: GetSlaDefinitionWorkflow(e.adapter),
+        "_search_request_templates_wf": lambda e: SearchRequestTemplatesWorkflow(e.adapter),
+        "_get_request_template_wf": lambda e: GetRequestTemplateWorkflow(e.adapter),
+        "_search_soar_ingestion_connectors_wf": lambda e: SearchSoarIngestionConnectorsWorkflow(e.adapter),
+        "_get_soar_ingestion_connector_wf": lambda e: GetSoarIngestionConnectorWorkflow(e.adapter),
+        "_search_soar_webhooks_wf": lambda e: SearchSoarWebhooksWorkflow(e.adapter),
+        "_get_soar_webhook_wf": lambda e: GetSoarWebhookWorkflow(e.adapter),
+    }
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._WORKFLOW_MAP:
+            if name not in self._wf_cache:
+                self._wf_cache[name] = self._WORKFLOW_MAP[name](self)
+            return self._wf_cache[name]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def _register_default_capabilities(self) -> None:
         """Registers canonical workflow capabilities."""

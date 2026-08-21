@@ -9,7 +9,10 @@ from engine.domain import (
     CaseSearchQuery,
     CaseSearchResultItem,
 )
-from engine.workflows.case_investigation import _parse_priority, _parse_timestamp
+from engine.parsing import (
+    parse_priority as _parse_priority,
+    parse_timestamp as _parse_timestamp,
+)
 
 
 class SearchCasesWorkflow:

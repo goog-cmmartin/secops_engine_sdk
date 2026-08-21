@@ -44,8 +44,10 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Secrets, Credentials, Tokens & Keys
+.env
 *.env
 *.env.*
+!.env.example
 *.pem
 *.key
 *.p12
@@ -54,6 +56,7 @@ pnpm-debug.log*
 *service_account*.json
 .secret*
 token.json
+.*_session.json
 
 # Databases, SQLite & Cache stores
 *.db
@@ -64,6 +67,7 @@ token.json
 # Logs, Diagnostics & Local Run Outputs
 *.log
 logs/
+bridge.log
 *.pid
 
 # OS & Editor configurations

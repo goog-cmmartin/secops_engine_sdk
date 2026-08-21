@@ -9,6 +9,7 @@ Verifies:
 6. Anti-Mock Invariant: Zero synthetic or fake data in production desktop, engine, or adapter code.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import re
 import sys
@@ -52,11 +53,21 @@ class TestM4DesktopAndPerformanceLive(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication(["test_app"])
 
     def setUp(self):
-        self.adapter = GoogleSecOpsAdapter()
-        self.engine = SecOpsEngine(self.adapter)
         now = datetime.now(timezone.utc)
         self.end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.start_time = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @property
+    def adapter(self):
+        if not hasattr(self, "_adapter"):
+            self._adapter = get_live_adapter()
+        return self._adapter
+
+    @property
+    def engine(self):
+        if not hasattr(self, "_engine"):
+            self._engine = get_live_engine(adapter=self.adapter)
+        return self._engine
 
     def test_qt_model_virtual_storage(self):
         """[M4-001] EventTableModel virtual storage and column extraction."""

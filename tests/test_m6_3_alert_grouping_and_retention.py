@@ -8,6 +8,7 @@ Validates end-to-end live API execution for:
 - Engine Facade Capability Registrations
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine import (
@@ -22,8 +23,8 @@ from engine import (
 class TestMilestone63AlertGroupingAndRetention(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_search_alert_grouping_rules(self):
         batch = self.engine.search_alert_grouping_rules(limit=10)

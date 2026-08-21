@@ -9,6 +9,7 @@ Verifies:
 6. Engine capability registration and strict anti-mock compliance.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import unittest
 from datetime import datetime
@@ -35,7 +36,7 @@ class TestM510SiemSettingsLive(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
 
     def test_01_get_managed_domain_settings_live(self):
         """Verifies retrieval of approved email domains configured for reports and alerts."""

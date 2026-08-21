@@ -7,6 +7,7 @@ Invariants:
   and deep inspection with marketplace documentation.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine import (
@@ -27,8 +28,8 @@ class TestM54IntegrationLiveAcceptance(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
-        cls.adapter = GoogleSecOpsAdapter()
+        cls.engine = get_live_engine()
+        cls.adapter = get_live_adapter()
 
     def test_list_all_integrations(self):
         """1. Verify engine lists all live base integrations and wraps in typed summaries."""

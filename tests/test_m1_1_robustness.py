@@ -12,6 +12,7 @@ Executes comprehensive behavioral verification against live Google SecOps APIs:
 - UDM-EXEC-009: Static anti-mock audit across all production code
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import re
 import unittest
@@ -29,9 +30,14 @@ from engine import (
 
 
 class TestUDMSearchRobustnessM11(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
+
     def setUp(self):
-        self.adapter = GoogleSecOpsAdapter()
-        self.engine = SecOpsEngine(self.adapter)
+        self.adapter = self.__class__.adapter
+        self.engine = self.__class__.engine
         self.end_time = "2026-08-17T11:03:00.000Z"
         self.start_time = "2026-08-16T11:03:00.000Z"
 

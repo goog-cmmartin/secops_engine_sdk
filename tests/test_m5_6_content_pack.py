@@ -5,6 +5,7 @@ and component bundle deep-inspection for Google SecOps Content Hub Content Packs
 Invariants: Strict live API provenance, zero synthetic data, explicit error visibility.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import unittest
 
@@ -24,7 +25,7 @@ class TestMilestone56ContentPack(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
 
     def test_01_list_all_content_packs_live(self):
         """Verify listing all live content packs from the Google SecOps Marketplace."""

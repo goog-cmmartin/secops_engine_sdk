@@ -4,6 +4,7 @@ Tests live integration against Google SecOps Marketplace catalog, deep inspectio
 commercial diff, and downstream affected dependency resolution.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from engine.facade import SecOpsEngine
 from engine.domain import (
@@ -17,7 +18,7 @@ from engine.domain import (
 class TestMarketplaceIntegrations(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
 
     def test_01_search_marketplace_integrations_all(self):
         """Verify discovery across entire Marketplace response integrations catalog."""

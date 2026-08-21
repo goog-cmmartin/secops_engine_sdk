@@ -5,6 +5,7 @@ and step DAG retrieval against live Google SecOps endpoints.
 Invariants: Zero mocks, strict error visibility, live API provenance.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import unittest
 from typing import List
@@ -26,7 +27,7 @@ class TestPlaybookLiveCapabilities(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
         cls.adapter = cls.engine.adapter
 
     def test_list_playbook_categories(self):

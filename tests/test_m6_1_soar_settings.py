@@ -12,6 +12,7 @@ Validates end-to-end live API execution for:
 - Case Title Setting Properties (priority rules for case title generation)
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine import (
@@ -31,8 +32,8 @@ from engine import (
 class TestMilestone61SoarSettings(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_search_soar_users(self):
         batch = self.engine.search_soar_users(limit=10)

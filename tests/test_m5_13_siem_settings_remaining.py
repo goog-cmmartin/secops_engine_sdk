@@ -9,6 +9,7 @@ Validates end-to-end live API execution for:
 - Root Tenant Instance Details and Feature Flags
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine import (
@@ -25,8 +26,8 @@ from engine import (
 class TestMilestone513SiemSettingsRemaining(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_list_enrichment_combinations(self):
         batch = self.engine.list_enrichment_combinations(limit=10)

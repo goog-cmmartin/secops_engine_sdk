@@ -12,6 +12,7 @@ Verifies:
 Invariants: Strict live API provenance, no synthetic fallbacks, explicit errors.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 from datetime import datetime, timedelta, timezone
 import os
 import unittest
@@ -36,8 +37,8 @@ class TestCuratedDetectionsLive(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_01_list_curated_categories_and_rulesets_live(self):
         """Verify discovery of categories and curated rule sets."""

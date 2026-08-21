@@ -4,6 +4,7 @@ Validates UDM Search Refinement and Canonical Entity Pivot Workflows against liv
 Zero mocks. Complete error visibility. Provenance tracking.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import re
 import unittest
@@ -24,7 +25,7 @@ class TestSearchPivotRefinementLive(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
         # Fetch 1 real event to serve as live reference for investigation and pivot tests
         req = SearchRequest(
             query='metadata.event_type = "USER_LOGIN"',

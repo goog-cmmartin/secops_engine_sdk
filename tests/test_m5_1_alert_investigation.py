@@ -7,6 +7,7 @@ Verifies:
 4. Capability Registration in WorkflowRegistry.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import unittest
 
@@ -17,8 +18,8 @@ from engine import SecOpsEngine
 class TestMilestone51AlertInvestigation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
         cls.known_alert_name = f"projects/{cls.adapter.project_id}/locations/{cls.adapter.location}/instances/{cls.adapter.customer_id}/cases/104185/caseAlerts/390054"
 
     def test_alert_inv_001_deep_dive_inspection(self):

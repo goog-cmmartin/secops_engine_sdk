@@ -9,6 +9,7 @@ Verifies:
 6. Anti-Mock Compliance.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import ast
 import os
 import unittest
@@ -21,8 +22,8 @@ from engine import CasePriority, CaseStatus, SecOpsEngine
 class TestMilestone5CaseInvestigation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
         cls.known_case_id = "104185"
 
     def test_case_inv_001_composite_case_loading(self):

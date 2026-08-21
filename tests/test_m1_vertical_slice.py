@@ -8,6 +8,7 @@ Verifies the real UDM Search vertical slice against live Google SecOps APIs:
 - Anti-Mock Audit (Verifies strict absence of mock/synthetic fallback data)
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import re
 import unittest
@@ -25,9 +26,14 @@ from engine import (
 
 
 class TestM1VerticalSlice(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
+
     def setUp(self):
-        self.adapter = GoogleSecOpsAdapter()
-        self.engine = SecOpsEngine(self.adapter)
+        self.adapter = self.__class__.adapter
+        self.engine = self.__class__.engine
         now = datetime.now(timezone.utc)
         self.end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.start_time = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")

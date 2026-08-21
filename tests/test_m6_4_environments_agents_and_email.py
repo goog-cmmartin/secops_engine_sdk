@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Acceptance tests for Milestone 6.4: SOAR Environments, Remote Agents, Email Settings, and Support Access.
 
 Validates that:
@@ -11,7 +12,7 @@ Validates that:
 8. Capability registry includes all 7 Milestone 6.4 capabilities.
 """
 
-from __future__ import annotations
+from tests.test_helpers import get_live_adapter, get_live_engine
 
 import unittest
 from engine.facade import SecOpsEngine
@@ -31,7 +32,7 @@ class TestMilestone64EnvironmentsAgentsAndEmail(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
 
     def test_01_search_environments(self):
         """Validates discovery and filtering of SOAR multi-tenancy environments."""

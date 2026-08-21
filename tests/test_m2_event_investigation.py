@@ -4,6 +4,7 @@ Validates the Event Investigation & Raw Log Workflow against live Google SecOps 
 Zero mocks. Complete error visibility. Provenance tracking.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import re
 import unittest
@@ -24,7 +25,7 @@ class TestEventInvestigationLive(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
         # Fetch 1 real event to serve as live reference for investigation tests
         req = SearchRequest(
             query='metadata.event_type = "USER_LOGIN"',

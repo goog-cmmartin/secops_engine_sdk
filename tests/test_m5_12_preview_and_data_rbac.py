@@ -8,6 +8,7 @@ Ensures complete compliance with AGENTS.md:
 4. Complete provenance and typed domain model encapsulation.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import os
 import unittest
 from datetime import datetime
@@ -33,8 +34,8 @@ class TestPreviewFeaturesAndDataRBAC(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.adapter = GoogleSecOpsAdapter()
-        cls.engine = SecOpsEngine(adapter=cls.adapter)
+        cls.adapter = get_live_adapter()
+        cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_01_preview_features_discovery_and_get_live(self):
         """Discovers preview features and retrieves a specific feature by ID."""

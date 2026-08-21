@@ -4,6 +4,7 @@ Verifies live Google SecOps API interactions, engine workflows, domain models,
 and capability registrations against live tenant endpoints.
 """
 
+from tests.test_helpers import get_live_adapter, get_live_engine
 import unittest
 from engine.facade import SecOpsEngine
 from engine.domain import (
@@ -21,7 +22,7 @@ class TestMilestone66IngestionConnectorsAndWebhooks(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = SecOpsEngine()
+        cls.engine = get_live_engine()
 
     # 1. SOAR Ingestion Connectors
     def test_search_soar_ingestion_connectors(self):

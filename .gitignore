@@ -110,3 +110,7 @@ take2/
 plan.md
 test_qt_app.py
 secops_state_graph*
+
+# Live Tenant Capture & Evidence Data
+evidence/
+

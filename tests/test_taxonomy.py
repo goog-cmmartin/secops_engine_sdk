@@ -1,4 +1,5 @@
-"""Step 2 taxonomy tests: lock in `kind`/`domain` derivation and invariants.
+"""Taxonomy tests: lock in `kind`/`domain` (Step 2) and result-set
+`cardinality` + require-filter policy (Step 4) derivation and invariants.
 
 These are unit tests on the pure derivation functions plus structural
 assertions over the live registry. They guarantee that the classification
@@ -10,7 +11,10 @@ from collections import Counter
 
 from engine.registry import WorkflowCapability, WorkflowRegistry
 from engine.taxonomy import (
+    REQUIRE_FILTER_POLICY_KEY,
+    VALID_CARDINALITIES,
     VALID_KINDS,
+    derive_cardinality,
     derive_domain,
     derive_kind,
 )
@@ -65,6 +69,37 @@ class DeriveDomainTest(unittest.TestCase):
         self.assertEqual(derive_domain("solo", None), "solo")
 
 
+class DeriveCardinalityTest(unittest.TestCase):
+    def test_nonquery_has_no_cardinality(self):
+        self.assertIsNone(derive_cardinality("x.run", kind="primitive"))
+        self.assertIsNone(derive_cardinality("x.investigate", kind="workflow"))
+
+    def test_single_result_verbs(self):
+        for cid in ("feed.get", "curated_detections.get_rule",
+                    "marketplace_integration.diff", "curated_detections.metrics"):
+            self.assertEqual(derive_cardinality(cid, "query"), "single", cid)
+
+    def test_bounded_caller_supplied_verbs(self):
+        for cid in ("dashboard.execute_query", "dashboard.validate_query"):
+            self.assertEqual(derive_cardinality(cid, "query"), "bounded", cid)
+
+    def test_collection_verbs_are_unbounded(self):
+        for cid in ("case.search", "case_config.stage.list",
+                    "integration.instances", "job.logs",
+                    "content_pack.categories", "feed_schema.list_sources"):
+            self.assertEqual(derive_cardinality(cid, "query"), "unbounded", cid)
+
+    def test_unknown_query_verb_fails_safe_to_unbounded(self):
+        self.assertEqual(derive_cardinality("x.frobnicate", "query"), "unbounded")
+
+    def test_all_derived_cardinalities_are_valid(self):
+        for cid, kind in (("a.get","query"),("b.search","query"),
+                          ("c.execute_query","query"),("d.run","primitive")):
+            card = derive_cardinality(cid, kind)
+            if card is not None:
+                self.assertIn(card, VALID_CARDINALITIES, cid)
+
+
 class CapabilityConstructionTest(unittest.TestCase):
     def test_explicit_kind_overrides_derivation(self):
         cap = WorkflowCapability(
@@ -95,6 +130,58 @@ class CapabilityConstructionTest(unittest.TestCase):
         )
         self.assertEqual(cap.domain, "mydomain")
 
+    def test_unbounded_query_autoattaches_require_filter_policy(self):
+        cap = WorkflowCapability(
+            capability_id="x.search", name="x", description="d",
+            category="x", handler=lambda: None,
+        )
+        self.assertEqual(cap.cardinality, "unbounded")
+        self.assertTrue(cap.agent.get(REQUIRE_FILTER_POLICY_KEY))
+
+    def test_single_query_has_no_filter_policy(self):
+        cap = WorkflowCapability(
+            capability_id="x.get", name="x", description="d",
+            category="x", handler=lambda: None,
+        )
+        self.assertEqual(cap.cardinality, "single")
+        self.assertNotIn(REQUIRE_FILTER_POLICY_KEY, cap.agent)
+
+    def test_explicit_bounded_cardinality_overrides_and_skips_policy(self):
+        # A verified finite enumeration: caller tags it bounded, so no filter
+        # is forced despite the collection-shaped ".list" verb.
+        cap = WorkflowCapability(
+            capability_id="x.list", name="x", description="d",
+            category="x", handler=lambda: None, cardinality="bounded",
+        )
+        self.assertEqual(cap.cardinality, "bounded")
+        self.assertNotIn(REQUIRE_FILTER_POLICY_KEY, cap.agent)
+
+    def test_operator_can_preserve_explicit_no_filter_decision(self):
+        # An explicit False must be respected (human-justified escape hatch),
+        # not silently overwritten by the auto-attach default.
+        cap = WorkflowCapability(
+            capability_id="x.search", name="x", description="d",
+            category="x", handler=lambda: None,
+            agent={REQUIRE_FILTER_POLICY_KEY: False},
+        )
+        self.assertEqual(cap.cardinality, "unbounded")
+        self.assertIs(cap.agent[REQUIRE_FILTER_POLICY_KEY], False)
+
+    def test_invalid_cardinality_rejected(self):
+        with self.assertRaises(ValueError):
+            WorkflowCapability(
+                capability_id="x.get", name="x", description="d",
+                category="x", handler=lambda: None, cardinality="infinite",
+            )
+
+    def test_nonquery_with_cardinality_rejected(self):
+        with self.assertRaises(ValueError):
+            WorkflowCapability(
+                capability_id="x.run", name="x", description="d",
+                category="x", handler=lambda: None,
+                kind="primitive", cardinality="single",
+            )
+
 
 class LiveRegistryTaxonomyTest(unittest.TestCase):
     def setUp(self):
@@ -122,6 +209,28 @@ class LiveRegistryTaxonomyTest(unittest.TestCase):
         self.assertGreater(dist["workflow"], 0)
         # Total must still be the full corpus.
         self.assertEqual(sum(dist.values()), len(self.caps))
+
+    def test_only_queries_carry_cardinality(self):
+        for c in self.caps:
+            if c.kind == "query":
+                self.assertIn(c.cardinality, VALID_CARDINALITIES, c.capability_id)
+            else:
+                self.assertIsNone(c.cardinality, c.capability_id)
+
+    def test_every_unbounded_capability_requires_a_filter(self):
+        # This is the live, non-vacuous form of the Step 4 contract invariant.
+        offenders = [
+            c.capability_id for c in self.caps
+            if c.cardinality == "unbounded"
+            and not c.agent.get(REQUIRE_FILTER_POLICY_KEY)
+        ]
+        self.assertEqual(offenders, [], f"unbounded without filter: {offenders}")
+
+    def test_unbounded_population_is_nonempty(self):
+        # Guard against a derivation regression making the Step 4 check vacuous.
+        unbounded = [c for c in self.caps if c.cardinality == "unbounded"]
+        self.assertGreater(len(unbounded), 0)
+
 
 
 if __name__ == "__main__":

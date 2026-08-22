@@ -28,6 +28,54 @@ from typing import Optional
 # The only legal kinds. Kept in sync with the contract suite's KINDS set.
 VALID_KINDS = frozenset({"primitive", "query", "workflow"})
 
+# The only legal cardinalities for a query capability's result set. Kept in
+# sync with the contract suite's expectations (Step 4).
+#   * ``single``    -- returns exactly one addressed resource (e.g. ``.get``).
+#   * ``bounded``   -- result size is intrinsically constrained by a required
+#                      caller-supplied argument (e.g. a query the caller writes,
+#                      or a verified small/static enumeration).
+#   * ``unbounded`` -- an open-ended collection over a paginated/streaming
+#                      endpoint that could enumerate an entire tenant. These
+#                      MUST carry a require-filter policy so an autonomous agent
+#                      cannot accidentally page the whole dataset.
+VALID_CARDINALITIES = frozenset({"single", "bounded", "unbounded"})
+
+# The agent-policy key the contract suite looks for on unbounded capabilities.
+REQUIRE_FILTER_POLICY_KEY = "require_filter_for_unbounded_query"
+
+# Terminal verbs that return a single addressed resource.
+SINGLE_RESULT_VERBS = frozenset({
+    "get",
+    "get_rule",
+    "get_ruleset",
+    "diff",
+    "metrics",
+})
+
+# Terminal verbs whose result set is bounded by a required caller argument
+# (the caller writes the query, so they own the bound).
+BOUNDED_RESULT_VERBS = frozenset({
+    "execute_query",
+    "validate_query",
+})
+
+# Terminal verbs that return an open-ended collection. This is the union of the
+# explicit search/list verbs and their list-like aliases already recognized as
+# read verbs. Anything here is treated as ``unbounded`` unless a registration
+# explicitly overrides it (e.g. a verified finite enum -> ``bounded``).
+COLLECTION_RESULT_VERBS = frozenset({
+    "search",
+    "list",
+    "search_rulesets",
+    "instances",
+    "logs",
+    "categories",
+    "remote_agents",
+    "affected_items",
+    "list_sources",
+    "list_log_types",
+})
+
 # Verb suffixes (the final dotted segment of a capability_id) that denote a
 # read-only operation. Anything ending in one of these is a `query` unless it
 # is composed (then it is a `workflow`) or explicitly overridden.
@@ -84,3 +132,30 @@ def derive_domain(capability_id: str, category: Optional[str]) -> str:
     if capability_id and "." in capability_id:
         return capability_id.split(".", 1)[0]
     return capability_id or ""
+
+
+def derive_cardinality(capability_id: str, kind: str) -> Optional[str]:
+    """Classify a query's result-set cardinality, or ``None`` for non-queries.
+
+    Cardinality only constrains read-only capabilities: a ``workflow`` bounds
+    its own output through its parameters, and a ``primitive`` mutates rather
+    than enumerates. For queries we map the terminal verb:
+
+      * single-result verbs      -> ``single``
+      * caller-bounded verbs     -> ``bounded``
+      * collection verbs         -> ``unbounded`` (the safe default)
+
+    Any query verb we do not recognize also defaults to ``unbounded``: it is
+    always safe to over-require a filter, never safe to under-require one.
+    """
+    if kind != "query":
+        return None
+    verb = _terminal_segment(capability_id)
+    if verb in SINGLE_RESULT_VERBS:
+        return "single"
+    if verb in BOUNDED_RESULT_VERBS:
+        return "bounded"
+    if verb in COLLECTION_RESULT_VERBS:
+        return "unbounded"
+    # Unknown query verb: fail safe.
+    return "unbounded"

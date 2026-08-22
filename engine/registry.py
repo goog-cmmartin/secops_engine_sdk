@@ -7,7 +7,14 @@ CLI commands, UI actions, and MCP tool definitions.
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from engine.taxonomy import VALID_KINDS, derive_domain, derive_kind
+from engine.taxonomy import (
+    REQUIRE_FILTER_POLICY_KEY,
+    VALID_CARDINALITIES,
+    VALID_KINDS,
+    derive_cardinality,
+    derive_domain,
+    derive_kind,
+)
 
 
 @dataclass
@@ -30,6 +37,13 @@ class WorkflowCapability:
     side_effects: List[str] = field(default_factory=list)
     # --- Step 3 composition graph: capability_ids this workflow composes -
     uses: Tuple[str, ...] = field(default_factory=tuple)
+    # --- Step 4 result-set cardinality + agent safety policy -----------
+    # `cardinality` is auto-derived for queries when left unset (explicit
+    # values win, e.g. tagging a verified finite enum as 'bounded').
+    # `agent` holds per-capability policy hints consumed by CLI/MCP; the
+    # require-filter policy is auto-attached to every unbounded query.
+    cardinality: Optional[str] = None
+    agent: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Derive taxonomy fields from existing data; explicit values win."""
@@ -64,6 +78,31 @@ class WorkflowCapability:
                     f"Capability '{self.capability_id}' lists itself in "
                     f"uses; a capability cannot compose itself."
                 )
+        # Derive result-set cardinality for queries (explicit wins).
+        if self.cardinality is None:
+            self.cardinality = derive_cardinality(self.capability_id, self.kind)
+        if (
+            self.cardinality is not None
+            and self.cardinality not in VALID_CARDINALITIES
+        ):
+            raise ValueError(
+                f"Capability '{self.capability_id}' has invalid cardinality "
+                f"'{self.cardinality}'; must be one of "
+                f"{sorted(VALID_CARDINALITIES)}."
+            )
+        # Only queries carry a cardinality; a mutating primitive or a
+        # composed workflow must not claim one.
+        if self.cardinality is not None and self.kind != "query":
+            raise ValueError(
+                f"Capability '{self.capability_id}' is kind={self.kind!r} but "
+                f"declares cardinality={self.cardinality!r}; only queries have "
+                f"a result-set cardinality."
+            )
+        # Auto-attach the require-filter policy to every unbounded query so
+        # an autonomous agent cannot page an entire tenant unfiltered. An
+        # explicit False is respected only if a human has justified it.
+        if self.cardinality == "unbounded":
+            self.agent.setdefault(REQUIRE_FILTER_POLICY_KEY, True)
 
 
 class WorkflowRegistry:

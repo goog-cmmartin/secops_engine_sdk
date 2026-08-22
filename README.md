@@ -46,7 +46,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   ├── registry.py           # Capability registry, taxonomy & agent-safety metadata
 │   ├── taxonomy.py           # kind/domain/cardinality derivation & safety policy
 │   ├── schema.py             # Canonical UDM schemas & field mappings
-│   └── workflows/            # Modular workflow implementations (60+ workflows)
+│   └── workflows/            # Modular workflow implementations (21 workflow modules)
 ├── clients/                  # Multi-tier frontends
 │   ├── cli/                  # Terminal CLI executable (secops.py)
 │   └── desktop/              # Qt / PySide6 Native Desktop application

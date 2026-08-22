@@ -6,7 +6,6 @@ Google SecOps (Chronicle) REST & Long Running Operation (LRO) APIs.
 
 import base64
 import json
-import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -15,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional
 
+from engine.auth import CredentialProvider
 from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
 from engine.domain import RawLogPayload, SearchBatchResult, ValidationResult
 
@@ -30,6 +30,7 @@ class GoogleSecOpsAdapter:
         customer_id: Optional[str] = None,
         location: Optional[str] = None,
         api_base: Optional[str] = None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         if config is not None:
             self.config = config
@@ -47,24 +48,17 @@ class GoogleSecOpsAdapter:
         self.customer_id = self.config.customer_id
         self.location = self.config.location
         self.api_base = self.config.api_base
-        self._token: Optional[str] = None
-        self._token_expiry: Optional[datetime] = None
+        self._credential_provider = credential_provider or CredentialProvider()
 
     def _get_auth_token(self) -> str:
-        """Acquires a valid Google Cloud ADC access token."""
-        now = datetime.now(timezone.utc)
-        if self._token and self._token_expiry and now < self._token_expiry:
-            return self._token
+        """Acquires a valid Google Cloud access token for SecOps REST calls.
 
-        res = subprocess.run(
-            ["gcloud", "auth", "print-access-token"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self._token = res.stdout.strip()
-        self._token_expiry = now + timedelta(minutes=45)
-        return self._token
+        Delegates to the configured :class:`~engine.auth.CredentialProvider`,
+        which resolves credentials via (in order) a static token override,
+        google-auth ADC, then a gcloud ADC subprocess fallback. See
+        ``engine/auth.py`` for the full resolution contract.
+        """
+        return self._credential_provider.get_token()
 
     def _request(
         self,

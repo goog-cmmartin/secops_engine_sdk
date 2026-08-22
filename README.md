@@ -86,6 +86,25 @@ cp .env.example .env
 # SECOPS_REGION=us
 ```
 
+### Authentication
+
+Token acquisition is centralized in `engine/auth.py` (`CredentialProvider`) and
+resolves credentials via a prioritized chain, controllable with `SECOPS_AUTH_MODE`:
+
+1. **Static override** — `SECOPS_AUTH_TOKEN` (or an injected token). No I/O or
+   refresh; intended for CI and constrained runners.
+2. **Library ADC** — `google-auth` Application Default Credentials, scoped to
+   `cloud-platform` and auto-refreshed. The enterprise default.
+3. **gcloud subprocess** — `gcloud auth application-default print-access-token`,
+   used when `google-auth` is unavailable.
+
+> Note: the fallback uses the **application-default** credential store, which
+> carries the `cloud-platform` scope. The bare `gcloud auth print-access-token`
+> command emits an unscoped user token that the SecOps API rejects with HTTP 401.
+
+Set `SECOPS_AUTH_MODE` to `auto` (default), `adc`, `gcloud`, or `static` to pin a
+specific strategy.
+
 ### 3. Python SDK Usage
 ```python
 from engine import SecOpsEngine

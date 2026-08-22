@@ -1,4 +1,4 @@
-id: soar.ingestion.webhook.get
+id: soar.webhook.get
 name: Get SOAR Webhook
 version: 1.0.0
 description: Deep inspection of a specific SOAR event ingestion webhook.

@@ -1,4 +1,4 @@
-id: soar.ingestion.webhook.search
+id: soar.webhook.search
 name: Search SOAR Webhooks
 version: 1.0.0
 description: Discovers and filters configured SOAR event ingestion webhooks.

@@ -1,4 +1,4 @@
-id: soar.ingestion.connector.search
+id: soar.ingestion_connector.search
 name: Search SOAR Ingestion Connectors
 version: 1.0.0
 description: Discovers and filters configured SOAR ingestion connector instances across integrations and environments.

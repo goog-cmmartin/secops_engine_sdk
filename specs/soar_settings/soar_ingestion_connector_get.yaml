@@ -1,4 +1,4 @@
-id: soar.ingestion.connector.get
+id: soar.ingestion_connector.get
 name: Get SOAR Ingestion Connector
 version: 1.0.0
 description: Deep inspection of a specific SOAR ingestion connector instance.

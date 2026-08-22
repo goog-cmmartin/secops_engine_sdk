@@ -486,6 +486,7 @@ class SecOpsEngine:
                 handler=self.refine_search,
                 mcp_tool_name="refine_search",
                 composed=True,
+                uses=("search.udm",),
                 evidence_path="evidence/search/refine",
             )
         )
@@ -498,6 +499,7 @@ class SecOpsEngine:
                 handler=self.search_from_entity,
                 mcp_tool_name="search_from_entity",
                 composed=True,
+                uses=("search.udm",),
                 evidence_path="evidence/search/from_entity",
             )
         )

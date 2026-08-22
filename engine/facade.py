@@ -5,6 +5,7 @@ from engine.domain import (
     CaseCommentRecord,
     CaseInvestigation,
     CaseSearchBatch,
+    CaseSearchPrefix,
     CaseSearchQuery,
     CaseSearchResultItem,
     CaseStatus,
@@ -1812,7 +1813,15 @@ class SecOpsEngine:
         page_size: int = 50,
         page_number: int = 0,
     ) -> CaseSearchBatch:
-        """Executes the SOAR Case Search workflow."""
+        """Executes the SOAR Case Search workflow.
+
+        NOTE (SecOps nuance): the ``query`` string maps to the legacy ``title`` field,
+        which is a *prefixed query DSL*, not a plain title-substring match. A bare term
+        (e.g. a raw hash) will return zero results. Prefix the term using the closed
+        vocabulary in :class:`CaseSearchPrefix` -- e.g. ``"Entity:<sha256>"``,
+        ``"AlertName:<name>"``, ``"CaseIds:<id>"``, ``"TicketIds:<id>"``, ``"Port:<n>"``.
+        For entity-driven lookups prefer :meth:`search_cases_by_entity`.
+        """
         if isinstance(query, CaseSearchQuery):
             return self._search_cases_wf.execute(query)
         q = CaseSearchQuery(
@@ -1829,6 +1838,36 @@ class SecOpsEngine:
             page_number=page_number,
         )
         return self._search_cases_wf.execute(q)
+
+    def search_cases_by_entity(
+        self,
+        entity_value: str,
+        start_time: Optional[Any] = None,
+        end_time: Optional[Any] = None,
+        environments: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_number: int = 0,
+    ) -> CaseSearchBatch:
+        """Finds cases involving a given entity value (IP, hash, user, domain, etc.).
+
+        Thin, discoverable wrapper over :meth:`search_cases` that applies the
+        ``Entity:`` prefix required by the case-search DSL. This is the canonical
+        "prior/similar cases by entity" lookup.
+
+        Example::
+
+            batch = engine.search_cases_by_entity(
+                "2FDA6E766E1B5263D7D957F2FCC998C438BD92C7B7E566E6D31872C254FA88BB")
+            print(batch.total_count)  # cases involving this file hash
+        """
+        return self.search_cases(
+            query=CaseSearchPrefix.ENTITY.apply(entity_value),
+            start_time=start_time,
+            end_time=end_time,
+            environments=environments,
+            page_size=page_size,
+            page_number=page_number,
+        )
 
     def get_case_filter_values(
         self,

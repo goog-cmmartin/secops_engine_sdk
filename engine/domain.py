@@ -37,6 +37,28 @@ class EntityType(str, Enum):
     DOMAIN = "DOMAIN"
 
 
+class CaseSearchPrefix(str, Enum):
+    """Typed query prefixes accepted by the SOAR case-search `title`/`query` field.
+
+    IMPORTANT SecOps nuance: the `legacyCaseSearchEverything` `title` field is NOT a
+    plain title-substring filter -- it is a prefixed query DSL. A bare, unprefixed
+    term (e.g. a raw file hash) matches nothing. To search by entity/case/etc., the
+    term MUST be prefixed, e.g. `Entity:<sha256>` or `AlertName:<name>`.
+
+    This prefix set is the complete, closed vocabulary as exposed by the SecOps UX;
+    the official API documentation does not enumerate additional prefixes.
+    """
+    CASE_IDS = "CaseIds"
+    TICKET_IDS = "TicketIds"
+    PORT = "Port"
+    ALERT_NAME = "AlertName"
+    ENTITY = "Entity"
+
+    def apply(self, value: str) -> str:
+        """Renders a prefixed query term, e.g. CaseSearchPrefix.ENTITY.apply(sha) -> 'Entity:<sha>'."""
+        return f"{self.value}:{value}"
+
+
 from engine.schema import canonicalize_udm_field
 
 

@@ -16,6 +16,7 @@ import unittest
 
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine import CasePriority, CaseSearchQuery, SecOpsEngine
+from engine.domain import CaseSearchPrefix
 
 
 class TestMilestone52CaseSearch(unittest.TestCase):
@@ -93,6 +94,52 @@ class TestMilestone52CaseSearch(unittest.TestCase):
         cap = caps["case.search"]
         self.assertEqual(cap.category, "case")
         self.assertFalse(cap.composed)
+
+    def test_case_search_008_entity_prefix_dsl(self):
+        """Regression guard: the query field is a prefixed DSL, not a title substring.
+
+        A bare hash must return zero; the same hash with the Entity: prefix must
+        return matching cases. This locks in the SecOps nuance discovered live and
+        prevents silent regression back to unprefixed (always-empty) queries.
+        """
+        known_hash = "2FDA6E766E1B5263D7D957F2FCC998C438BD92C7B7E566E6D31872C254FA88BB"
+
+        bare = self.engine.search_cases(query=known_hash, page_size=50)
+        prefixed = self.engine.search_cases(
+            query=CaseSearchPrefix.ENTITY.apply(known_hash), page_size=50
+        )
+
+        self.assertEqual(
+            bare.total_count, 0,
+            "Bare (unprefixed) entity term unexpectedly matched; DSL semantics changed.",
+        )
+        self.assertGreater(
+            prefixed.total_count, 0,
+            "Entity:<hash> returned no cases; prefix DSL may have regressed.",
+        )
+
+    def test_case_search_009_search_cases_by_entity_helper(self):
+        """The typed helper must equal an explicit Entity: prefixed search."""
+        known_hash = "2FDA6E766E1B5263D7D957F2FCC998C438BD92C7B7E566E6D31872C254FA88BB"
+
+        via_helper = self.engine.search_cases_by_entity(known_hash, page_size=50)
+        via_explicit = self.engine.search_cases(
+            query=CaseSearchPrefix.ENTITY.apply(known_hash), page_size=50
+        )
+
+        self.assertGreater(via_helper.total_count, 0)
+        self.assertEqual(via_helper.total_count, via_explicit.total_count)
+        self.assertEqual(
+            CaseSearchPrefix.ENTITY.apply("X"), "Entity:X",
+            "Prefix rendering contract changed.",
+        )
+
+    def test_case_search_010_prefix_vocabulary_closed_set(self):
+        """The prefix enum must remain the exact closed, UX-sourced vocabulary."""
+        self.assertEqual(
+            {p.value for p in CaseSearchPrefix},
+            {"CaseIds", "TicketIds", "Port", "AlertName", "Entity"},
+        )
 
     def test_case_search_007_anti_mock_audit(self):
         """Audits all production code for banned mock identifiers."""

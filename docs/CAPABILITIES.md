@@ -54,7 +54,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 | capability_id | kind | cardinality | mcp_tool | description |
 | :--- | :--- | :--- | :--- | :--- |
-| `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
+| `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. Single call yielding both `status` and `comments`. Caveat: `comments` are unordered — sort by `create_time` for recency; closed-state is `CaseInvestigation.status` (enum) here vs `CaseSearchResultItem.is_closed` (bool) in `case.search`. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 

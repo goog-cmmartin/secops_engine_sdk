@@ -121,7 +121,7 @@ class GoogleSecOpsAdapter:
             res = self._request("GET", path, params=params)
             query_type = res.get("queryType")
             err_text = res.get("errorText") or res.get("errorType")
-            is_valid = query_type == "QUERY_TYPE_UDM_QUERY" and not err_text
+            is_valid = query_type in ["QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY"] and not err_text
             return ValidationResult(
                 valid=is_valid,
                 dialect="udm",
@@ -1684,6 +1684,52 @@ class GoogleSecOpsAdapter:
         clean_id = webhook_id.split("/")[-1]
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/webhooks/{clean_id}"
         return self._request("GET", path)
+
+    def search_enterprise_iocs(
+        self,
+        value: str,
+        value_type: str,
+        start_time: str,
+        end_time: str,
+        max_matches: int = 10000,
+        add_mandiant_attributes: bool = True,
+    ) -> Dict[str, Any]:
+        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacy:legacySearchEnterpriseWideIoCs"
+        params: Dict[str, Any] = {
+            "fieldAndValue.value": value,
+            "fieldAndValue.valueType": value_type,
+            "timestampRange.startTime": start_time,
+            "timestampRange.endTime": end_time,
+            "maxMatchesToReturn": max_matches,
+            "addMandiantAttributes": "true" if add_mandiant_attributes else "false",
+        }
+        return self._request("GET", path, params=params)
+
+    def summarize_entity(
+        self,
+        entity_id: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        return_alerts: bool = False,
+        return_prevalence: bool = True,
+        include_all_udm_event_types: bool = True,
+    ) -> Dict[str, Any]:
+        """Summarizes entity metadata, timeline intervals, and prevalence."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:summarizeEntity"
+        clean_id = entity_id.split("/")[-1]
+        params: Dict[str, Any] = {
+            "entityId": clean_id,
+            "returnAlerts": "true" if return_alerts else "false",
+            "returnPrevalence": "true" if return_prevalence else "false",
+            "includeAllUdmEventTypesForFirstLastSeen": "true" if include_all_udm_event_types else "false",
+        }
+        if start_time:
+            params["timeRange.startTime"] = start_time
+        if end_time:
+            params["timeRange.endTime"] = end_time
+        return self._request("GET", path, params=params)
+
 
 
 

@@ -27,6 +27,10 @@ from engine.domain import (
     DashboardQueryResult,
     DashboardSearchQuery,
     DashboardSummary,
+    EnterpriseIocBatch,
+    EnterpriseIocMatch,
+    EntityInvestigationReport,
+    EntitySummaryResult,
     EntityType,
     EventInvestigation,
     EventReference,
@@ -209,10 +213,17 @@ from engine.workflows.data_rbac import (
     SearchDataAccessScopesWorkflow,
     SearchEnvironmentScopesWorkflow,
 )
+from engine.entity_detector import DetectedEntity, EntityCategory, detect_entity
 from engine.workflows.enrichment import (
     GetEnrichmentControlWorkflow,
     ListEnrichmentCombinationsWorkflow,
     SearchEnrichmentControlsWorkflow,
+)
+from engine.workflows.entity_search import (
+    InvestigateEntityWorkflow,
+    SearchEntityGraphWorkflow,
+    SearchEnterpriseIocsWorkflow,
+    SummarizeEntityWorkflow,
 )
 from engine.workflows.feed import (
     GetFeedDetailWorkflow,
@@ -443,6 +454,16 @@ class SecOpsEngine:
         "_get_soar_ingestion_connector_wf": lambda e: GetSoarIngestionConnectorWorkflow(e.adapter),
         "_search_soar_webhooks_wf": lambda e: SearchSoarWebhooksWorkflow(e.adapter),
         "_get_soar_webhook_wf": lambda e: GetSoarWebhookWorkflow(e.adapter),
+        "_search_entity_graph_wf": lambda e: SearchEntityGraphWorkflow(e._search_udm_wf),
+        "_search_enterprise_iocs_wf": lambda e: SearchEnterpriseIocsWorkflow(e.adapter),
+        "_summarize_entity_wf": lambda e: SummarizeEntityWorkflow(e.adapter),
+        "_investigate_entity_wf": lambda e: InvestigateEntityWorkflow(
+            e._search_entity_graph_wf,
+            e._search_from_entity_wf,
+            e._search_enterprise_iocs_wf,
+            e._search_cases_wf,
+            e._summarize_entity_wf,
+        ),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -502,6 +523,58 @@ class SecOpsEngine:
                 composed=True,
                 uses=("search.udm",),
                 evidence_path="evidence/search/from_entity",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="entity.search_udm",
+                name="UDM Entity Graph Search",
+                description="Executes streaming searches across the native UDM entity graph (graph.entity.*).",
+                category="entity",
+                handler=self.search_entity_graph,
+                mcp_tool_name="search_entity_udm",
+                composed=True,
+                uses=("search.udm",),
+                evidence_path="evidence/entity/search_udm",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="ioc.search_enterprise",
+                name="Enterprise-Wide IoC Intelligence Search",
+                description="Searches enterprise IoC matches and Mandiant breach intelligence for indicators.",
+                category="ioc",
+                handler=self.search_enterprise_iocs,
+                mcp_tool_name="search_enterprise_iocs",
+                composed=False,
+                cardinality="bounded",
+                evidence_path="evidence/ioc/search_enterprise",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="entity.summarize",
+                name="Entity Summarization Profile",
+                description="Retrieves entity timeline intervals, prevalence metrics, and metadata.",
+                category="entity",
+                handler=self.summarize_entity,
+                mcp_tool_name="summarize_entity",
+                composed=False,
+                cardinality="single",
+                evidence_path="evidence/entity/summarize",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="entity.investigate",
+                name="Unified Cross-Engine Entity Investigation",
+                description="Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases.",
+                category="entity",
+                handler=self.investigate_entity,
+                mcp_tool_name="investigate_entity",
+                composed=True,
+                uses=("entity.search_udm", "search.from_entity", "ioc.search_enterprise", "case.search"),
+                evidence_path="evidence/entity/investigate",
             )
         )
         self.registry.register(
@@ -2732,9 +2805,94 @@ class SecOpsEngine:
         """Retrieves deep configuration and JSON schema mapping of a single SOAR event ingestion webhook."""
         return self._get_soar_webhook_wf.execute(webhook_id=webhook_id)
 
+    def detect_entity(self, value: str) -> DetectedEntity:
+        """Detects entity indicator type, category, and canonical graph & event queries."""
+        return detect_entity(value)
+
+    def search_entity_graph(
+        self,
+        indicator_or_field: str,
+        value: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        receive_limit: int = 10000,
+        batch_size: int = 2000,
+        on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
+        on_state_change: Optional[Callable[[SearchSession], None]] = None,
+        cancel_token: Optional[Callable[[], bool]] = None,
+    ) -> SearchSession:
+        """Executes streaming search against the UDM entity graph (graph.entity.*)."""
+        return self._search_entity_graph_wf.execute(
+            indicator_or_field=indicator_or_field,
+            value=value,
+            start_time=start_time,
+            end_time=end_time,
+            receive_limit=receive_limit,
+            batch_size=batch_size,
+            on_batch=on_batch,
+            on_state_change=on_state_change,
+            cancel_token=cancel_token,
+        )
+
+    def search_enterprise_iocs(
+        self,
+        value: str,
+        value_type: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        max_matches: int = 10000,
+        add_mandiant_attributes: bool = True,
+    ) -> EnterpriseIocBatch:
+        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator."""
+        return self._search_enterprise_iocs_wf.execute(
+            value=value,
+            value_type=value_type,
+            start_time=start_time,
+            end_time=end_time,
+            max_matches=max_matches,
+            add_mandiant_attributes=add_mandiant_attributes,
+        )
+
+    def summarize_entity(
+        self,
+        entity_id: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        return_alerts: bool = False,
+        return_prevalence: bool = True,
+        include_all_udm_event_types: bool = True,
+    ) -> EntitySummaryResult:
+        """Retrieves entity summary profile, timeline intervals, and prevalence."""
+        return self._summarize_entity_wf.execute(
+            entity_id=entity_id,
+            start_time=start_time,
+            end_time=end_time,
+            return_alerts=return_alerts,
+            return_prevalence=return_prevalence,
+            include_all_udm_event_types=include_all_udm_event_types,
+        )
+
+    def investigate_entity(
+        self,
+        indicator: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        max_events: int = 50,
+        include_cases: bool = True,
+    ) -> EntityInvestigationReport:
+        """Executes full cross-engine correlation across Entity Graph, UDM Events, IoCs, and SOAR Cases."""
+        return self._investigate_entity_wf.execute(
+            indicator=indicator,
+            start_time=start_time,
+            end_time=end_time,
+            max_events=max_events,
+            include_cases=include_cases,
+        )
+
     def list_capabilities(self, category: Optional[str] = None) -> List[WorkflowCapability]:
         """Lists capabilities available in this engine instance."""
         return self.registry.list_capabilities(category=category)
+
 
 
 

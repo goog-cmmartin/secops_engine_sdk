@@ -10,6 +10,10 @@ from engine.domain import (
     CaseSearchResultItem,
     CaseStatus,
     CompletenessState,
+    EnterpriseIocBatch,
+    EnterpriseIocMatch,
+    EntityInvestigationReport,
+    EntitySummaryResult,
     EntityType,
     EventInvestigation,
     EventReference,
@@ -373,4 +377,14 @@ __all__ = [
     "SoarWebhookSummary",
     "SoarWebhookDetail",
     "SoarWebhookBatch",
+    "EnterpriseIocBatch",
+    "EnterpriseIocMatch",
+    "EntitySummaryResult",
+    "EntityInvestigationReport",
+    "detect_entity",
+    "DetectedEntity",
+    "EntityCategory",
 ]
+
+from engine.entity_detector import DetectedEntity, EntityCategory, detect_entity
+

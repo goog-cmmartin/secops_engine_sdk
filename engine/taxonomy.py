@@ -50,6 +50,7 @@ SINGLE_RESULT_VERBS = frozenset({
     "get_ruleset",
     "diff",
     "metrics",
+    "summarize",
 })
 
 # Terminal verbs whose result set is bounded by a required caller argument
@@ -67,6 +68,7 @@ COLLECTION_RESULT_VERBS = frozenset({
     "search",
     "list",
     "search_rulesets",
+    "search_enterprise",
     "instances",
     "logs",
     "categories",
@@ -82,6 +84,8 @@ COLLECTION_RESULT_VERBS = frozenset({
 READ_VERB_SUFFIXES = frozenset({
     "get",
     "search",
+    "search_enterprise",
+    "summarize",
     "list",
     "list_log_types",
     "list_sources",

@@ -102,7 +102,14 @@ class SearchFromEntityWorkflow:
         EntityType.HOSTNAME: 'principal.hostname = "{value}" OR target.hostname = "{value}" OR src.hostname = "{value}"',
         EntityType.USER: 'principal.user.userid = "{value}" OR target.user.userid = "{value}" OR src.user.userid = "{value}"',
         EntityType.SHA256: 'principal.process.file.sha256 = "{value}" OR target.process.file.sha256 = "{value}" OR target.file.sha256 = "{value}"',
-        EntityType.DOMAIN: 'network.dns.questions.name = "{value}"',
+        EntityType.MD5: 'target.file.md5 = "{value}" OR principal.process.file.md5 = "{value}"',
+        EntityType.SHA1: 'target.file.sha1 = "{value}" OR principal.process.file.sha1 = "{value}"',
+        EntityType.DOMAIN: 'network.dns.questions.name = "{value}" OR target.hostname = "{value}"',
+        EntityType.EMAIL: 'principal.user.email_addresses = "{value}" OR target.user.email_addresses = "{value}"',
+        EntityType.MAC: 'principal.mac = "{value}" OR target.mac = "{value}" OR src.mac = "{value}"',
+        EntityType.URL: 'target.url = "{value}" OR network.http.referral_url = "{value}"',
+        EntityType.WINDOWS_SID: 'principal.user.windows_sid = "{value}" OR target.user.windows_sid = "{value}"',
+        EntityType.RESOURCE: 'target.resource.name = "{value}"',
     }
 
     STRATEGY_DESCRIPTIONS = {
@@ -110,7 +117,14 @@ class SearchFromEntityWorkflow:
         EntityType.HOSTNAME: "Searches across principal.hostname, target.hostname, and src.hostname.",
         EntityType.USER: "Searches across principal.user.userid, target.user.userid, and src.user.userid.",
         EntityType.SHA256: "Searches across process sha256 (principal & target) and target file sha256.",
-        EntityType.DOMAIN: "Searches across network.dns.questions.name.",
+        EntityType.MD5: "Searches across target file md5 and process file md5.",
+        EntityType.SHA1: "Searches across target file sha1 and process file sha1.",
+        EntityType.DOMAIN: "Searches across network.dns.questions.name and target.hostname.",
+        EntityType.EMAIL: "Searches across user email addresses in principal and target.",
+        EntityType.MAC: "Searches across principal.mac, target.mac, and src.mac.",
+        EntityType.URL: "Searches across target.url and network referral url.",
+        EntityType.WINDOWS_SID: "Searches across principal and target windows SID.",
+        EntityType.RESOURCE: "Searches across target resource name.",
     }
 
     def __init__(self, search_workflow: SearchUDMWorkflow):

@@ -34,7 +34,14 @@ class EntityType(str, Enum):
     HOSTNAME = "HOSTNAME"
     USER = "USER"
     SHA256 = "SHA256"
+    MD5 = "MD5"
+    SHA1 = "SHA1"
     DOMAIN = "DOMAIN"
+    EMAIL = "EMAIL"
+    MAC = "MAC"
+    URL = "URL"
+    WINDOWS_SID = "WINDOWS_SID"
+    RESOURCE = "RESOURCE"
 
 
 class CaseSearchPrefix(str, Enum):
@@ -2458,6 +2465,71 @@ class SoarWebhookBatch(UniversalBatchMixin):
     total_count: int
     next_page_token: Optional[str] = None
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class EnterpriseIocMatch:
+    """Enterprise-wide IoC match with Mandiant intelligence and asset correlations."""
+    artifact_indicator: Dict[str, Any] = field(default_factory=dict)
+    sources: List[str] = field(default_factory=list)
+    categories: List[str] = field(default_factory=list)
+    asset_indicators: List[Dict[str, Any]] = field(default_factory=list)
+    ioc_ingest_timestamp: Optional[str] = None
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnterpriseIocBatch(UniversalBatchMixin):
+    """Batch of enterprise-wide IoC matches."""
+    matches: List[EnterpriseIocMatch] = field(default_factory=list)
+    total_count: int = 0
+    searched_value: str = ""
+    value_type: str = ""
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def results(self) -> List[EnterpriseIocMatch]:
+        return self.matches
+
+
+@dataclass
+class EntityTimelineInterval:
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+
+
+@dataclass
+class EntitySummaryResult:
+    """Entity summary profile including timeline intervals, prevalence, and metadata."""
+    entity_id: str
+    entity_type: str = ""
+    timeline: List[Dict[str, Any]] = field(default_factory=list)
+    prevalence: Dict[str, Any] = field(default_factory=dict)
+    file_metadata: Dict[str, Any] = field(default_factory=dict)
+    entities: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class EntityInvestigationReport:
+    """Composite investigation report across Graph Entities, UDM Events, IoCs, and SOAR Cases."""
+    indicator: str
+    detected_type: str
+    category: str
+    entity_graph_events_count: int = 0
+    udm_events_count: int = 0
+    enterprise_iocs_count: int = 0
+    related_cases_count: int = 0
+    graph_events: List[Dict[str, Any]] = field(default_factory=list)
+    udm_events: List[Dict[str, Any]] = field(default_factory=list)
+    ioc_matches: List[EnterpriseIocMatch] = field(default_factory=list)
+    related_cases: List[Any] = field(default_factory=list)
+    entity_summary: Optional[EntitySummaryResult] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 

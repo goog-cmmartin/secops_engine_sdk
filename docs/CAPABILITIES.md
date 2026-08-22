@@ -5,7 +5,7 @@
 
 _Generated 2026-08-22 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**104 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`), the CLI, and as an MCP tool.
+**108 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`), the CLI, and as an MCP tool.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-08-22 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 7 |
+| workflow | 9 |
 | primitive | 1 |
-| query | 96 |
-| **total** | **104** |
+| query | 98 |
+| **total** | **108** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 44 |
-| bounded | 2 |
+| single | 45 |
+| bounded | 3 |
 | unbounded | 50 |
-| (n/a — workflows/primitive) | 8 |
+| (n/a — workflows/primitive) | 10 |
 
 ## Workflows
 
@@ -37,6 +37,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
+| `entity.investigate` | entity | Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases. |
+| `entity.search_udm` | entity | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
 | `event.investigate` | event | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 | `search.from_entity` | search | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | search | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
@@ -54,7 +56,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 | capability_id | kind | cardinality | mcp_tool | description |
 | :--- | :--- | :--- | :--- | :--- |
-| `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. Single call yielding both `status` and `comments`. Caveat: `comments` are unordered — sort by `create_time` for recency; closed-state is `CaseInvestigation.status` (enum) here vs `CaseSearchResultItem.is_closed` (bool) in `case.search`. |
+| `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 
@@ -121,6 +123,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `enrichment.control.get` | query | `single` | `get_enrichment_control` | Retrieves full configuration and timing rules for a deployed enrichment control. |
 | `enrichment.control.search` | query | `unbounded` | `search_enrichment_controls` | Discovers and filters deployed enrichment controls that restrict entity enrichments. |
 
+### entity  (3: workflow=2, query=1)
+
+| capability_id | kind | cardinality | mcp_tool | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `entity.investigate` | workflow | — | `investigate_entity` | Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases. |
+| `entity.search_udm` | workflow | — | `search_entity_udm` | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
+| `entity.summarize` | query | `single` | `summarize_entity` | Retrieves entity timeline intervals, prevalence metrics, and metadata. |
+
 ### event  (1: workflow=1)
 
 | capability_id | kind | cardinality | mcp_tool | description |
@@ -144,6 +154,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `integration.instances` | query | `unbounded` | `list_integration_instances` | Lists configured integration instances across environments or specific integrations. |
 | `integration.remote_agents` | query | `unbounded` | `list_remote_agents` | Lists remote proxy execution agents and their supported environments. |
 | `integration.search` | query | `unbounded` | `search_integrations` | Searches, lists, and filters SOAR integrations across environments, status, and certification. |
+
+### ioc  (1: query=1)
+
+| capability_id | kind | cardinality | mcp_tool | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `ioc.search_enterprise` | query | `bounded` | `search_enterprise_iocs` | Searches enterprise IoC matches and Mandiant breach intelligence for indicators. |
 
 ### job  (4: query=4)
 

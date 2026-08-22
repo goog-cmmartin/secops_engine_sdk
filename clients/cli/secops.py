@@ -579,6 +579,39 @@ def main():
 
     cc_ag_settings = case_config_sub.add_parser("alert-grouping-settings", help="Get global SOAR alert grouping configuration parameters")
 
+    # Entity command group
+    entity_grp = subparsers.add_parser("entity", help="Search UDM Entity Graph, summarize entities, and run composite investigations")
+    entity_sub = entity_grp.add_subparsers(dest="entity_action", required=True)
+
+    ent_search = entity_sub.add_parser("search", help="Search UDM entity graph (graph.entity.*)")
+    ent_search.add_argument("indicator", help="Entity indicator or value (e.g. hash, IP, user)")
+    ent_search.add_argument("--field", "-f", help="Explicit entity graph field (e.g. file.sha256, ip, hostname)")
+    ent_search.add_argument("--start", help="Start timestamp ISO8601")
+    ent_search.add_argument("--end", help="End timestamp ISO8601")
+    ent_search.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+
+    ent_summary = entity_sub.add_parser("summarize", help="Get entity summary, timeline intervals, and prevalence")
+    ent_summary.add_argument("entity_id", help="Entity identifier or URI")
+    ent_summary.add_argument("--start", help="Start timestamp ISO8601")
+    ent_summary.add_argument("--end", help="End timestamp ISO8601")
+
+    ent_inv = entity_sub.add_parser("investigate", help="Run multi-engine cross-correlation for an indicator")
+    ent_inv.add_argument("indicator", help="Indicator (IP, hash, email, hostname, domain, user)")
+    ent_inv.add_argument("--start", help="Start timestamp ISO8601")
+    ent_inv.add_argument("--end", help="End timestamp ISO8601")
+    ent_inv.add_argument("--limit", type=int, default=50, help="Max events per search")
+
+    # IoC command group
+    ioc_grp = subparsers.add_parser("ioc", help="Search enterprise-wide IoC matches and Mandiant threat intel")
+    ioc_sub = ioc_grp.add_subparsers(dest="ioc_action", required=True)
+
+    ioc_search = ioc_sub.add_parser("search", help="Search enterprise-wide IoCs")
+    ioc_search.add_argument("value", help="IoC value (hash, IP, domain, etc.)")
+    ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, IP_ADDRESS, DOMAIN_NAME)")
+    ioc_search.add_argument("--start", help="Start timestamp ISO8601")
+    ioc_search.add_argument("--end", help="End timestamp ISO8601")
+    ioc_search.add_argument("--limit", type=int, default=100, help="Max matches (default: 100)")
+
     args = parser.parse_args()
 
     if args.command == "search":
@@ -587,6 +620,10 @@ def main():
         run_investigate_cli(args)
     elif args.command == "entity-search":
         run_entity_search_cli(args)
+    elif args.command == "entity":
+        run_entity_cli(args)
+    elif args.command == "ioc":
+        run_ioc_cli(args)
     elif args.command == "refine":
         run_refine_cli(args)
     elif args.command == "case":
@@ -721,6 +758,97 @@ def run_entity_search_cli(args):
     print(f"Query Run     : {session.request.query}")
     print(f"Total Matches : {session.received_count}")
     print(f"Lifecycle     : {session.lifecycle.value}")
+
+
+def run_entity_cli(args):
+    now = datetime.now(timezone.utc)
+    end_time = args.end or now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_time = args.start or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    engine = SecOpsEngine()
+
+    if args.entity_action == "search":
+        print(f"\n[CLI] Searching UDM Entity Graph for '{args.indicator}'...")
+        def on_batch(batch, session):
+            print(f" [➜] Batch: {batch.batch_count} entity records (Total: {session.received_count})")
+
+        session = engine.search_entity_graph(
+            indicator_or_field=args.field or args.indicator,
+            value=args.indicator if args.field else None,
+            start_time=start_time,
+            end_time=end_time,
+            receive_limit=args.limit,
+            on_batch=on_batch,
+        )
+        print("\n--- Entity Graph Search Summary ---")
+        print(f"Session ID    : {session.session_id}")
+        print(f"Query Run     : {session.request.query}")
+        print(f"Total Matches : {session.received_count}")
+        print(f"Lifecycle     : {session.lifecycle.value}")
+
+    elif args.entity_action == "summarize":
+        print(f"\n[CLI] Retrieving Entity Profile Summary for: {args.entity_id}")
+        summary = engine.summarize_entity(
+            entity_id=args.entity_id,
+            start_time=args.start,
+            end_time=args.end,
+        )
+        print("\n--- Entity Profile Summary ---")
+        print(f"Entity ID     : {summary.entity_id}")
+        print(f"Entity Type   : {summary.entity_type}")
+        print(f"Timeline Span : {len(summary.timeline)} intervals")
+        if summary.prevalence:
+            print(f"Prevalence    : {summary.prevalence}")
+        if summary.file_metadata:
+            print(f"File Metadata : {summary.file_metadata}")
+
+    elif args.entity_action == "investigate":
+        print(f"\n[CLI] Initiating Multi-Engine Investigation for indicator: '{args.indicator}'...")
+        report = engine.investigate_entity(
+            indicator=args.indicator,
+            start_time=start_time,
+            end_time=end_time,
+            max_events=args.limit,
+        )
+        print("\n--- Unified Entity Investigation Report ---")
+        print(f"Indicator     : {report.indicator}")
+        print(f"Detected Type : {report.detected_type} (Category: {report.category})")
+        print(f"Entity Graph  : {report.entity_graph_events_count} matches")
+        print(f"UDM Events    : {report.udm_events_count} events")
+        print(f"IoC Matches   : {report.enterprise_iocs_count} threat intel hits")
+        print(f"SOAR Cases    : {report.related_cases_count} correlated cases")
+        if report.ioc_matches:
+            print("\nThreat Intel Sources:")
+            for m in report.ioc_matches[:5]:
+                print(f"  - Sources: {', '.join(m.sources)} | Categories: {', '.join(m.categories)}")
+
+
+def run_ioc_cli(args):
+    now = datetime.now(timezone.utc)
+    end_time = args.end or now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_time = args.start or (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    engine = SecOpsEngine()
+
+    if args.ioc_action == "search":
+        print(f"\n[CLI] Searching Enterprise IoCs for: '{args.value}'...")
+        batch = engine.search_enterprise_iocs(
+            value=args.value,
+            value_type=args.type,
+            start_time=start_time,
+            end_time=end_time,
+            max_matches=args.limit,
+        )
+        print("\n--- Enterprise IoC Results ---")
+        print(f"Searched Value : {batch.searched_value}")
+        print(f"Value Type     : {batch.value_type}")
+        print(f"Total Matches  : {batch.total_count}")
+        for idx, m in enumerate(batch.matches[:10], 1):
+            print(f"\nMatch #{idx}:")
+            print(f"  Sources      : {', '.join(m.sources)}")
+            print(f"  Categories   : {', '.join(m.categories)}")
+            if m.artifact_indicator:
+                print(f"  Artifact     : {m.artifact_indicator}")
+            if m.asset_indicators:
+                print(f"  Asset Count  : {len(m.asset_indicators)}")
 
 
 def run_refine_cli(args):

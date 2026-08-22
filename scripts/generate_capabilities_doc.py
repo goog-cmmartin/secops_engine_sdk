@@ -71,7 +71,9 @@ def render(caps) -> str:
       f"via `scripts/generate_capabilities_doc.py`._")
     a("")
     a(f"**{len(caps)} registered capabilities.** Every capability is exposed to the "
-      "Python SDK (`engine.facade`), the CLI, and as an MCP tool.")
+      "Python SDK (`engine.facade`) and the CLI. Each also carries a reserved "
+      "MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP "
+      "binding; no MCP server ships today.")
     a("")
 
     # --- Legend -----------------------------------------------------------
@@ -125,7 +127,7 @@ def render(caps) -> str:
         summary = ", ".join(f"{k}={kc[k]}" for k in sorted(kc, key=lambda x: _KIND_ORDER.get(x, 9)))
         a(f"### {dom}  ({len(group)}: {summary})")
         a("")
-        a("| capability_id | kind | cardinality | mcp_tool | description |")
+        a("| capability_id | kind | cardinality | mcp_tool (proposed) | description |")
         a("| :--- | :--- | :--- | :--- | :--- |")
         for c in sorted(group, key=lambda x: (_KIND_ORDER.get(x.kind, 9), x.capability_id)):
             desc = c.description.replace("|", "\\|")

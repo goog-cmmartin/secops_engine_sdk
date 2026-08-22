@@ -5,7 +5,7 @@
 
 _Generated 2026-08-22 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**108 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`), the CLI, and as an MCP tool.
+**108 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -48,13 +48,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### alert  (1: workflow=1)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
 ### case  (3: workflow=1, primitive=1, query=1)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
@@ -62,7 +62,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### case_config  (14: query=14)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `case_config.alert_grouping.rule.get` | query | `single` | `get_alert_grouping_rule` | Retrieves deep inspection of a single alert grouping rule including entity types and category details. |
 | `case_config.alert_grouping.rule.search` | query | `unbounded` | `search_alert_grouping_rules` | Discovers and filters SOAR alert grouping rules determining case clustering. |
@@ -81,7 +81,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### content_pack  (3: query=3)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `content_pack.categories` | query | `unbounded` | `list_content_pack_categories` | Discovers and aggregates the taxonomy of Content Hub categories with pack counts. |
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
@@ -89,7 +89,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### curated_detections  (4: query=4)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `curated_detections.get_rule` | query | `single` | `get_curated_rule` | Retrieves an individual Curated Rule, its MITRE techniques, false positives, and raw YARA-L logic. |
 | `curated_detections.get_ruleset` | query | `single` | `get_curated_ruleset` | Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry. |
@@ -98,7 +98,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### dashboard  (4: workflow=1, query=3)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `dashboard.get` | workflow | — | `get_dashboard` | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.execute_query` | query | `bounded` | `execute_dashboard_query` | Executes a dashboard widget query against live telemetry and transforms columnar results into tabular records. |
@@ -107,7 +107,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### data_rbac  (5: query=5)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `data_rbac.environment.search` | query | `unbounded` | `search_environment_scopes` | Discovers SOAR multi-tenant environments and inspects their bound Data Access Scopes. |
 | `data_rbac.label.get` | query | `single` | `get_data_access_label` | Retrieves full configuration of a Data Access Label including UDM filter expression. |
@@ -117,7 +117,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### enrichment  (3: query=3)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `enrichment.combination.list` | query | `unbounded` | `list_enrichment_combinations` | Discovers available enrichment types, target log types, and enrichment sources. |
 | `enrichment.control.get` | query | `single` | `get_enrichment_control` | Retrieves full configuration and timing rules for a deployed enrichment control. |
@@ -125,7 +125,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### entity  (3: workflow=2, query=1)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `entity.investigate` | workflow | — | `investigate_entity` | Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases. |
 | `entity.search_udm` | workflow | — | `search_entity_udm` | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
@@ -133,13 +133,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### event  (1: workflow=1)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `event.investigate` | workflow | — | `investigate_event` | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 
 ### feed  (4: query=4)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `feed.get` | query | `single` | `get_feed` | Retrieves full configuration details and source parameters for an ingestion feed. |
 | `feed.search` | query | `unbounded` | `search_feeds` | Searches, lists, and filters push/pull ingestion feeds across source types and log types. |
@@ -148,7 +148,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### integration  (4: query=4)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `integration.get` | query | `single` | `get_integration` | Retrieves complete integration details, instances, remote agents, and documentation. |
 | `integration.instances` | query | `unbounded` | `list_integration_instances` | Lists configured integration instances across environments or specific integrations. |
@@ -157,13 +157,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### ioc  (1: query=1)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `ioc.search_enterprise` | query | `bounded` | `search_enterprise_iocs` | Searches enterprise IoC matches and Mandiant breach intelligence for indicators. |
 
 ### job  (4: query=4)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `job.get` | query | `single` | `get_job` | Retrieves complete job details, deployed runtime instances, and recent execution logs. |
 | `job.instances` | query | `unbounded` | `list_job_instances` | Lists runtime job instances deployed across environments or specific jobs. |
@@ -172,7 +172,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### marketplace_integration  (4: query=4)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `marketplace_integration.affected_items` | query | `unbounded` | `get_marketplace_integration_affected_items` | Resolves affected environment instances and active playbooks before integration modifications. |
 | `marketplace_integration.diff` | query | `single` | `get_marketplace_integration_diff` | Compares commercial upgrade differences and overrides between installed and target versions. |
@@ -181,7 +181,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### parser  (6: query=6)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `parser.extensions.get` | query | `single` | `get_parser_extension` | Retrieves full parser extension configuration, decoded snippet, and test log. |
 | `parser.extensions.search` | query | `unbounded` | `search_parser_extensions` | Discovers parser extensions and dynamic parsing configurations across log types. |
@@ -192,7 +192,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### playbook  (3: query=3)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
@@ -200,14 +200,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### preview_feature  (2: query=2)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
 
 ### search  (3: workflow=3)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `search.from_entity` | workflow | — | `search_from_entity` | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | workflow | — | `refine_search` | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
@@ -215,7 +215,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### siem_settings  (6: query=6)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `pipeline.get` | query | `single` | `get_log_processing_pipeline` | Retrieves full transform statements and stream bindings for a Data Processing Pipeline. |
 | `pipeline.search` | query | `unbounded` | `search_log_processing_pipelines` | Discovers and lists Data Processing Pipelines with parser transforms and Bindplane SaaS links. |
@@ -226,7 +226,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 
 ### soar_settings  (30: query=30)
 
-| capability_id | kind | cardinality | mcp_tool | description |
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `soar.company.get` | query | `single` | `get_company_settings` | Retrieves tenant branding, report customizations, and system email settings. |
 | `soar.custom_list.get` | query | `single` | `get_soar_custom_list` | Retrieves complete configuration for a single SOAR custom list record. |

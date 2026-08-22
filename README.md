@@ -23,6 +23,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
   * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking.
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
   * **Universal Capability Registry (`engine.facade`)**: 100+ modular registered capabilities for direct Python SDK and AI agent integration.
+  * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---
 
@@ -42,7 +43,8 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   ├── domain.py             # Strongly-typed domain models & universal batch protocol
 │   ├── facade.py             # SecOpsEngine unified entrypoint & lazy workflow loader
 │   ├── parsing.py            # Centralized timestamp, status, and priority parsers
-│   ├── registry.py           # Capability registry & tool metadata
+│   ├── registry.py           # Capability registry, taxonomy & agent-safety metadata
+│   ├── taxonomy.py           # kind/domain/cardinality derivation & safety policy
 │   ├── schema.py             # Canonical UDM schemas & field mappings
 │   └── workflows/            # Modular workflow implementations (60+ workflows)
 ├── clients/                  # Multi-tier frontends

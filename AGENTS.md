@@ -38,6 +38,18 @@ This document outlines the mandatory operational invariants, architectural bound
    - Every workflow result and finding must retain verifiable provenance:
      `Finding → Workflow Step → API Call / Response → Raw Event IDs / Query`.
 
+9. **Bounded Autonomy for Unbounded Queries:**
+   - Every capability declares a result-set `cardinality` (`single`, `bounded`,
+     `unbounded`), auto-derived for queries from their terminal verb; only
+     `query` capabilities carry one.
+   - Any `unbounded` (collection-returning) query MUST carry the
+     `require_filter_for_unbounded_query` agent policy. This is auto-attached
+     at registration; unknown query verbs fail safe to `unbounded`.
+   - Consumers that execute capabilities autonomously (MCP tools, agents) MUST
+     honor this policy and refuse to run a flagged query without a filter, so an
+     agent cannot page an entire tenant. An explicit `False` override requires
+     documented human justification.
+
 ---
 
 ## 2. Classification Status Taxonomy
@@ -51,6 +63,19 @@ When analyzing, specifying, or implementing SecOps behaviors, every interaction 
 | **`UNKNOWN`** | Behavior or internal state transition cannot be determined from available network traces or documentation. |
 | **`UNSUPPORTED_API`** | Capability is implemented via proprietary internal endpoints not exposed or achievable via public Google SecOps APIs. |
 | **`BLOCKED_API_MAPPING`** | Engine implementation is blocked because a required API dependency or parameter mapping is missing. |
+
+### Capability Classification Axes
+
+Beyond status, every registered capability is auto-classified on three axes
+(explicit values always win over derivation; see `engine/taxonomy.py`):
+
+| Axis | Values | Meaning |
+| :--- | :--- | :--- |
+| **`kind`** | `query`, `primitive`, `workflow` | Read vs. single mutation vs. composed multi-step. |
+| **`domain`** | e.g. `case`, `feed`, `udm` | Functional area, from the capability id / category. |
+| **`cardinality`** | `single`, `bounded`, `unbounded`, `None` | Result-set shape of a query; `None` for non-queries. |
+
+`cardinality` drives the require-filter safety policy in Invariant #9.
 
 ---
 

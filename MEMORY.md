@@ -5,7 +5,8 @@ Table of contents for project documentation and governance.
 ## Documentation
 
 - [README.md](README.md) — Project overview, quickstart, SDK/CLI usage, repository structure.
-- [AGENTS.md](AGENTS.md) — Non-negotiable invariants, classification taxonomy (status + kind/domain/cardinality axes), agent role profiles, and the discovery→verification loop.
+- [AGENTS.md](AGENTS.md) — Non-negotiable invariants, classification taxonomy (status + kind/domain/cardinality axes), agent role profiles, the discovery→verification loop, and the capability Definition-of-Done checklist.
+- [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — Generated capability reference (all registered capabilities by kind/domain/cardinality). Regenerate with `python scripts/generate_capabilities_doc.py`.
 
 ## Reports & Artifacts
 

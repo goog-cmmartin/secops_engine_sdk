@@ -146,3 +146,61 @@ For every vertical slice (starting with **UDM Search**):
 │ 8. CONSUME: Wire to CLI, Reference UI, Qt & MCP         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 6. Capability "Definition of Done" Checklist
+
+Every new or refined capability must touch each relevant layer below before it
+is considered complete. Skipping a layer silently degrades the SDK/CLI/MCP
+contract. Treat this as the merge gate.
+
+### 6.1 Discovery & specification
+- [ ] Behavior observed against live SecOps and assigned a **status** (§2:
+      `VERIFIED` / `OBSERVED_NOT_MAPPED` / …).
+- [ ] Live observations recorded under `discovery/observations/`.
+- [ ] API/UDM mapping documented (endpoint, params, payload shape).
+
+### 6.2 Engine core
+- [ ] Handler implemented in the appropriate `engine/workflows/` module
+      (no synthetic data — see §4 banned terms).
+- [ ] Registered as a `WorkflowCapability` in `engine/registry.py` with:
+      `capability_id`, `name`, `description`, `category`, `handler`,
+      `mcp_tool_name`, `evidence_path`.
+- [ ] Taxonomy correct (§2 axes): `kind`, `domain`, `cardinality`. Rely on
+      `engine/taxonomy.py` derivation; set explicit values only to override,
+      and add a comment explaining why.
+- [ ] `composed` workflows declare their `uses` edges (composition DAG stays
+      acyclic and non-dangling — enforced by the capability contract suite).
+- [ ] `unbounded` queries carry the require-filter policy (Invariant #9).
+- [ ] Exposed on the SDK facade (`engine/facade.py`) via lazy loading.
+
+### 6.3 Schema
+- [ ] Canonical UDM fields / mappings added or updated in `engine/schema.py`
+      where the capability introduces new fields.
+- [ ] `input_schema` / `output_schema` populated if the capability defines a
+      structured contract.
+
+### 6.4 Frontends
+- [ ] CLI (`clients/cli/secops.py`) wiring + `--help` text.
+- [ ] MCP tool name is unique and stable (matches `mcp_tool_name`).
+- [ ] Desktop (`clients/desktop/`) surface updated **if** the capability is
+      user-facing there.
+
+### 6.5 Tests (anti-mock; live-decoupled)
+- [ ] Capability contract test coverage (`tests/test_capability_contract.py`)
+      still passes (registration, DAG, uniqueness invariants).
+- [ ] Taxonomy assertions (`tests/test_taxonomy.py`) updated if counts/axes
+      change.
+- [ ] Behavioral test added for the slice, using `tests/test_helpers.py` so it
+      gracefully `SkipTest`s on unconfigured environments.
+
+### 6.6 Docs & provenance
+- [ ] **Regenerate the capability reference:**
+      `python scripts/generate_capabilities_doc.py`
+      (CI enforces freshness via `--check`; a stale `docs/CAPABILITIES.md`
+      fails the build).
+- [ ] `README.md` counts/claims still accurate (capability + workflow-module
+      totals).
+- [ ] `MEMORY.md` index updated if a new top-level doc/report was added.
+- [ ] `evidence_path` points at a real evidence/report artifact.

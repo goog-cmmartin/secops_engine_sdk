@@ -3,13 +3,17 @@
 Parses untyped strings (IPs, hashes, emails, hostnames, URLs, MACs, domains, usernames)
 and returns structured query fragments for UDM Event Search, UDM Entity Graph Search,
 and Enterprise IoC Intelligence searches.
+
+When the caller already knows the type (e.g. a SOAR involved-entity carries an
+``entity_type``), pass it via ``hint`` to bypass the ambiguous regex heuristics.
+The regex fallback remains for genuinely untyped input.
 """
 
 from dataclasses import dataclass
 from enum import Enum
 import ipaddress
 import re
-from typing import Optional
+from typing import Callable, Dict, Optional
 
 from engine.domain import EntityType
 
@@ -22,11 +26,20 @@ class EntityCategory(str, Enum):
     NETWORK = "NETWORK"
     RESOURCE = "RESOURCE"
     URL = "URL"
+    OTHER = "OTHER"
 
 
 @dataclass(frozen=True)
 class DetectedEntity:
-    """Represents a detected indicator and its canonical search representations."""
+    """Represents a detected indicator and its canonical search representations.
+
+    ``graph_field`` is the primary UDM Entity Graph field. Some entity types are
+    inherently ambiguous in the graph schema (e.g. a SOAR ``USERUNIQNAME`` may be a
+    ``userid`` *or* an ``email_addresses`` value; a ``DOMAIN`` may live under
+    ``domain.name`` *or* ``hostname``). For those, ``graph_fields`` holds every field
+    that should be OR'd together and ``graph_query`` is the composed OR expression.
+    For single-field entities ``graph_fields == (graph_field,)``.
+    """
 
     raw_value: str
     entity_type: EntityType
@@ -35,159 +48,160 @@ class DetectedEntity:
     graph_query: str
     event_query: str
     ioc_value_type: Optional[str] = None
+    graph_fields: tuple = ()
+
+    def __post_init__(self):
+        # Guarantee graph_fields is always populated and the primary is first.
+        if not self.graph_fields:
+            object.__setattr__(self, "graph_fields", (self.graph_field,))
 
 
-def detect_entity(value: str) -> DetectedEntity:
-    """Detects indicator type from an untyped string and produces canonical graph & event queries.
+# ---------------------------------------------------------------------------
+# Per-type builders. Each accepts the already-stripped raw value and returns a
+# fully-formed DetectedEntity. These are the single source of truth for how a
+# given EntityType maps to graph/event/IoC queries; both the regex heuristics
+# and the hint dispatch reuse them.
+# ---------------------------------------------------------------------------
 
-    Args:
-        value: Untyped string identifier (e.g. IP, file hash, email, hostname, domain, username).
+def _build_ip(val: str) -> DetectedEntity:
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.IP,
+        category=EntityCategory.ASSET,
+        graph_field="graph.entity.ip",
+        graph_query=f'graph.entity.ip = "{val}"',
+        event_query=f'principal.ip = "{val}" OR target.ip = "{val}" OR src.ip = "{val}"',
+        ioc_value_type="IP_ADDRESS",
+    )
 
-    Returns:
-        DetectedEntity containing the typed entity, graph query, event query, and IoC valueType.
-    """
-    val = value.strip()
-    if not val:
-        raise ValueError("Cannot detect entity type from an empty string.")
 
-    # 1. IP Address (IPv4 or IPv6)
-    try:
-        ipaddress.ip_address(val)
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.IP,
-            category=EntityCategory.ASSET,
-            graph_field="graph.entity.ip",
-            graph_query=f'graph.entity.ip = "{val}"',
-            event_query=f'principal.ip = "{val}" OR target.ip = "{val}" OR src.ip = "{val}"',
-            ioc_value_type="IP_ADDRESS",
-        )
-    except ValueError:
-        pass
+def _build_md5(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.MD5,
+        category=EntityCategory.FILE,
+        graph_field="graph.entity.file.md5",
+        graph_query=f'graph.entity.file.md5 = "{v}"',
+        event_query=f'target.file.md5 = "{v}" OR principal.process.file.md5 = "{v}"',
+        ioc_value_type="HASH_MD5",
+    )
 
-    # 2. File Hashes (MD5: 32, SHA1: 40, SHA256: 64)
-    if re.fullmatch(r"[a-fA-F0-9]{32}", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.MD5,
-            category=EntityCategory.FILE,
-            graph_field="graph.entity.file.md5",
-            graph_query=f'graph.entity.file.md5 = "{val_lower}"',
-            event_query=f'target.file.md5 = "{val_lower}" OR principal.process.file.md5 = "{val_lower}"',
-            ioc_value_type="HASH_MD5",
-        )
-    if re.fullmatch(r"[a-fA-F0-9]{40}", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.SHA1,
-            category=EntityCategory.FILE,
-            graph_field="graph.entity.file.sha1",
-            graph_query=f'graph.entity.file.sha1 = "{val_lower}"',
-            event_query=f'target.file.sha1 = "{val_lower}" OR principal.process.file.sha1 = "{val_lower}"',
-            ioc_value_type="HASH_SHA1",
-        )
-    if re.fullmatch(r"[a-fA-F0-9]{64}", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.SHA256,
-            category=EntityCategory.FILE,
-            graph_field="graph.entity.file.sha256",
-            graph_query=f'graph.entity.file.sha256 = "{val_lower}"',
-            event_query=f'target.file.sha256 = "{val_lower}" OR principal.process.file.sha256 = "{val_lower}"',
-            ioc_value_type="HASH_SHA256",
-        )
 
-    # 3. MAC Address (e.g. 00:1A:2B:3C:4D:5E or 00-1A-2B-3C-4D-5E)
-    if re.fullmatch(r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.MAC,
-            category=EntityCategory.ASSET,
-            graph_field="graph.entity.mac",
-            graph_query=f'graph.entity.mac = "{val_lower}"',
-            event_query=f'principal.mac = "{val_lower}" OR target.mac = "{val_lower}" OR src.mac = "{val_lower}"',
-            ioc_value_type="MAC_ADDRESS",
-        )
+def _build_sha1(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.SHA1,
+        category=EntityCategory.FILE,
+        graph_field="graph.entity.file.sha1",
+        graph_query=f'graph.entity.file.sha1 = "{v}"',
+        event_query=f'target.file.sha1 = "{v}" OR principal.process.file.sha1 = "{v}"',
+        ioc_value_type="HASH_SHA1",
+    )
 
-    # 4. Email Address (e.g. user@domain.com)
-    if re.fullmatch(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.EMAIL,
-            category=EntityCategory.USER,
-            graph_field="graph.entity.user.email_addresses",
-            graph_query=f'graph.entity.user.email_addresses = "{val_lower}" nocase',
-            event_query=f'principal.user.email_addresses = "{val_lower}" OR target.user.email_addresses = "{val_lower}"',
-            ioc_value_type="EMAIL_ADDRESS",
-        )
 
-    # 5. URL / Web Resource (e.g. http://... or https://...)
-    if val.startswith("http://") or val.startswith("https://"):
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.URL,
-            category=EntityCategory.URL,
-            graph_field="graph.entity.url",
-            graph_query=f'graph.entity.url = "{val}"',
-            event_query=f'target.url = "{val}" OR network.http.referral_url = "{val}"',
-            ioc_value_type="URL",
-        )
+def _build_sha256(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.SHA256,
+        category=EntityCategory.FILE,
+        graph_field="graph.entity.file.sha256",
+        graph_query=f'graph.entity.file.sha256 = "{v}"',
+        event_query=f'target.file.sha256 = "{v}" OR principal.process.file.sha256 = "{v}"',
+        ioc_value_type="HASH_SHA256",
+    )
 
-    # 6. Windows Security Identifier (SID) (e.g. S-1-5-21-...)
-    if re.fullmatch(r"S-1-[0-59]-\d{2}-\d{8,10}-\d{8,10}-\d{8,10}-\d{3,5}", val, re.IGNORECASE):
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.WINDOWS_SID,
-            category=EntityCategory.USER,
-            graph_field="graph.entity.user.windows_sid",
-            graph_query=f'graph.entity.user.windows_sid = "{val}"',
-            event_query=f'principal.user.windows_sid = "{val}" OR target.user.windows_sid = "{val}"',
-            ioc_value_type=None,
-        )
 
-    # 7. Cloud Resource Name (e.g. //compute.googleapis.com/... or projects/...)
-    if val.startswith("//") or val.startswith("projects/"):
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.RESOURCE,
-            category=EntityCategory.RESOURCE,
-            graph_field="graph.entity.resource.name",
-            graph_query=f'graph.entity.resource.name = "{val}"',
-            event_query=f'target.resource.name = "{val}"',
-            ioc_value_type=None,
-        )
+def _build_mac(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.MAC,
+        category=EntityCategory.ASSET,
+        graph_field="graph.entity.mac",
+        graph_query=f'graph.entity.mac = "{v}"',
+        event_query=f'principal.mac = "{v}" OR target.mac = "{v}" OR src.mac = "{v}"',
+        ioc_value_type="MAC_ADDRESS",
+    )
 
-    # 8. Domain Name (FQDN) (e.g. evil.example.com)
-    if re.fullmatch(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$", val):
-        val_lower = val.lower()
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.DOMAIN,
-            category=EntityCategory.DOMAIN_NAME,
-            graph_field="graph.entity.domain.name",
-            graph_query=f'graph.entity.domain.name = "{val_lower}"',
-            event_query=f'network.dns.questions.name = "{val_lower}" OR target.hostname = "{val_lower}"',
-            ioc_value_type="DOMAIN_NAME",
-        )
 
-    # 9. Hostname / Asset Name (e.g. WIN-DESKTOP-01, server02, SRV-DC-01$)
-    if re.fullmatch(r"^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\$?$", val):
-        return DetectedEntity(
-            raw_value=val,
-            entity_type=EntityType.HOSTNAME,
-            category=EntityCategory.ASSET,
-            graph_field="graph.entity.hostname",
-            graph_query=f'graph.entity.hostname = "{val}" nocase',
-            event_query=f'principal.hostname = "{val}" nocase OR target.hostname = "{val}" nocase',
-            ioc_value_type="HOSTNAME",
-        )
+def _build_email(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.EMAIL,
+        category=EntityCategory.USER,
+        graph_field="graph.entity.user.email_addresses",
+        graph_query=f'graph.entity.user.email_addresses = "{v}" nocase',
+        event_query=f'principal.user.email_addresses = "{v}" OR target.user.email_addresses = "{v}"',
+        ioc_value_type="EMAIL_ADDRESS",
+    )
 
-    # 10. Fallback: User ID / Username (e.g. jdoe, admin_user)
+
+def _build_url(val: str) -> DetectedEntity:
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.URL,
+        category=EntityCategory.URL,
+        graph_field="graph.entity.url",
+        graph_query=f'graph.entity.url = "{val}"',
+        event_query=f'target.url = "{val}" OR network.http.referral_url = "{val}"',
+        ioc_value_type="URL",
+    )
+
+
+def _build_sid(val: str) -> DetectedEntity:
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.WINDOWS_SID,
+        category=EntityCategory.USER,
+        graph_field="graph.entity.user.windows_sid",
+        graph_query=f'graph.entity.user.windows_sid = "{val}"',
+        event_query=f'principal.user.windows_sid = "{val}" OR target.user.windows_sid = "{val}"',
+        ioc_value_type=None,
+    )
+
+
+def _build_resource(val: str) -> DetectedEntity:
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.RESOURCE,
+        category=EntityCategory.RESOURCE,
+        graph_field="graph.entity.resource.name",
+        graph_query=f'graph.entity.resource.name = "{val}"',
+        event_query=f'target.resource.name = "{val}"',
+        ioc_value_type=None,
+    )
+
+
+def _build_domain(val: str) -> DetectedEntity:
+    v = val.lower()
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.DOMAIN,
+        category=EntityCategory.DOMAIN_NAME,
+        graph_field="graph.entity.domain.name",
+        graph_query=f'graph.entity.domain.name = "{v}"',
+        event_query=f'network.dns.questions.name = "{v}" OR target.hostname = "{v}"',
+        ioc_value_type="DOMAIN_NAME",
+    )
+
+
+def _build_hostname(val: str) -> DetectedEntity:
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.HOSTNAME,
+        category=EntityCategory.ASSET,
+        graph_field="graph.entity.hostname",
+        graph_query=f'graph.entity.hostname = "{val}" nocase',
+        event_query=f'principal.hostname = "{val}" nocase OR target.hostname = "{val}" nocase',
+        ioc_value_type="HOSTNAME",
+    )
+
+
+def _build_user(val: str) -> DetectedEntity:
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.USER,
@@ -197,3 +211,323 @@ def detect_entity(value: str) -> DetectedEntity:
         event_query=f'principal.user.userid = "{val}" nocase OR target.user.userid = "{val}" nocase',
         ioc_value_type="USER_ID",
     )
+
+
+def _build_file_name(val: str) -> DetectedEntity:
+    """A file *name*/path (not a hash). Routes to file.full_path, not userid."""
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.FILE,
+        category=EntityCategory.FILE,
+        graph_field="graph.entity.file.full_path",
+        graph_query=f'graph.entity.file.full_path = "{val}" nocase',
+        event_query=(
+            f'target.file.full_path = "{val}" nocase '
+            f'OR principal.process.file.full_path = "{val}" nocase'
+        ),
+        ioc_value_type=None,
+    )
+
+
+def _compose_graph_or(pairs, nocase: bool = False) -> str:
+    """Compose an OR expression across multiple graph fields.
+
+    ``pairs`` is an iterable of ``(field, value)``. Each clause is rendered as
+    ``field = "value"`` with an optional trailing ``nocase``. Values are assumed
+    already normalised by the caller.
+    """
+    suffix = " nocase" if nocase else ""
+    return " OR ".join(f'{field} = "{value}"{suffix}' for field, value in pairs)
+
+
+def _build_user_or_email(val: str) -> DetectedEntity:
+    """SOAR USERUNIQNAME: identity may be a bare userid OR an email address.
+
+    Emits an OR across both graph fields so the search matches whichever the
+    graph actually stored. Values are lower-cased for the email clause; userid
+    matching is case-insensitive via ``nocase``.
+    """
+    v = val.lower()
+    fields = ("graph.entity.user.userid", "graph.entity.user.email_addresses")
+    graph_query = _compose_graph_or(
+        ((fields[0], val), (fields[1], v)), nocase=True
+    )
+    event_query = (
+        f'principal.user.userid = "{val}" nocase '
+        f'OR target.user.userid = "{val}" nocase '
+        f'OR principal.user.email_addresses = "{v}" '
+        f'OR target.user.email_addresses = "{v}"'
+    )
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.USER,
+        category=EntityCategory.USER,
+        graph_field=fields[0],
+        graph_fields=fields,
+        graph_query=graph_query,
+        event_query=event_query,
+        ioc_value_type="USER_ID",
+    )
+
+
+def _build_domain_or_hostname(val: str) -> DetectedEntity:
+    """SOAR DOMAIN: value may be a registered domain OR an asset hostname.
+
+    Emits an OR across ``domain.name`` and ``hostname`` (both case-insensitive).
+    """
+    v = val.lower()
+    fields = ("graph.entity.domain.name", "graph.entity.hostname")
+    graph_query = _compose_graph_or(((fields[0], v), (fields[1], val)), nocase=True)
+    event_query = (
+        f'network.dns.questions.name = "{v}" nocase '
+        f'OR target.hostname = "{val}" nocase '
+        f'OR principal.hostname = "{val}" nocase'
+    )
+    return DetectedEntity(
+        raw_value=val,
+        entity_type=EntityType.DOMAIN,
+        category=EntityCategory.DOMAIN_NAME,
+        graph_field=fields[0],
+        graph_fields=fields,
+        graph_query=graph_query,
+        event_query=event_query,
+        ioc_value_type="DOMAIN_NAME",
+    )
+
+
+# Map an EntityType to its builder. Used by the hint dispatch.
+_BUILDERS: Dict[EntityType, Callable[[str], DetectedEntity]] = {
+    EntityType.IP: _build_ip,
+    EntityType.MD5: _build_md5,
+    EntityType.SHA1: _build_sha1,
+    EntityType.SHA256: _build_sha256,
+    EntityType.MAC: _build_mac,
+    EntityType.EMAIL: _build_email,
+    EntityType.URL: _build_url,
+    EntityType.WINDOWS_SID: _build_sid,
+    EntityType.RESOURCE: _build_resource,
+    EntityType.DOMAIN: _build_domain,
+    EntityType.HOSTNAME: _build_hostname,
+    EntityType.USER: _build_user,
+}
+# FILE builder is registered separately only if the domain enum exposes it.
+if hasattr(EntityType, "FILE"):
+    _BUILDERS[EntityType.FILE] = _build_file_name
+
+
+# ---------------------------------------------------------------------------
+# SOAR involved-entity type -> our EntityType. SOAR types are free-form-ish
+# strings; normalise to upper-case and strip separators for matching.
+# For file hashes, the concrete hash algorithm is resolved by length at runtime.
+# ---------------------------------------------------------------------------
+_SOAR_TYPE_MAP: Dict[str, EntityType] = {
+    "ADDRESS": EntityType.IP,
+    "IP": EntityType.IP,
+    "IPADDRESS": EntityType.IP,
+    "HOSTNAME": EntityType.HOSTNAME,
+    "HOST": EntityType.HOSTNAME,
+    "MACADDRESS": EntityType.MAC,
+    "MAC": EntityType.MAC,
+    "USER": EntityType.USER,
+    "USERUNIQNAME": EntityType.USER,
+    "USERNAME": EntityType.USER,
+    "DESTINATIONURL": EntityType.URL,
+    "URL": EntityType.URL,
+    "DOMAIN": EntityType.DOMAIN,
+    "EMAILSUBJECT": EntityType.USER,  # subjects aren't graph indicators; best-effort
+    "CVE": EntityType.RESOURCE,
+}
+if hasattr(EntityType, "FILE"):
+    _SOAR_TYPE_MAP["FILENAME"] = EntityType.FILE
+    _SOAR_TYPE_MAP["FILE"] = EntityType.FILE
+    _SOAR_TYPE_MAP["PROCESS"] = EntityType.FILE  # process name -> file path family
+
+
+# SOAR types whose graph representation is genuinely ambiguous and must be
+# searched as an OR across multiple fields. These take precedence over the
+# single-field EntityType builders when the caller supplies the SOAR hint.
+# (The plain regex fallback still uses the narrow single-field builders, since
+# it can already tell an email from a userid and a domain from a hostname.)
+_SOAR_MULTI: Dict[str, Callable[[str], DetectedEntity]] = {
+    "USERUNIQNAME": _build_user_or_email,
+    "DOMAIN": _build_domain_or_hostname,
+}
+
+
+def _normalise_hint(hint: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", hint.upper())
+
+
+def _resolve_hash(val: str) -> Optional[DetectedEntity]:
+    """Return the correct hash entity for a hex string, by length; else None."""
+    if re.fullmatch(r"[a-fA-F0-9]{32}", val):
+        return _build_md5(val)
+    if re.fullmatch(r"[a-fA-F0-9]{40}", val):
+        return _build_sha1(val)
+    if re.fullmatch(r"[a-fA-F0-9]{64}", val):
+        return _build_sha256(val)
+    return None
+
+
+# Common file extensions that strongly imply a file name/path rather than a
+# hostname or username. Kept deliberately small and high-signal.
+_FILE_EXT_RE = re.compile(
+    r"\.(exe|dll|sys|bat|cmd|ps1|vbs|js|jar|msi|scr|"
+    r"doc|docx|xls|xlsx|ppt|pptx|pdf|rtf|"
+    r"zip|rar|7z|gz|tar|"
+    r"sh|py|php|dmg|apk|bin|dat|tmp|log)$",
+    re.IGNORECASE,
+)
+
+# A domain must have a plausible alphabetic TLD (>= 2 letters). This prevents
+# things like "WRK-01.local"? -> .local is allowed; but "foo.123" is not a domain.
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+"
+    r"[a-zA-Z]{2,63}$"
+)
+
+# Hostname signal: contains a dash or a trailing '$' (machine account) or is a
+# recognised host-ish token. A *bare* short alphanumeric token is treated as a
+# username instead (see fallback), because that is the far more common case for
+# untyped identifiers in case data.
+_HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\$?$")
+
+
+def _looks_like_hostname(val: str) -> bool:
+    """Heuristic: a single-label token that reads like a host, not a person.
+
+    Signals: presence of a hyphen (WRK-01, WIN-DESKTOP), a trailing '$'
+    (Windows machine account), or an embedded digit run typical of asset tags.
+    """
+    if not _HOSTNAME_RE.fullmatch(val):
+        return False
+    if val.endswith("$"):
+        return True
+    if "-" in val:
+        return True
+    # e.g. "SERVER01", "HOST12" -> letters followed by digits reads host-ish.
+    if re.fullmatch(r"[a-zA-Z]{2,}\d{1,}", val):
+        return True
+    return False
+
+
+def _detect_by_regex(val: str) -> DetectedEntity:
+    """Heuristic detection for genuinely untyped strings.
+
+    Ordered most-specific -> least-specific. The final catch-all is USER (not
+    HOSTNAME): a bare token with no host-like signal is far more likely to be a
+    username in case data. HOSTNAME is only chosen on a positive host signal.
+    """
+    # 1. IP Address (IPv4 or IPv6)
+    try:
+        ipaddress.ip_address(val)
+        return _build_ip(val)
+    except ValueError:
+        pass
+
+    # 2. File Hashes (MD5: 32, SHA1: 40, SHA256: 64)
+    hashed = _resolve_hash(val)
+    if hashed is not None:
+        return hashed
+
+    # 3. MAC Address (colon/hyphen sextet or Cisco dot-triplet)
+    if re.fullmatch(r"([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", val) or re.fullmatch(
+        r"([0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}", val
+    ):
+        return _build_mac(val)
+
+    # 4. Email Address
+    if re.fullmatch(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", val):
+        return _build_email(val)
+
+    # 5. URL / Web Resource (http, https, ftp, file schemes)
+    if re.match(r"^(https?|ftp|file)://", val, re.IGNORECASE):
+        return _build_url(val)
+
+    # 6. Windows Security Identifier (SID)
+    if re.fullmatch(r"S-1-[0-59]-\d{2}-\d{8,10}-\d{8,10}-\d{8,10}-\d{3,5}", val, re.IGNORECASE):
+        return _build_sid(val)
+
+    # 7. Cloud Resource Name
+    if val.startswith("//") or val.startswith("projects/"):
+        return _build_resource(val)
+
+    # 8. Unambiguous file *paths*: UNC (\\\\host\\share), drive path (C:\\..), or POSIX path.
+    #    A lone interior backslash (DOMAIN\\user credential form) is NOT a path and
+    #    is deliberately left to fall through to the USER fallback.
+    if val.startswith("\\\\") or re.match(r"^[a-zA-Z]:[\\/]", val) or val.startswith("/"):
+        return _build_file_name(val)
+
+    # 9. Single-label file name (exactly one dot) whose suffix is a known file
+    #    extension -- e.g. "invoice.pdf", "payload.exe". Resolved before the
+    #    domain check because "name.ext" is far more likely a file than a domain
+    #    when the extension is a recognised non-TLD file type. Multi-dot names
+    #    (e.g. "host.acme.com") fall through to the domain check below.
+    if val.count(".") == 1 and _FILE_EXT_RE.search(val):
+        return _build_file_name(val)
+
+    # 10. Domain Name (FQDN with alphabetic TLD) -- e.g. "evil-domain.com",
+    #     "host.acme.com".
+    if _DOMAIN_RE.fullmatch(val):
+        return _build_domain(val)
+
+    # 11. Remaining known-extension file names (multi-dot, non-domain).
+    if _FILE_EXT_RE.search(val):
+        return _build_file_name(val)
+
+    # 12. Hostname / Asset Name -- only on a positive host signal.
+    if _looks_like_hostname(val):
+        return _build_hostname(val)
+
+    # 13. Fallback: User ID / Username (the most common untyped identifier).
+    return _build_user(val)
+
+
+def detect_entity(value: str, hint: Optional[str] = None) -> DetectedEntity:
+    """Detects indicator type from a string and produces canonical graph & event queries.
+
+    Args:
+        value: String identifier (e.g. IP, file hash, email, hostname, domain, username).
+        hint: Optional known type. Accepts either our own ``EntityType`` values or
+            SOAR involved-entity type strings (e.g. ``"FILEHASH"``, ``"PHONENUMBER"``,
+            ``"USERUNIQNAME"``). When the hint maps to a concrete builder it takes
+            precedence over the regex heuristics. Unknown/unmappable hints fall back
+            to regex detection.
+
+    Returns:
+        DetectedEntity containing the typed entity, graph query, event query, and IoC valueType.
+    """
+    val = value.strip()
+    if not val:
+        raise ValueError("Cannot detect entity type from an empty string.")
+
+    if hint:
+        norm = _normalise_hint(hint)
+
+        # File hashes: SOAR only says "FILEHASH"; pick MD5/SHA1/SHA256 by length.
+        if norm in ("FILEHASH", "HASH"):
+            hashed = _resolve_hash(val)
+            if hashed is not None:
+                return hashed
+            # Not hex/expected length -> fall through to regex.
+
+        multi = _SOAR_MULTI.get(norm)
+        if multi is not None:
+            return multi(val)
+
+        mapped = _SOAR_TYPE_MAP.get(norm)
+        if mapped is None:
+            # Maybe the caller passed one of our own EntityType names directly.
+            try:
+                mapped = EntityType[norm]
+            except KeyError:
+                mapped = None
+
+        if mapped is not None:
+            builder = _BUILDERS.get(mapped)
+            if builder is not None:
+                return builder(val)
+        # Unknown hint (e.g. PHONENUMBER with no graph field) -> regex fallback.
+
+    return _detect_by_regex(val)

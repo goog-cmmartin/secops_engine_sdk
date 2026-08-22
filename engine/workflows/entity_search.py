@@ -32,6 +32,7 @@ class SearchEntityGraphWorkflow:
         end_time: Optional[str] = None,
         receive_limit: int = 10000,
         batch_size: int = 2000,
+        hint: Optional[str] = None,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
@@ -48,7 +49,7 @@ class SearchEntityGraphWorkflow:
                 field_name = f"graph.entity.{field_name}"
             query = f'{field_name} = "{val_clean}"'
         else:
-            detected = detect_entity(indicator_or_field)
+            detected = detect_entity(indicator_or_field, hint=hint)
             query = detected.graph_query
 
         if not start_time or not end_time:

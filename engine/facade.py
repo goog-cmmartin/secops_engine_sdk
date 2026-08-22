@@ -2,6 +2,10 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from engine.domain import (
     AlertInvestigation,
+    AlertPlaybookStatus,
+    PlaybookInstanceCard,
+    PlaybookInstanceRun,
+    PlaybookInstanceStep,
     CaseCommentRecord,
     CaseInvestigation,
     CaseSearchBatch,
@@ -259,6 +263,7 @@ from engine.workflows.parser import (
     SearchParsersWorkflow,
 )
 from engine.workflows.playbook import (
+    GetAlertPlaybookInstancesWorkflow,
     GetPlaybookWorkflow,
     ListPlaybookCategoriesWorkflow,
     SearchPlaybooksWorkflow,
@@ -361,6 +366,7 @@ class SecOpsEngine:
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
         "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
+        "_alert_playbook_instances_wf": lambda e: GetAlertPlaybookInstancesWorkflow(e.adapter),
         "_search_integrations_wf": lambda e: SearchIntegrationsWorkflow(e.adapter),
         "_get_integration_wf": lambda e: GetIntegrationDetailWorkflow(e.adapter),
         "_list_integration_instances_wf": lambda e: ListIntegrationInstancesWorkflow(e.adapter),
@@ -659,6 +665,18 @@ class SecOpsEngine:
                 mcp_tool_name="list_playbook_categories",
                 composed=False,
                 evidence_path="evidence/playbook/categories",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="playbook.instances",
+                name="Alert Playbook Run Instances",
+                description="Retrieves authoritative per-alert playbook run instances and the executed step DAG.",
+                category="playbook",
+                handler=self.get_alert_playbook_instances,
+                mcp_tool_name="get_alert_playbook_instances",
+                composed=False,
+                evidence_path="evidence/playbook/instances",
             )
         )
         self.registry.register(
@@ -1864,6 +1882,140 @@ class SecOpsEngine:
         """Executes the Case Investigation Workspace workflow."""
         return self._investigate_case_wf.execute(case_id=case_id)
 
+    def get_alert_playbook_status(
+        self, case_id: str, alert_id: Optional[str] = None
+    ) -> List[AlertPlaybookStatus]:
+        """Returns the attached playbook + status snapshot for alert(s) in a case.
+
+        Tier-1: reuses the Case Investigation workflow (no extra endpoint) and
+        surfaces the playbook association already present in the case-alert payload.
+        The reported ``status`` is the alert-level ``playbookStatus`` snapshot, not
+        the authoritative per-run instance record.
+
+        Args:
+            case_id: Numeric case ID (or resource name; the trailing segment is used).
+            alert_id: Optional alert identifier/name to filter to a single alert. When
+                omitted, status for every alert in the case is returned.
+
+        Returns:
+            A list of :class:`AlertPlaybookStatus`. Empty if the case has no alerts
+            (or the given ``alert_id`` does not match).
+        """
+        investigation = self._investigate_case_wf.execute(case_id=case_id)
+        cid = str(case_id).strip().split("/")[-1]
+        target = str(alert_id).strip().split("/")[-1] if alert_id else None
+
+        results: List[AlertPlaybookStatus] = []
+        for a in investigation.alerts:
+            if target is not None and target not in (a.identifier, a.name, a.alert_id):
+                continue
+            results.append(
+                AlertPlaybookStatus(
+                    case_id=cid,
+                    alert_id=a.alert_id,
+                    alert_display_name=a.display_name,
+                    attached_playbook_name=a.attached_playbook_name,
+                    status=a.playbook_status,
+                    run_count=a.playbook_run_count,
+                    alert_group_identifier=a.alert_group_identifier,
+                )
+            )
+        return results
+
+    def get_alert_playbook_instances(
+        self, case_id: str, alert_identifier: str
+    ) -> List[PlaybookInstanceCard]:
+        """Tier-2: lists authoritative playbook *run instances* for an alert.
+
+        Unlike :meth:`get_alert_playbook_status` (a Tier-1 snapshot from the
+        case-alert payload), this queries ``legacyGetWorkflowInstancesCards`` for
+        the actual run instances attached to the alert.
+
+        Args:
+            case_id: Numeric case ID (or resource name; trailing segment is used).
+            alert_identifier: Either the opaque ``alertGroupIdentifier`` or a plain
+                alert id/name (auto-resolved to the group identifier).
+
+        Returns:
+            A list of :class:`PlaybookInstanceCard`. Each card's
+            ``definition_identifier`` can be passed to
+            :meth:`get_alert_playbook_instance` for the full run.
+        """
+        return self._alert_playbook_instances_wf.execute(
+            case_id=case_id, alert_identifier=alert_identifier
+        )
+
+    def get_alert_playbook_instance(
+        self,
+        case_id: str,
+        alert_identifier: str,
+        definition_identifier: Optional[str] = None,
+        should_fetch_steps: bool = True,
+        collapse_blocks: bool = True,
+        loops_requested_iterations: Optional[List[Any]] = None,
+    ) -> PlaybookInstanceRun:
+        """Tier-2: retrieves one full playbook run instance incl. the step DAG.
+
+        Wraps ``legacyGetWorkflowInstance``. If ``definition_identifier`` is
+        omitted, it is resolved from the alert's first instance card.
+
+        Args:
+            case_id: Numeric case ID (or resource name; trailing segment is used).
+            alert_identifier: Opaque ``alertGroupIdentifier`` or a plain alert
+                id/name (auto-resolved).
+            definition_identifier: Playbook UUID. Optional; resolved via the cards
+                endpoint when not provided.
+            should_fetch_steps: Whether to include per-step execution records.
+            collapse_blocks: Whether to collapse nested playbook blocks.
+            loops_requested_iterations: Optional loop-iteration selectors.
+
+        Returns:
+            A :class:`PlaybookInstanceRun` with runtime status, steps, and the
+            execution DAG (``relations``).
+        """
+        return self._alert_playbook_instances_wf.execute_full(
+            case_id=case_id,
+            alert_identifier=alert_identifier,
+            definition_identifier=definition_identifier,
+            should_fetch_steps=should_fetch_steps,
+            collapse_blocks=collapse_blocks,
+            loops_requested_iterations=loops_requested_iterations,
+        )
+
+    def get_alert_playbook_executed_path(
+        self,
+        case_id: str,
+        alert_identifier: str,
+        definition_identifier: Optional[str] = None,
+    ) -> List[PlaybookInstanceStep]:
+        """Return only the playbook steps that actually executed, in run order.
+
+        Convenience wrapper over :meth:`get_alert_playbook_instance` that collapses
+        the full conditional step DAG down to the single branch a given run
+        actually traversed (see :meth:`PlaybookInstanceRun.executed_path`). Useful
+        for post-incident review and for summarizing "what the playbook did" without
+        wading through un-taken branches.
+
+        Args:
+            case_id: Numeric case ID (or resource name; trailing segment is used).
+            alert_identifier: Opaque ``alertGroupIdentifier`` or a plain alert
+                id/name (auto-resolved).
+            definition_identifier: Playbook UUID. Optional; resolved via the cards
+                endpoint when not provided.
+
+        Returns:
+            Ordered list of executed :class:`PlaybookInstanceStep` records (may be
+            empty if the run has not executed any steps yet).
+        """
+        run = self.get_alert_playbook_instance(
+            case_id=case_id,
+            alert_identifier=alert_identifier,
+            definition_identifier=definition_identifier,
+            should_fetch_steps=True,
+        )
+        return run.executed_path()
+
+
     def add_case_comment(self, case_id: str, comment: str) -> CaseCommentRecord:
         """Executes the Add Case Comment workflow."""
         return self._add_case_comment_wf.execute(case_id=case_id, comment=comment)
@@ -2805,9 +2957,13 @@ class SecOpsEngine:
         """Retrieves deep configuration and JSON schema mapping of a single SOAR event ingestion webhook."""
         return self._get_soar_webhook_wf.execute(webhook_id=webhook_id)
 
-    def detect_entity(self, value: str) -> DetectedEntity:
-        """Detects entity indicator type, category, and canonical graph & event queries."""
-        return detect_entity(value)
+    def detect_entity(self, value: str, hint: Optional[str] = None) -> DetectedEntity:
+        """Detects entity indicator type, category, and canonical graph & event queries.
+
+        Pass ``hint`` (our EntityType names or SOAR involved-entity type strings) to
+        override the regex heuristics when the caller already knows the type.
+        """
+        return detect_entity(value, hint=hint)
 
     def search_entity_graph(
         self,
@@ -2817,11 +2973,16 @@ class SecOpsEngine:
         end_time: Optional[str] = None,
         receive_limit: int = 10000,
         batch_size: int = 2000,
+        hint: Optional[str] = None,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
     ) -> SearchSession:
-        """Executes streaming search against the UDM entity graph (graph.entity.*)."""
+        """Executes streaming search against the UDM entity graph (graph.entity.*).
+
+        Pass ``hint`` (SOAR entity_type or our EntityType) to bypass the ambiguous
+        regex classification when the type is already known.
+        """
         return self._search_entity_graph_wf.execute(
             indicator_or_field=indicator_or_field,
             value=value,
@@ -2829,6 +2990,7 @@ class SecOpsEngine:
             end_time=end_time,
             receive_limit=receive_limit,
             batch_size=batch_size,
+            hint=hint,
             on_batch=on_batch,
             on_state_change=on_state_change,
             cancel_token=cancel_token,

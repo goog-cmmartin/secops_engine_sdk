@@ -11,6 +11,10 @@ from engine.domain import (
     PlaybookBatch,
     PlaybookCategory,
     PlaybookDetail,
+    PlaybookInstanceCard,
+    PlaybookInstanceRelation,
+    PlaybookInstanceRun,
+    PlaybookInstanceStep,
     PlaybookSearchQuery,
     PlaybookStep,
     PlaybookStepParameter,
@@ -297,3 +301,220 @@ class ListPlaybookCategoriesWorkflow:
                 )
             )
         return categories
+
+
+def _ms_to_dt(value: Any) -> Optional[datetime]:
+    """Coerces a Unix-epoch-milliseconds value (str|int) into a tz-aware datetime."""
+    if value is None or value == "":
+        return None
+    try:
+        return datetime.fromtimestamp(int(value) / 1000.0, tz=timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
+class GetAlertPlaybookInstancesWorkflow:
+    """Tier-2: retrieves authoritative playbook *run instances* for an alert.
+
+    Two modes:
+      * :meth:`execute` -> lightweight summary cards (instances + status).
+      * :meth:`execute_full` -> a single full run instance incl. the step DAG.
+
+    Both accept either the raw opaque ``alertGroupIdentifier`` OR a plain alert id
+    (which is resolved to the group identifier via a case-investigation lookup).
+    """
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    # -- identifier resolution -------------------------------------------------
+
+    @staticmethod
+    def _looks_like_group_identifier(value: str) -> bool:
+        """Heuristic: the opaque alertGroupIdentifier embeds a base64 hash + UUID.
+
+        Real examples look like ``<RuleName>.<base64>=_<uuid>``. A bare numeric or
+        short id does not contain the ``=_`` separator, so we treat that as a
+        plain alert id requiring resolution.
+        """
+        return "=_" in value or (len(value) > 40 and "_" in value)
+
+    def _resolve_alert_identifier(self, case_id: str, alert_ref: str) -> str:
+        """Returns the opaque alertGroupIdentifier for an alert reference.
+
+        If ``alert_ref`` already looks like a group identifier it is returned
+        verbatim (raw passthrough). Otherwise the case alerts are fetched and the
+        matching alert's ``alertGroupIdentifier`` is resolved by id/name.
+        """
+        if self._looks_like_group_identifier(alert_ref):
+            return alert_ref
+
+        alerts_raw = self.adapter.list_case_alerts(str(case_id))
+        for a in alerts_raw:
+            candidates = {
+                str(a.get("identifier", "")),
+                str(a.get("name", "")).split("/")[-1],
+                str(a.get("id", "")),
+            }
+            if alert_ref in candidates:
+                gid = a.get("alertGroupIdentifier") or a.get("groupIdentifier")
+                if gid:
+                    return gid
+        # Fall back to the caller-supplied value; the API will reject if invalid.
+        return alert_ref
+
+    # -- parsing ---------------------------------------------------------------
+
+    def _parse_card(self, card: Dict[str, Any]) -> PlaybookInstanceCard:
+        return PlaybookInstanceCard(
+            instance_id=str(card.get("id", "")),
+            definition_identifier=(
+                card.get("definitionIdentifier")
+                or card.get("identifier")
+                or card.get("originalPlaybookIdentifier", "")
+            ),
+            name=card.get("name", ""),
+            status=card.get("status") or card.get("workflowInstanceStatus"),
+            is_enabled=bool(card.get("isEnabled", True)),
+            environments=card.get("environments", []) or [],
+            creation_time=_ms_to_dt(card.get("creationTimeUnixTimeInMs")),
+            modification_time=_ms_to_dt(card.get("modificationTimeUnixTimeInMs")),
+            raw=card,
+        )
+
+    def _parse_trigger(self, raw_trig: Any) -> Optional[PlaybookTrigger]:
+        if not isinstance(raw_trig, dict):
+            return None
+        conditions = [
+            PlaybookTriggerCondition(
+                value=c.get("value", ""),
+                match_type=c.get("matchType", "EQUAL"),
+            )
+            for c in raw_trig.get("conditions", [])
+        ]
+        return PlaybookTrigger(
+            id=str(raw_trig.get("id", "")),
+            identifier=raw_trig.get("identifier", ""),
+            trigger_type=raw_trig.get("type", ""),
+            logical_operator=raw_trig.get("logicalOperator", "AND"),
+            conditions=conditions,
+            reaction_logical_operator=raw_trig.get("reactionLogicalOperator", "OR"),
+            raw=raw_trig,
+        )
+
+    def _parse_run(
+        self, raw: Dict[str, Any], case_id: str, alert_identifier: str
+    ) -> PlaybookInstanceRun:
+        steps: List[PlaybookInstanceStep] = []
+        for st in raw.get("steps", []):
+            steps.append(
+                PlaybookInstanceStep(
+                    identifier=st.get("identifier", ""),
+                    name=st.get("name", ""),
+                    status=st.get("status") or st.get("actionStatus"),
+                    action_name=st.get("actionName", ""),
+                    integration=st.get("integration", ""),
+                    instance_name=st.get("instanceName", ""),
+                    is_automatic=bool(st.get("isAutomatic", True)),
+                    result_summary=st.get("resultSummary") or st.get("result"),
+                    start_time=_ms_to_dt(st.get("startTimeUnixTimeInMs")),
+                    end_time=_ms_to_dt(st.get("endTimeUnixTimeInMs")),
+                    raw=st,
+                )
+            )
+
+        relations: List[PlaybookInstanceRelation] = []
+        for rel in raw.get("stepsRelations", []):
+            relations.append(
+                PlaybookInstanceRelation(
+                    from_step=rel.get("fromStep", ""),
+                    to_step=rel.get("toStep", ""),
+                    destination_action_status=rel.get("destinationActionStatus"),
+                    condition=rel.get("condition"),
+                    raw=rel,
+                )
+            )
+
+        return PlaybookInstanceRun(
+            instance_id=str(raw.get("id", "")),
+            identifier=raw.get("identifier", ""),
+            name=raw.get("name", ""),
+            case_id=str(case_id),
+            alert_identifier=alert_identifier,
+            status=raw.get("status") or raw.get("workflowInstanceStatus"),
+            is_enabled=bool(raw.get("isEnabled", True)),
+            is_debug_mode=bool(raw.get("isDebugMode", False)),
+            priority=int(raw.get("priority", 0) or 0),
+            category_name=raw.get("categoryName", ""),
+            original_playbook_identifier=raw.get("originalPlaybookIdentifier"),
+            environments=raw.get("environments", []) or [],
+            trigger=self._parse_trigger(raw.get("trigger")),
+            steps=steps,
+            relations=relations,
+            creation_time=_ms_to_dt(raw.get("creationTimeUnixTimeInMs")),
+            modification_time=_ms_to_dt(raw.get("modificationTimeUnixTimeInMs")),
+            raw=raw,
+        )
+
+    # -- public API ------------------------------------------------------------
+
+    def execute(self, case_id: str, alert_identifier: str) -> List[PlaybookInstanceCard]:
+        if not case_id or not str(case_id).strip():
+            raise ValueError("case_id must be a non-empty string.")
+        if not alert_identifier or not str(alert_identifier).strip():
+            raise ValueError("alert_identifier must be a non-empty string.")
+
+        clean_case = str(case_id).strip().split("/")[-1]
+        resolved = self._resolve_alert_identifier(clean_case, str(alert_identifier).strip())
+        raw_cards = self.adapter.get_workflow_instances_cards(
+            case_id=clean_case, alert_identifier=resolved
+        )
+        return [self._parse_card(c) for c in raw_cards]
+
+    def execute_full(
+        self,
+        case_id: str,
+        alert_identifier: str,
+        definition_identifier: Optional[str] = None,
+        should_fetch_steps: bool = True,
+        collapse_blocks: bool = True,
+        loops_requested_iterations: Optional[List[Any]] = None,
+    ) -> PlaybookInstanceRun:
+        if not case_id or not str(case_id).strip():
+            raise ValueError("case_id must be a non-empty string.")
+        if not alert_identifier or not str(alert_identifier).strip():
+            raise ValueError("alert_identifier must be a non-empty string.")
+
+        clean_case = str(case_id).strip().split("/")[-1]
+        resolved = self._resolve_alert_identifier(clean_case, str(alert_identifier).strip())
+
+        # If no definition identifier supplied, resolve via the cards endpoint.
+        def_id = definition_identifier
+        if not def_id:
+            cards = self.adapter.get_workflow_instances_cards(
+                case_id=clean_case, alert_identifier=resolved
+            )
+            if not cards:
+                raise RuntimeError(
+                    f"No playbook instances found for alert on case {clean_case}; "
+                    "cannot resolve definition_identifier."
+                )
+            first = self._parse_card(cards[0])
+            def_id = first.definition_identifier
+
+        raw = self.adapter.get_workflow_instance(
+            case_id=clean_case,
+            alert_identifier=resolved,
+            definition_identifier=def_id,
+            should_fetch_steps=should_fetch_steps,
+            collapse_blocks=collapse_blocks,
+            loops_requested_iterations=loops_requested_iterations,
+        )
+        if not raw:
+            raise RuntimeError(
+                f"Playbook instance '{def_id}' not found for alert on case {clean_case}."
+            )
+        return self._parse_run(raw, clean_case, resolved)

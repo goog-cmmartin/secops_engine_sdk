@@ -42,6 +42,7 @@ class EntityType(str, Enum):
     URL = "URL"
     WINDOWS_SID = "WINDOWS_SID"
     RESOURCE = "RESOURCE"
+    FILE = "FILE"
 
 
 class CaseSearchPrefix(str, Enum):
@@ -181,6 +182,17 @@ class SearchRequest:
     customer_id: Optional[str] = None
     project_id: Optional[str] = None
     location: Optional[str] = None
+    # Server-side result materialization budget (maps to eventList.maxReturnedEvents).
+    #
+    # DISTINCT from `receive_limit`, which is the CLIENT-side cap on delivered events.
+    # SecOps `legacyFetchUdmSearchView` uses `maxReturnedEvents` to size the whole
+    # result set that also feeds prevalence/aggregation/AI-overview assembly; driving
+    # it to very small values (e.g. receive_limit=1) starves the event list and can
+    # yield zero events for a query that otherwise has matches. When None, the search
+    # workflow derives a floored budget (see MATERIALIZE_BUDGET_FLOOR in
+    # search_udm.py). The client-side loop still trims to `receive_limit`, so raising
+    # this never over-delivers.
+    materialize_budget: Optional[int] = None
 
 
 @dataclass
@@ -359,11 +371,23 @@ class CaseAlertSummary:
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     rule_name: Optional[str] = None
+    # SOAR playbook association + runtime status snapshot (surfaced from the
+    # case-alert payload; the authoritative per-run instance record is a Tier-2
+    # concern -- see get_alert_playbook_status / playbook-instances endpoint).
+    attached_playbook_name: Optional[str] = None
+    playbook_status: Optional[str] = None
+    playbook_run_count: int = 0
+    alert_group_identifier: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def alert_id(self) -> str:
         return self.identifier or self.name
+
+    @property
+    def has_playbook(self) -> bool:
+        """True if a playbook is attached to this alert."""
+        return bool(self.attached_playbook_name)
 
     @property
     def severity(self) -> str:
@@ -376,6 +400,28 @@ class CaseAlertSummary:
     @property
     def created_time(self) -> Optional[datetime]:
         return self.start_time
+
+
+@dataclass
+class AlertPlaybookStatus:
+    """Playbook association + status snapshot for a single alert within a case.
+
+    Tier-1 model: values are surfaced directly from the case-alert payload. The
+    ``status`` here is the alert-level snapshot (``playbookStatus``); it is not the
+    authoritative per-run instance record (that is a Tier-2 concern keyed by
+    ``alert_group_identifier``).
+    """
+    case_id: str
+    alert_id: str
+    alert_display_name: str
+    attached_playbook_name: Optional[str] = None
+    status: Optional[str] = None
+    run_count: int = 0
+    alert_group_identifier: Optional[str] = None
+
+    @property
+    def has_playbook(self) -> bool:
+        return bool(self.attached_playbook_name)
 
 
 @dataclass
@@ -635,6 +681,187 @@ class PlaybookBatch(UniversalBatchMixin):
     results: List[PlaybookSummary]
     total_count: int
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# -----------------------------------------------------------------------------
+# Tier-2: authoritative per-alert playbook *instance* execution records.
+# Sourced from legacyPlaybooks:legacyGetWorkflowInstancesCards (summary) and
+# legacyGetWorkflowInstance (full run incl. step DAG). Distinct from the Tier-1
+# CaseAlertSummary snapshot, these reflect actual run instances keyed by the
+# opaque alertGroupIdentifier (alertIdentifier).
+# -----------------------------------------------------------------------------
+
+
+# Playbook step statuses that indicate a step did NOT execute during a run. Any
+# other (truthy) status -- COMPLETED, FAILED, TIMED_OUT, etc. -- is treated as
+# "executed" (a failed step still ran). Compared case-insensitively.
+NON_EXECUTED_STEP_STATUSES = frozenset({
+    "",
+    "NO_STATUS",
+    "PENDING",
+    "PENDING_ADDITIONAL_DATA",
+    "NOT_STARTED",
+    "SKIPPED",
+})
+
+
+def _step_did_execute(status: Optional[str]) -> bool:
+    """True if a playbook step's status indicates it actually ran."""
+    return (status or "").strip().upper() not in NON_EXECUTED_STEP_STATUSES
+
+
+@dataclass
+class PlaybookInstanceCard:
+    """Lightweight summary of a single playbook run instance attached to an alert.
+
+    Returned by ``legacyGetWorkflowInstancesCards``. The ``definition_identifier``
+    is the playbook UUID required to drill into the full run via
+    ``get_alert_playbook_instance``.
+    """
+    instance_id: str
+    definition_identifier: str
+    name: str
+    status: Optional[str] = None
+    is_enabled: bool = True
+    environments: List[str] = field(default_factory=list)
+    creation_time: Optional[datetime] = None
+    modification_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PlaybookInstanceRelation:
+    """A directed edge in the playbook execution DAG (``stepsRelations`` entry)."""
+    from_step: str
+    to_step: str
+    destination_action_status: Optional[str] = None
+    condition: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PlaybookInstanceStep:
+    """A single executed step within a playbook run instance.
+
+    Extends the definition-level :class:`PlaybookStep` shape with runtime
+    execution state (``status``, timing, result summary).
+    """
+    identifier: str
+    name: str
+    status: Optional[str] = None
+    action_name: str = ""
+    integration: str = ""
+    instance_name: str = ""
+    is_automatic: bool = True
+    result_summary: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PlaybookInstanceRun:
+    """Full authoritative record of a playbook run instance against an alert.
+
+    Returned by ``legacyGetWorkflowInstance``. Combines the playbook definition
+    with runtime state: the execution DAG (:attr:`relations`) and per-step
+    execution status (:attr:`steps`).
+    """
+    instance_id: str
+    identifier: str
+    name: str
+    case_id: str
+    alert_identifier: str
+    status: Optional[str] = None
+    is_enabled: bool = True
+    is_debug_mode: bool = False
+    priority: int = 0
+    category_name: str = ""
+    original_playbook_identifier: Optional[str] = None
+    environments: List[str] = field(default_factory=list)
+    trigger: Optional["PlaybookTrigger"] = None
+    steps: List[PlaybookInstanceStep] = field(default_factory=list)
+    relations: List[PlaybookInstanceRelation] = field(default_factory=list)
+    creation_time: Optional[datetime] = None
+    modification_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def step_count(self) -> int:
+        return len(self.steps)
+
+    @property
+    def completed_step_count(self) -> int:
+        return sum(1 for s in self.steps if (s.status or "").upper() == "COMPLETED")
+
+    @property
+    def executed_step_count(self) -> int:
+        """Number of steps that actually ran (any terminal status, incl. failures)."""
+        return sum(1 for s in self.steps if _step_did_execute(s.status))
+
+    def executed_path(self) -> List["PlaybookInstanceStep"]:
+        """Return only the steps that actually executed, in execution order.
+
+        A playbook *definition* may contain many conditional branches; a single
+        *run* traverses only one path through the DAG. This collapses the full
+        step list down to the connected subgraph that actually ran, ordered by
+        the execution DAG (:attr:`relations`) with ``start_time`` as a tie-break.
+
+        "Executed" means the step has a terminal status (see
+        :data:`NON_EXECUTED_STEP_STATUSES`); failed/timed-out steps are included
+        because they did run. Steps with no timing and a non-executed status are
+        excluded.
+
+        The traversal is defensive against real-world DAG irregularities:
+        cycles are broken via a visited-set, executed steps unreachable from a
+        root are still appended (ordered by ``start_time``), so the returned list
+        always contains exactly the executed steps with no duplicates.
+        """
+        by_id = {s.identifier: s for s in self.steps}
+        executed_ids = {sid for sid, s in by_id.items() if _step_did_execute(s.status)}
+        if not executed_ids:
+            return []
+
+        # Adjacency restricted to executed->executed edges, preserving edge order.
+        adj: Dict[str, List[str]] = {sid: [] for sid in executed_ids}
+        indeg: Dict[str, int] = {sid: 0 for sid in executed_ids}
+        seen_edge = set()
+        for rel in self.relations:
+            f, t = rel.from_step, rel.to_step
+            if f in executed_ids and t in executed_ids and (f, t) not in seen_edge:
+                seen_edge.add((f, t))
+                adj[f].append(t)
+                indeg[t] += 1
+
+        def _sort_key(sid: str):
+            st = by_id[sid].start_time
+            # None start_times sort last but stably.
+            return (st is None, st or datetime.max.replace(tzinfo=timezone.utc))
+
+        # Roots: executed steps with no executed predecessor, earliest first.
+        roots = sorted([sid for sid in executed_ids if indeg[sid] == 0], key=_sort_key)
+
+        ordered: List[str] = []
+        visited: set = set()
+        # BFS/DFS hybrid: stable DFS from each root following edge order.
+        stack = list(reversed(roots))
+        while stack:
+            sid = stack.pop()
+            if sid in visited:
+                continue
+            visited.add(sid)
+            ordered.append(sid)
+            # Push successors in reverse so first edge is processed first.
+            for nxt in reversed(adj[sid]):
+                if nxt not in visited:
+                    stack.append(nxt)
+
+        # Append any executed step not reached via edges (disconnected islands),
+        # ordered by start_time to keep chronology sensible.
+        leftover = sorted([sid for sid in executed_ids if sid not in visited], key=_sort_key)
+        ordered.extend(leftover)
+
+        return [by_id[sid] for sid in ordered]
 
 
 # =============================================================================

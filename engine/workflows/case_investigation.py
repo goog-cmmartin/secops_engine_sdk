@@ -67,6 +67,10 @@ class InvestigateCaseWorkflow:
                     start_time=_parse_timestamp(a.get("startTime")),
                     end_time=_parse_timestamp(a.get("endTime")),
                     rule_name=a.get("sourceRuleIdentifier") or a.get("displayName"),
+                    attached_playbook_name=a.get("attachedPlaybookName"),
+                    playbook_status=a.get("playbookStatus"),
+                    playbook_run_count=int(a.get("playbookRunCount", 0) or 0),
+                    alert_group_identifier=a.get("alertGroupIdentifier"),
                     raw=a,
                 )
             )

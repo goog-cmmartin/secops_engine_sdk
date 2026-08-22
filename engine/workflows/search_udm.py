@@ -10,6 +10,15 @@ from engine.domain import (
 )
 
 
+# Minimum server-side result window (eventList.maxReturnedEvents) requested from
+# SecOps regardless of how small the caller's client-side receive_limit is.
+# Prevents low limits (e.g. receive_limit=1 from entity/investigation workflows)
+# from starving the operation's event list, which is shared with prevalence/
+# aggregation/AI-overview assembly. The retrieval loop still trims delivered
+# events to receive_limit, so this never causes over-delivery to the caller.
+MATERIALIZE_BUDGET_FLOOR = 1000
+
+
 def _is_cancelled(token: Any) -> bool:
     if token is None:
         return False
@@ -74,11 +83,20 @@ class SearchUDMWorkflow:
         _notify_state()
 
         try:
+            # Decouple the server-side materialization budget from the client-side
+            # receive_limit. Honor an explicit request.materialize_budget when set;
+            # otherwise floor the derived budget so tiny receive_limits don't starve
+            # the shared event list. The loop below still enforces receive_limit.
+            materialize_budget = (
+                request.materialize_budget
+                if request.materialize_budget is not None
+                else max(request.receive_limit, MATERIALIZE_BUDGET_FLOOR)
+            )
             operation_id = self.adapter.start_search(
                 query=request.query,
                 start_time=request.start_time,
                 end_time=request.end_time,
-                max_events=request.receive_limit,
+                max_events=materialize_budget,
             )
             session.session_id = operation_id
         except Exception as e:

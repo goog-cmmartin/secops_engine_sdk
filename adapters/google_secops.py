@@ -519,6 +519,55 @@ class GoogleSecOpsAdapter:
             return res
         return {}
 
+    def get_workflow_instances_cards(
+        self,
+        case_id: str,
+        alert_identifier: str,
+    ) -> List[Dict[str, Any]]:
+        """Lists playbook run-instance summary cards for a specific alert.
+
+        Wraps ``legacyPlaybooks:legacyGetWorkflowInstancesCards``. ``alert_identifier``
+        is the opaque ``alertGroupIdentifier`` string associated with the alert.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowInstancesCards"
+        body = {"caseId": str(case_id), "alertIdentifier": alert_identifier}
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], list):
+            return res["payload"]
+        elif isinstance(res, list):
+            return res
+        return []
+
+    def get_workflow_instance(
+        self,
+        case_id: str,
+        alert_identifier: str,
+        definition_identifier: str,
+        should_fetch_steps: bool = True,
+        collapse_blocks: bool = True,
+        loops_requested_iterations: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        """Fetches the full playbook run instance (incl. step DAG) for an alert.
+
+        Wraps ``legacyPlaybooks:legacyGetWorkflowInstance``. ``definition_identifier``
+        is the playbook UUID (obtained from a workflow-instance card).
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowInstance"
+        body = {
+            "caseId": str(case_id),
+            "alertIdentifier": alert_identifier,
+            "shouldFetchSteps": bool(should_fetch_steps),
+            "definitionIdentifier": definition_identifier,
+            "collapseBlocks": bool(collapse_blocks),
+            "loopsRequestedIterations": loops_requested_iterations or [],
+        }
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], dict):
+            return res["payload"]
+        elif isinstance(res, dict):
+            return res
+        return {}
+
     # =========================================================================
     # Milestone 5.4: SOAR Integrations, Instances & Remote Agents API Methods
     # =========================================================================

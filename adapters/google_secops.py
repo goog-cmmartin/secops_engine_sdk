@@ -16,7 +16,16 @@ from typing import Any, Dict, List, Optional
 
 from engine.auth import CredentialProvider
 from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
-from engine.domain import RawLogPayload, SearchBatchResult, ValidationResult
+from engine.domain import (
+    RawLogPayload,
+    SearchBatchResult,
+    StatsColumn,
+    StatsColumnMetadata,
+    StatsFieldAggregation,
+    StatsSearchResult,
+    StatsValueCount,
+    ValidationResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +130,7 @@ class GoogleSecOpsAdapter:
             res = self._request("GET", path, params=params)
             query_type = res.get("queryType")
             err_text = res.get("errorText") or res.get("errorType")
-            is_valid = query_type in ["QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY"] and not err_text
+            is_valid = query_type in ["QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY", "QUERY_TYPE_STATS_QUERY"] and not err_text
             return ValidationResult(
                 valid=is_valid,
                 dialect="udm",
@@ -276,6 +285,190 @@ class GoogleSecOpsAdapter:
             returned_end_index=start_index + len(all_events) - 1 if all_events else start_index,
             retrieved_at=datetime.now(timezone.utc),
             raw_response=res if isinstance(res, (dict, list)) else None,
+        )
+
+    def get_stats(
+        self,
+        operation_id: str,
+        start_index: int = 1,
+        batch_size: int = 2000,
+    ) -> StatsSearchResult:
+        """Translates search.udm.stats operation to :streamSearch API and parses stats payload.
+
+        Returns normalized StatsSearchResult.
+        """
+        if operation_id.startswith("projects/"):
+            path = f"/v1alpha/{operation_id}:streamSearch"
+        else:
+            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/operations/{operation_id}:streamSearch"
+
+        end_index = start_index + batch_size - 1
+        params = {
+            "eventIndexStart": start_index,
+            "eventIndexEnd": end_index,
+            "pageRequest": "false",
+            "paginationEnabled": "true",
+        }
+
+        res = self._request("GET", path, params=params)
+
+        def _extract_val(v_obj: Any) -> Any:
+            if not isinstance(v_obj, dict):
+                return v_obj
+            if "value" in v_obj:
+                v_obj = v_obj["value"]
+            if not isinstance(v_obj, dict):
+                return v_obj
+            if "stringVal" in v_obj:
+                return v_obj["stringVal"]
+            if "stringValue" in v_obj:
+                return v_obj["stringValue"]
+            if "int64Val" in v_obj:
+                try:
+                    return int(v_obj["int64Val"])
+                except (ValueError, TypeError):
+                    return v_obj["int64Val"]
+            if "int64Value" in v_obj:
+                try:
+                    return int(v_obj["int64Value"])
+                except (ValueError, TypeError):
+                    return v_obj["int64Value"]
+            if "doubleVal" in v_obj:
+                try:
+                    return float(v_obj["doubleVal"])
+                except (ValueError, TypeError):
+                    return v_obj["doubleVal"]
+            if "doubleValue" in v_obj:
+                try:
+                    return float(v_obj["doubleValue"])
+                except (ValueError, TypeError):
+                    return v_obj["doubleValue"]
+            if "boolVal" in v_obj:
+                return bool(v_obj["boolVal"])
+            if "boolValue" in v_obj:
+                return bool(v_obj["boolValue"])
+            if "timestampVal" in v_obj:
+                return v_obj["timestampVal"]
+            if "timestampValue" in v_obj:
+                return v_obj["timestampValue"]
+            if len(v_obj) == 1:
+                return next(iter(v_obj.values()))
+            return v_obj
+
+        columns: List[StatsColumn] = []
+        aggregations: List[StatsFieldAggregation] = []
+        total_results = 0
+        filtered_result_count = 0
+        data_query_expr = ""
+        progress = 1.0
+        complete = True
+
+        items = res if isinstance(res, list) else [res]
+        for item in items:
+            op_obj = item.get("operation", item) if isinstance(item, dict) else {}
+            if "error" in op_obj:
+                err = op_obj["error"]
+                err_code = err.get("code", "UNKNOWN")
+                err_msg = err.get("message", str(err))
+                raise RuntimeError(f"Google SecOps Operation Error [{err_code}]: {err_msg}")
+
+            metadata = op_obj.get("metadata", {})
+            done = op_obj.get("done", False)
+            resp_obj = op_obj.get("response", op_obj)
+
+            progress = metadata.get("progress", resp_obj.get("progress", 1.0 if done else 0.0))
+            complete = resp_obj.get("complete", done)
+
+            stats_data = resp_obj.get("stats", {})
+            if stats_data:
+                data_query_expr = stats_data.get("dataQueryExpression", data_query_expr)
+                total_results = stats_data.get("totalResults", total_results)
+                filtered_result_count = stats_data.get("filteredResultCount", filtered_result_count)
+
+                # Parse columnar results
+                raw_results = stats_data.get("results", [])
+                for r in raw_results:
+                    col_name = r.get("column", "")
+                    filterable = r.get("filterable", False)
+                    filter_expr = r.get("filterExpression")
+                    meta_raw = r.get("columnMetadata", {})
+                    col_meta = StatsColumnMetadata(
+                        column=meta_raw.get("column", col_name),
+                        field_path=meta_raw.get("fieldPath", ""),
+                        function_name_used=meta_raw.get("functionNameUsed"),
+                        data_type=meta_raw.get("dataType", "STRING"),
+                    ) if meta_raw else None
+
+                    vals_raw = r.get("values", [])
+                    extracted_vals = [_extract_val(v) for v in vals_raw]
+
+                    # Find or update column in columns list
+                    existing_col = next((c for c in columns if c.column == col_name), None)
+                    if existing_col:
+                        existing_col.values.extend(extracted_vals)
+                    else:
+                        columns.append(
+                            StatsColumn(
+                                column=col_name,
+                                values=extracted_vals,
+                                filterable=filterable,
+                                filter_expression=filter_expr,
+                                column_metadata=col_meta,
+                            )
+                        )
+
+            # Parse statsResultAggregation
+            raw_agg = resp_obj.get("statsResultAggregation", {})
+            if raw_agg and "fields" in raw_agg:
+                for f in raw_agg["fields"]:
+                    fname = f.get("fieldName", "")
+                    b_count = f.get("baselineEventCount", 0)
+                    e_count = f.get("eventCount", 0)
+                    v_count = f.get("valueCount", 0)
+                    vals = []
+                    for v in f.get("allValues", []):
+                        raw_v = _extract_val(v.get("value"))
+                        vals.append(
+                            StatsValueCount(
+                                value=raw_v,
+                                event_count=v.get("eventCount", 0),
+                                baseline_event_count=v.get("baselineEventCount", 0),
+                            )
+                        )
+                    aggregations.append(
+                        StatsFieldAggregation(
+                            field_name=fname,
+                            baseline_event_count=b_count,
+                            event_count=e_count,
+                            value_count=v_count,
+                            all_values=vals,
+                        )
+                    )
+
+        # Assemble row records from columns
+        rows: List[Dict[str, Any]] = []
+        if columns:
+            max_rows = max(len(c.values) for c in columns)
+            if total_results == 0:
+                total_results = max_rows
+            for i in range(max_rows):
+                row_dict: Dict[str, Any] = {}
+                for col in columns:
+                    row_dict[col.column] = col.values[i] if i < len(col.values) else None
+                rows.append(row_dict)
+
+        return StatsSearchResult(
+            columns=columns,
+            rows=rows,
+            total_results=total_results,
+            filtered_result_count=filtered_result_count,
+            data_query_expression=data_query_expr,
+            aggregations=aggregations,
+            progress=progress,
+            complete=complete,
+            operation_id=operation_id,
+            raw_response=res if isinstance(res, (dict, list)) else None,
+            retrieved_at=datetime.now(timezone.utc),
         )
 
     def cancel_operation(self, operation_id: str) -> None:

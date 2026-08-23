@@ -66,6 +66,7 @@ BOUNDED_RESULT_VERBS = frozenset({
 # explicitly overrides it (e.g. a verified finite enum -> ``bounded``).
 COLLECTION_RESULT_VERBS = frozenset({
     "search",
+    "stats",
     "list",
     "search_rulesets",
     "search_enterprise",
@@ -84,6 +85,7 @@ COLLECTION_RESULT_VERBS = frozenset({
 READ_VERB_SUFFIXES = frozenset({
     "get",
     "search",
+    "stats",
     "search_enterprise",
     "summarize",
     "list",

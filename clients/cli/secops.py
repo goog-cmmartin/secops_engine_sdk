@@ -30,6 +30,15 @@ def main():
     search_parser.add_argument("--limit", type=int, default=10000, help="Max events limit")
     search_parser.add_argument("--batch-size", type=int, default=2000, help="Batch size per fetch")
 
+    # UDM Stats Search command
+    stats_parser = subparsers.add_parser("search-stats", aliases=["stats-search"], help="Execute UDM Stats Search (Aggregation, Analytics & Metrics)")
+    stats_parser.add_argument("--query", "-q", required=True, help="UDM Stats query with match/outcome aggregation")
+    stats_parser.add_argument("--start", help="Start timestamp ISO8601 (default: 24h ago)")
+    stats_parser.add_argument("--end", help="End timestamp ISO8601 (default: now)")
+    stats_parser.add_argument("--limit", type=int, default=10000, help="Max events limit (default: 10000)")
+    stats_parser.add_argument("--format", "-f", choices=["table", "json", "csv"], default="table", help="Output format (default: table)")
+    stats_parser.add_argument("--case-sensitive", action="store_true", help="Perform case-sensitive matching")
+
     # Investigate command
     inv_parser = subparsers.add_parser("investigate", help="Investigate a specific SecOps event and view Raw Log")
     inv_parser.add_argument("--event-id", "-id", required=True, help="Event ID (Base64 string)")
@@ -616,6 +625,8 @@ def main():
 
     if args.command == "search":
         run_search_cli(args)
+    elif args.command in ("search-stats", "stats-search"):
+        run_search_stats_cli(args)
     elif args.command == "investigate":
         run_investigate_cli(args)
     elif args.command == "entity-search":
@@ -3706,6 +3717,163 @@ def run_search_cli(args):
 
     if session.lifecycle == LifecycleState.FAILED:
         sys.exit(1)
+
+
+def run_search_stats_cli(args):
+    now = datetime.now(timezone.utc)
+    end_time = args.end or now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_time = args.start or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    engine = SecOpsEngine()
+
+    is_cancelled = False
+
+    def handle_sigint(signum, frame):
+        nonlocal is_cancelled
+        if not is_cancelled:
+            is_cancelled = True
+            print("\n[CLI] Cancellation requested (Ctrl+C). Signaling engine...", file=sys.stderr)
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    def cancel_token() -> bool:
+        return is_cancelled
+
+    last_state = None
+
+    def on_state_change(lifecycle, completeness, session):
+        nonlocal last_state
+        if lifecycle != last_state:
+            last_state = lifecycle
+            if lifecycle == LifecycleState.VALIDATING:
+                print("Validating stats query syntax against Google SecOps...")
+            elif lifecycle == LifecycleState.STARTING:
+                print("Query valid. Starting asynchronous stats operation...")
+            elif lifecycle == LifecycleState.RUNNING:
+                print(f"Stats operation started. Session ID: {session.session_id}")
+            elif lifecycle == LifecycleState.CANCELLING:
+                print("Engine cancelling backend operation...")
+            elif lifecycle == LifecycleState.CANCELLED:
+                print("Operation cancelled.")
+            elif lifecycle == LifecycleState.FAILED:
+                print(f"Error: {session.error}", file=sys.stderr)
+
+    start_perf = time.time()
+    print(f"\n[bold green]Initiating UDM Stats Search...[/bold green]")
+
+    session = engine.search_udm_stats(
+        query=args.query,
+        start_time=start_time,
+        end_time=end_time,
+        max_events=args.limit,
+        case_insensitive=not getattr(args, "case_sensitive", False),
+        on_state_change=on_state_change,
+        cancel_token=cancel_token,
+    )
+
+    duration = time.time() - start_perf
+
+    if session.lifecycle == LifecycleState.FAILED:
+        print(f"\n[bold red]Stats Search Failed:[/bold red] {session.error}", file=sys.stderr)
+        sys.exit(1)
+
+    res = session.result
+    if not res or not res.rows:
+        print("\nNo stats rows returned for the specified time range and query.")
+        return
+
+    out_format = getattr(args, "format", "table")
+
+    if out_format == "json":
+        import json
+
+        payload = {
+            "query": args.query,
+            "total_results": res.total_results,
+            "filtered_result_count": res.filtered_result_count,
+            "data_query_expression": res.data_query_expression,
+            "columns": [
+                {
+                    "column": c.column,
+                    "filterable": c.filterable,
+                    "filter_expression": c.filter_expression,
+                    "data_type": c.column_metadata.data_type if c.column_metadata else "STRING",
+                    "function": c.column_metadata.function_name_used if c.column_metadata else None,
+                }
+                for c in res.columns
+            ],
+            "rows": res.rows,
+        }
+        print(json.dumps(payload, indent=2, default=str))
+
+    elif out_format == "csv":
+        import csv
+        import io
+
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=res.column_names())
+        writer.writeheader()
+        for row in res.rows:
+            writer.writerow(row)
+        print(buf.getvalue().strip())
+
+    else:  # table format
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(
+                title=f"UDM Stats Results ({len(res.rows)} rows)",
+                show_header=True,
+                header_style="bold magenta",
+            )
+            for col in res.columns:
+                header_title = col.column
+                if col.column_metadata and col.column_metadata.function_name_used:
+                    header_title = f"{col.column} ({col.column_metadata.function_name_used})"
+                table.add_column(
+                    header_title, style="dim" if col.column.startswith("_") else "cyan"
+                )
+
+            for row in res.rows:
+                table.add_row(*[str(row.get(c.column, "")) for c in res.columns])
+
+            console.print(table)
+
+            if res.aggregations:
+                agg_table = Table(
+                    title="Field Distribution Aggregations",
+                    show_header=True,
+                    header_style="bold green",
+                )
+                agg_table.add_column("Field", style="cyan")
+                agg_table.add_column("Events", justify="right")
+                agg_table.add_column("Distinct Values", justify="right")
+                agg_table.add_column("Top Values", style="dim")
+                for agg in res.aggregations:
+                    top_vals = ", ".join(
+                        f"{v.value} ({v.event_count})" for v in agg.all_values[:3]
+                    )
+                    agg_table.add_row(
+                        agg.field_name,
+                        str(agg.event_count),
+                        str(agg.value_count),
+                        top_vals,
+                    )
+                console.print(agg_table)
+
+        except ImportError:
+            headers = res.column_names()
+            print("\t".join(headers))
+            print("-" * 40)
+            for row in res.rows:
+                print("\t".join(str(row.get(h, "")) for h in headers))
+
+    print(f"\n--- Stats Execution Summary ---")
+    print(f"Session ID    : {session.session_id}")
+    print(f"Total Rows    : {len(res.rows):,}")
+    print(f"Duration      : {duration:.2f}s")
 
 
 if __name__ == "__main__":

@@ -210,6 +210,106 @@ class SearchSession:
     completed_at: Optional[datetime] = None
 
 
+@dataclass
+class StatsColumnMetadata:
+    """Metadata describing a column in a UDM Stats Search result."""
+
+    column: str = ""
+    field_path: str = ""
+    function_name_used: Optional[str] = None
+    data_type: str = "STRING"
+
+
+@dataclass
+class StatsColumn:
+    """A single columnar result array from a UDM Stats Search operation."""
+
+    column: str
+    values: List[Any] = field(default_factory=list)
+    filterable: bool = False
+    filter_expression: Optional[str] = None
+    column_metadata: Optional[StatsColumnMetadata] = None
+
+
+@dataclass
+class StatsValueCount:
+    """Value breakdown and event counts within a stats field aggregation."""
+
+    value: Any = None
+    event_count: int = 0
+    baseline_event_count: int = 0
+
+
+@dataclass
+class StatsFieldAggregation:
+    """Field-level event count and value distribution aggregation."""
+
+    field_name: str
+    baseline_event_count: int = 0
+    event_count: int = 0
+    value_count: int = 0
+    all_values: List[StatsValueCount] = field(default_factory=list)
+
+
+@dataclass
+class StatsSearchResult(UniversalBatchMixin):
+    """Normalized result of a UDM Stats Search operation with columnar and record views."""
+
+    columns: List[StatsColumn] = field(default_factory=list)
+    rows: List[Dict[str, Any]] = field(default_factory=list)
+    total_results: int = 0
+    filtered_result_count: int = 0
+    data_query_expression: str = ""
+    aggregations: List[StatsFieldAggregation] = field(default_factory=list)
+    progress: float = 1.0
+    complete: bool = True
+    operation_id: Optional[str] = None
+    raw_response: Optional[Dict[str, Any]] = None
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[Dict[str, Any]]:
+        """UniversalBatchMixin support: returns list of row dicts."""
+        return self.rows
+
+    def to_records(self) -> List[Dict[str, Any]]:
+        """Returns row records as a list of column-to-value dictionaries."""
+        return self.rows
+
+    def column_names(self) -> List[str]:
+        """Returns list of column names in output order."""
+        return [col.column for col in self.columns]
+
+
+@dataclass
+class StatsSearchRequest:
+    """Parameters for initiating a UDM Stats Search query."""
+
+    query: str
+    start_time: str
+    end_time: str
+    max_events: int = 10000
+    case_insensitive: bool = True
+    generate_ai_overview: bool = True
+    max_values_per_field: int = 60
+    customer_id: Optional[str] = None
+    project_id: Optional[str] = None
+    location: Optional[str] = None
+
+
+@dataclass
+class StatsSearchSession:
+    """Lifecycle and state management session for a UDM Stats Search operation."""
+
+    session_id: Optional[str] = None
+    request: Optional[StatsSearchRequest] = None
+    lifecycle: LifecycleState = LifecycleState.VALIDATING
+    completeness: CompletenessState = CompletenessState.EMPTY
+    result: Optional[StatsSearchResult] = None
+    error: Optional[str] = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: Optional[datetime] = None
+
 
 @dataclass
 class RawLogPayload:

@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-08-22 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-08-23 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**108 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**110 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -18,14 +18,14 @@ _Generated 2026-08-22 from `engine/registry.py` via `scripts/generate_capabiliti
 | :--- | ----: |
 | workflow | 9 |
 | primitive | 1 |
-| query | 98 |
-| **total** | **108** |
+| query | 100 |
+| **total** | **110** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 45 |
 | bounded | 3 |
-| unbounded | 50 |
+| unbounded | 52 |
 | (n/a — workflows/primitive) | 10 |
 
 ## Workflows
@@ -190,12 +190,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.log_types.list` | query | `unbounded` | `list_log_types` | Discovers and filters supported ingestion log types cataloged in Google SecOps. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (3: query=3)
+### playbook  (4: query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
+| `playbook.instances` | query | `unbounded` | `get_alert_playbook_instances` | Retrieves authoritative per-alert playbook run instances and the executed step DAG. |
 | `playbook.search` | query | `unbounded` | `search_playbooks` | Searches, lists, and filters SOAR playbooks across categories, triggers, and environments. |
 
 ### preview_feature  (2: query=2)
@@ -205,13 +206,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
 
-### search  (3: workflow=3)
+### search  (4: workflow=3, query=1)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `search.from_entity` | workflow | — | `search_from_entity` | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | workflow | — | `refine_search` | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | workflow | — | `search_udm` | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
+| `search.udm.stats` | query | `unbounded` | `search_udm_stats` | Validates, initiates, streams, and aggregates UDM statistics, match/outcome metrics, and multi-field grouping operations via LRO. |
 
 ### siem_settings  (6: query=6)
 

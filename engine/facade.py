@@ -154,6 +154,9 @@ from engine.domain import (
     SearchBatchResult,
     SearchRequest,
     SearchSession,
+    StatsSearchRequest,
+    StatsSearchResult,
+    StatsSearchSession,
     SupportSettingProperty,
     SupportSettingsBatch,
     SoarNetworkSummary,
@@ -277,6 +280,7 @@ from engine.workflows.refine_search import (
     SearchFromEntityWorkflow,
 )
 from engine.workflows.search_udm import SearchUDMWorkflow
+from engine.workflows.search_udm_stats import SearchUDMStatsWorkflow
 from engine.workflows.siem_settings import (
     GetAgentSettingsWorkflow,
     GetEntityRiskConfigWorkflow,
@@ -356,6 +360,7 @@ class SecOpsEngine:
 
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
+        "_search_udm_stats_wf": lambda e: SearchUDMStatsWorkflow(e.adapter),
         "_investigate_event_wf": lambda e: InvestigateEventWorkflow(e.adapter),
         "_refine_search_wf": lambda e: RefineSearchWorkflow(e._search_udm_wf),
         "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
@@ -491,6 +496,18 @@ class SecOpsEngine:
                 mcp_tool_name="search_udm",
                 composed=True,
                 evidence_path="evidence/search/udm",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.stats",
+                name="UDM Stats Search (Aggregation & Analytics)",
+                description="Validates, initiates, streams, and aggregates UDM statistics, match/outcome metrics, and multi-field grouping operations via LRO.",
+                category="search",
+                handler=self.search_udm_stats,
+                mcp_tool_name="search_udm_stats",
+                composed=False,
+                evidence_path="evidence/search/udm_stats",
             )
         )
         self.registry.register(
@@ -1813,6 +1830,50 @@ class SecOpsEngine:
             on_batch=on_batch,
             on_state_change=on_state_change,
             cancel_token=cancel_token,
+        )
+
+    def search_udm_stats(
+        self,
+        request: Optional[Union[StatsSearchRequest, str]] = None,
+        query: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        max_events: int = 10000,
+        case_insensitive: bool = True,
+        generate_ai_overview: bool = True,
+        max_values_per_field: int = 60,
+        on_batch: Optional[Callable[[StatsSearchResult, StatsSearchSession], None]] = None,
+        on_state_change: Optional[Callable[[Any, Any, StatsSearchSession], None]] = None,
+        cancel_token: Optional[Any] = None,
+        poll_interval: float = 0.5,
+        max_poll_seconds: float = 120.0,
+    ) -> StatsSearchSession:
+        """Executes the canonical UDM Stats Search (Aggregation & Analytics) workflow."""
+        if isinstance(request, StatsSearchRequest):
+            req = request
+        else:
+            q = query or (request if isinstance(request, str) else None)
+            if not q:
+                raise ValueError("A query string or StatsSearchRequest must be provided")
+            if start_time is None or end_time is None:
+                raise ValueError("start_time and end_time are required when query is passed as a string")
+            req = StatsSearchRequest(
+                query=q,
+                start_time=start_time,
+                end_time=end_time,
+                max_events=max_events,
+                case_insensitive=case_insensitive,
+                generate_ai_overview=generate_ai_overview,
+                max_values_per_field=max_values_per_field,
+            )
+
+        return self._search_udm_stats_wf.execute(
+            request=req,
+            on_batch=on_batch,
+            on_state_change=on_state_change,
+            cancel_token=cancel_token,
+            poll_interval=poll_interval,
+            max_poll_seconds=max_poll_seconds,
         )
 
     def investigate_event(

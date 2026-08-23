@@ -24,3 +24,12 @@ python3 examples/dashboard_query_proto_demo.py all
 - ✗ playbooks.proto (schema mismatch)
 
 **Note:** Some proto field definitions may differ from actual backend implementation.
+
+## Proto Schema Reference
+
+All queries in this demo are validated against official proto schemas in `protos/secops_protos/`.
+
+See [`docs/proto-schemas.md`](../docs/proto-schemas.md) for:
+- Complete proto schema table
+- UDM Search vs Dashboard Query capabilities
+- Field reference and query syntax

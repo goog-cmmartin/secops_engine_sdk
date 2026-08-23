@@ -210,3 +210,28 @@ This project adheres to the strict operational invariants defined in [AGENTS.md]
 * **Live Provenance:** All production data originates from live Google SecOps endpoints. Zero synthetic, dummy, or fabricated data is permitted in production code paths.
 * **Error Visibility:** API errors, authentication failures, and rate limits propagate explicitly without silent fallbacks.
 * **Secrets Protection:** No API keys, passwords, or credentials are hardcoded or tracked in Git.
+
+---
+
+## 📋 Protocol Buffer Schemas
+
+This SDK includes the official **Google SecOps Proto Schemas** as a Git submodule. These protos define the Chronicle data model and are used for query validation.
+
+**Key Distinctions:**
+- **UDM Search** supports: `udm`, `case`, `detection` (collections), `graph` tables
+- **Dashboard Query** supports: All proto schemas (full Chronicle data model)
+
+See [`docs/proto-schemas.md`](docs/proto-schemas.md) for:
+- Complete proto reference table
+- UDM Search vs Dashboard Query differences
+- Query validation examples
+- Schema update instructions
+
+**Quickstart:**
+```bash
+# Initialize submodule (for fresh clones)
+git submodule update --init --recursive
+
+# Validate dashboard queries against proto schemas
+python3 examples/dashboard_query_proto_demo.py all
+```

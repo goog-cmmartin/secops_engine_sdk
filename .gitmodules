@@ -1,0 +1,3 @@
+[submodule "protos/secops_protos"]
+	path = protos/secops_protos
+	url = ../secops_protos

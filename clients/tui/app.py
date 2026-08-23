@@ -32,8 +32,39 @@ from textual import work
 from . import render
 
 
+# --- worker -> UI messages --------------------------------------------
+
+@dataclass
+class CasesLoaded(Message):
+    items: List[Any]
+    total: int
+    query: str
+
+
+@dataclass
+class CasesFailed(Message):
+    error: str
+    query: str
+
+
+@dataclass
+class DetailLoaded(Message):
+    investigation: Any
+
+
+@dataclass
+class DetailFailed(Message):
+    error: str
+    case_id: str
+
+
 class SecOpsTUI(App):
     """Proof-of-concept SecOps case triage TUI."""
+
+    CasesLoaded = CasesLoaded
+    CasesFailed = CasesFailed
+    DetailLoaded = DetailLoaded
+    DetailFailed = DetailFailed
 
     CSS = """
     Screen {
@@ -82,28 +113,6 @@ class SecOpsTUI(App):
         ("r", "refresh", "Refresh"),
         ("q", "quit", "Quit"),
     ]
-
-    # --- worker -> UI messages --------------------------------------------
-
-    @dataclass
-    class CasesLoaded(Message):
-        items: List[Any]
-        total: int
-        query: str
-
-    @dataclass
-    class CasesFailed(Message):
-        error: str
-        query: str
-
-    @dataclass
-    class DetailLoaded(Message):
-        investigation: Any
-
-    @dataclass
-    class DetailFailed(Message):
-        error: str
-        case_id: str
 
     def __init__(self, engine: Any, initial_query: str = "", page_size: int = 50):
         super().__init__()
@@ -169,7 +178,7 @@ class SecOpsTUI(App):
     def _load_cases(self, query: str) -> None:
         try:
             batch = self._engine.search_cases(query=query, page_size=self._page_size)
-            items = list(getattr(batch, "results", []) or [])
+            items = list(getattr(batch, "items", getattr(batch, "results", batch if isinstance(batch, list) else [])) or [])
             total = int(getattr(batch, "total_count", len(items)))
             self.post_message(self.CasesLoaded(items=items, total=total, query=query))
         except Exception as exc:  # facade surfaces RuntimeError on API errors

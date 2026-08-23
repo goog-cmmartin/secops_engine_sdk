@@ -22,6 +22,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 * **Client Interfaces & Integration:**
   * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking.
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
+  * **TUI (`clients/tui/`, `run_tui.py`)**: Textual-based two-pane terminal UI for case triage with responsive threading, offline demo mode, and clean domain/presentation separation (proof-of-concept).
   * **Universal Capability Registry (`engine.facade`)**: 100+ modular registered capabilities for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
@@ -50,6 +51,12 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 ├── clients/                  # Multi-tier frontends
 │   ├── cli/                  # Terminal CLI executable (secops.py)
 │   └── desktop/              # Qt / PySide6 Native Desktop application
+├── tui/                      # Textual TUI proof-of-concept
+│   ├── app.py                # Two-pane Textual App with background workers
+│   ├── render.py             # Stateless Rich-based rendering (Tables, Panels)
+│   ├── requirements-tui.txt  # TUI-only dependencies (textual, rich)
+│   └── README.md             # TUI design, threading, and demo mode docs
+├── run_tui.py                # TUI launcher (live or --demo)
 ├── specs/                    # Declarative YAML workflow contracts
 ├── schemas/                  # API & domain JSON schemas
 ├── benchmarks/               # Performance, memory & stress benchmarks
@@ -76,6 +83,9 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# (Optional) Install TUI dependencies
+pip install -r clients/tui/requirements-tui.txt
 
 # Configure tenant parameters
 cp .env.example .env
@@ -147,6 +157,20 @@ python3 -m clients.cli.secops soar-webhooks
 ```bash
 python3 -m clients.desktop.app
 ```
+
+### 6. Running the TUI (Terminal UI)
+```bash
+# Live mode (requires configured credentials):
+python3 run_tui.py
+
+# Offline demo mode (synthetic data, no API calls):
+python3 run_tui.py --demo
+
+# With initial search query:
+python3 run_tui.py --query "Priority:HIGH"
+```
+
+See [`clients/tui/README.md`](clients/tui/README.md) for design notes, threading architecture, and extension patterns.
 
 ---
 

@@ -1,0 +1,5 @@
+# TUI-only dependencies (kept separate from core requirements.txt).
+# Rich ships as a Textual dependency but is pinned here since render.py imports
+# it directly and is intended to be reusable by a stateless CLI too.
+textual>=0.60.0
+rich>=13.0.0

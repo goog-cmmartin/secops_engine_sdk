@@ -31,12 +31,45 @@ def main():
     search_parser.add_argument("--batch-size", type=int, default=2000, help="Batch size per fetch")
 
     # UDM Stats Search command
-    stats_parser = subparsers.add_parser("search-stats", aliases=["stats-search"], help="Execute UDM Stats Search (Aggregation, Analytics & Metrics)")
-    stats_parser.add_argument("--query", "-q", required=True, help="UDM Stats query with match/outcome aggregation")
+    stats_parser = subparsers.add_parser(
+        "search-stats",
+        aliases=["stats-search"],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Execute UDM Stats Search (Aggregation, Analytics & Metrics)",
+        description="""Execute analytical UDM aggregation queries using match/outcome syntax.
+
+Stats queries use match/outcome syntax (different from UDM search):
+  - match:   defines grouping variables (e.g. match: $logType)
+  - outcome: defines aggregation functions (count, sum, min, max, avg, count_distinct)
+  - order:   (optional) sort outcome metric (e.g. order: $total desc)
+  - limit:   (optional) group limit (e.g. limit: 10)
+
+Canonical Examples:
+  1. UDM Events by Log Type:
+     secops.py search-stats -q 'metadata.base_labels.namespaces = "SDL" metadata.log_type = $logType match: $logType outcome: $total = count(metadata.id) order: $total desc limit: 10'
+
+  2. UDM Entity Graph Distribution:
+     secops.py search-stats -q 'graph.metadata.entity_type = $et match: $et outcome: $total = count(graph.metadata.product_entity_id) order: $total desc limit: 10'
+
+  3. Detection Alerts by Rule Name:
+     secops.py search-stats -q 'detection.detection.rule_name = $rn match: $rn outcome: $total = count(detection.id) order: $total desc limit: 10'
+
+  4. Event Type Distribution (CSV format):
+     secops.py search-stats -q 'metadata.event_type = $et match: $et outcome: $total = count(metadata.id)' --format csv
+
+See docs/UDM_STATS_SYNTAX.md for the complete query language reference and documentation.""",
+    )
+    stats_parser.add_argument(
+        "--query",
+        "-q",
+        required=True,
+        help="UDM Stats query with match/outcome aggregation (e.g. 'metadata.event_type = $et match: $et outcome: $total = count(metadata.id)')",
+    )
     stats_parser.add_argument("--start", help="Start timestamp ISO8601 (default: 24h ago)")
     stats_parser.add_argument("--end", help="End timestamp ISO8601 (default: now)")
     stats_parser.add_argument("--limit", type=int, default=10000, help="Max events limit (default: 10000)")
     stats_parser.add_argument("--format", "-f", choices=["table", "json", "csv"], default="table", help="Output format (default: table)")
+    stats_parser.add_argument("--dedup", action="store_true", help="Deduplicate identical rows in the result set")
     stats_parser.add_argument("--case-sensitive", action="store_true", help="Perform case-sensitive matching")
 
     # Investigate command
@@ -3723,6 +3756,8 @@ def run_search_stats_cli(args):
     now = datetime.now(timezone.utc)
     end_time = args.end or now.strftime("%Y-%m-%dT%H:%M:%SZ")
     start_time = args.start or (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out_format = getattr(args, "format", "table")
+    dedup = getattr(args, "dedup", False)
 
     engine = SecOpsEngine()
 
@@ -3745,21 +3780,25 @@ def run_search_stats_cli(args):
         nonlocal last_state
         if lifecycle != last_state:
             last_state = lifecycle
+            target_out = sys.stderr if out_format in ("json", "csv") else sys.stdout
             if lifecycle == LifecycleState.VALIDATING:
-                print("Validating stats query syntax against Google SecOps...")
+                print("Validating stats query syntax against Google SecOps...", file=target_out)
             elif lifecycle == LifecycleState.STARTING:
-                print("Query valid. Starting asynchronous stats operation...")
+                print("Query valid. Starting asynchronous stats operation...", file=target_out)
             elif lifecycle == LifecycleState.RUNNING:
-                print(f"Stats operation started. Session ID: {session.session_id}")
+                print(f"Stats operation started. Session ID: {session.session_id}", file=target_out)
             elif lifecycle == LifecycleState.CANCELLING:
-                print("Engine cancelling backend operation...")
+                print("Engine cancelling backend operation...", file=target_out)
             elif lifecycle == LifecycleState.CANCELLED:
-                print("Operation cancelled.")
+                print("Operation cancelled.", file=target_out)
             elif lifecycle == LifecycleState.FAILED:
                 print(f"Error: {session.error}", file=sys.stderr)
 
     start_perf = time.time()
-    print(f"\n[bold green]Initiating UDM Stats Search...[/bold green]")
+    if out_format == "table":
+        print(f"\n[bold green]Initiating UDM Stats Search...[/bold green]")
+    else:
+        print(f"Initiating UDM Stats Search...", file=sys.stderr)
 
     session = engine.search_udm_stats(
         query=args.query,
@@ -3779,17 +3818,18 @@ def run_search_stats_cli(args):
 
     res = session.result
     if not res or not res.rows:
-        print("\nNo stats rows returned for the specified time range and query.")
+        target_out = sys.stderr if out_format in ("json", "csv") else sys.stdout
+        print("\nNo stats rows returned for the specified time range and query.", file=target_out)
         return
 
-    out_format = getattr(args, "format", "table")
+    rows = res.dedup_rows() if dedup else res.rows
 
     if out_format == "json":
         import json
 
         payload = {
             "query": args.query,
-            "total_results": res.total_results,
+            "total_results": len(rows),
             "filtered_result_count": res.filtered_result_count,
             "data_query_expression": res.data_query_expression,
             "columns": [
@@ -3802,7 +3842,7 @@ def run_search_stats_cli(args):
                 }
                 for c in res.columns
             ],
-            "rows": res.rows,
+            "rows": rows,
         }
         print(json.dumps(payload, indent=2, default=str))
 
@@ -3813,7 +3853,7 @@ def run_search_stats_cli(args):
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=res.column_names())
         writer.writeheader()
-        for row in res.rows:
+        for row in rows:
             writer.writerow(row)
         print(buf.getvalue().strip())
 
@@ -3824,7 +3864,7 @@ def run_search_stats_cli(args):
 
             console = Console()
             table = Table(
-                title=f"UDM Stats Results ({len(res.rows)} rows)",
+                title=f"UDM Stats Results ({len(rows)} rows)",
                 show_header=True,
                 header_style="bold magenta",
             )
@@ -3836,7 +3876,7 @@ def run_search_stats_cli(args):
                     header_title, style="dim" if col.column.startswith("_") else "cyan"
                 )
 
-            for row in res.rows:
+            for row in rows:
                 table.add_row(*[str(row.get(c.column, "")) for c in res.columns])
 
             console.print(table)
@@ -3867,13 +3907,14 @@ def run_search_stats_cli(args):
             headers = res.column_names()
             print("\t".join(headers))
             print("-" * 40)
-            for row in res.rows:
+            for row in rows:
                 print("\t".join(str(row.get(h, "")) for h in headers))
 
-    print(f"\n--- Stats Execution Summary ---")
-    print(f"Session ID    : {session.session_id}")
-    print(f"Total Rows    : {len(res.rows):,}")
-    print(f"Duration      : {duration:.2f}s")
+    if out_format == "table":
+        print(f"\n--- Stats Execution Summary ---")
+        print(f"Session ID    : {session.session_id}")
+        print(f"Total Rows    : {len(rows):,}")
+        print(f"Duration      : {duration:.2f}s")
 
 
 if __name__ == "__main__":

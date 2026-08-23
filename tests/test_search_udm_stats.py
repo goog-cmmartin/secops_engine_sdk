@@ -215,6 +215,97 @@ class TestUDMStatsSearchUnit(unittest.TestCase):
         self.assertEqual(cap.domain, "search")
         self.assertEqual(cap.cardinality, "unbounded")
 
+    def test_05_deduplication_and_csv_formatting(self):
+        """Verifies row deduplication and CSV generation."""
+        import csv
+        import io
+
+        res = StatsSearchResult(
+            columns=[
+                StatsColumn(column="et", values=["USER_LOGIN", "USER_LOGIN", "NETWORK_CONNECTION"]),
+                StatsColumn(column="total", values=[500, 500, 250]),
+            ],
+            rows=[
+                {"et": "USER_LOGIN", "total": 500},
+                {"et": "USER_LOGIN", "total": 500},
+                {"et": "NETWORK_CONNECTION", "total": 250},
+            ],
+            total_results=3,
+        )
+
+        self.assertEqual(len(res.rows), 3)
+        deduped = res.dedup_rows()
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(deduped[0]["et"], "USER_LOGIN")
+        self.assertEqual(deduped[1]["et"], "NETWORK_CONNECTION")
+
+        # Test to_records with dedup
+        self.assertEqual(len(res.to_records(dedup=True)), 2)
+        self.assertEqual(len(res.to_records(dedup=False)), 3)
+
+        # Test CSV export
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=res.column_names())
+        writer.writeheader()
+        for row in deduped:
+            writer.writerow(row)
+        csv_text = buf.getvalue().strip()
+        lines = csv_text.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "et,total")
+        self.assertEqual(lines[1], "USER_LOGIN,500")
+        self.assertEqual(lines[2], "NETWORK_CONNECTION,250")
+
+    def test_06_entity_graph_and_detection_queries(self):
+        """Verifies workflow orchestration for Entity Graph and Detection stats queries."""
+        # 1. Entity Graph Stats Result
+        graph_res = StatsSearchResult(
+            columns=[
+                StatsColumn(column="et", values=["USER", "IP_ADDRESS"]),
+                StatsColumn(column="total", values=[1420, 890]),
+            ],
+            rows=[
+                {"et": "USER", "total": 1420},
+                {"et": "IP_ADDRESS", "total": 890},
+            ],
+            total_results=2,
+        )
+        adapter = MockAdapterForStats(stats_response=graph_res)
+        wf = SearchUDMStatsWorkflow(adapter=adapter)
+        req = StatsSearchRequest(
+            query="graph.metadata.entity_type = $et match: $et outcome: $total = count(graph.metadata.product_entity_id) order: $total desc limit: 10",
+            start_time="2026-08-21T00:00:00Z",
+            end_time="2026-08-23T00:00:00Z",
+        )
+        session = wf.execute(req)
+        self.assertEqual(session.lifecycle, LifecycleState.COMPLETED)
+        self.assertEqual(len(session.result.rows), 2)
+        self.assertEqual(session.result.rows[0]["et"], "USER")
+
+        # 2. Detections Stats Result
+        det_res = StatsSearchResult(
+            columns=[
+                StatsColumn(column="rn", values=["Suspicious PowerShell Execution", "Brute Force Login"]),
+                StatsColumn(column="total", values=[45, 12]),
+            ],
+            rows=[
+                {"rn": "Suspicious PowerShell Execution", "total": 45},
+                {"rn": "Brute Force Login", "total": 12},
+            ],
+            total_results=2,
+        )
+        adapter_det = MockAdapterForStats(stats_response=det_res)
+        wf_det = SearchUDMStatsWorkflow(adapter=adapter_det)
+        req_det = StatsSearchRequest(
+            query="detection.detection.rule_name = $rn match: $rn outcome: $total = count(detection.id) order: $total desc limit: 10",
+            start_time="2026-08-21T00:00:00Z",
+            end_time="2026-08-23T00:00:00Z",
+        )
+        session_det = wf_det.execute(req_det)
+        self.assertEqual(session_det.lifecycle, LifecycleState.COMPLETED)
+        self.assertEqual(len(session_det.result.rows), 2)
+        self.assertEqual(session_det.result.rows[0]["rn"], "Suspicious PowerShell Execution")
+
 
 class TestUDMStatsSearchLive(unittest.TestCase):
     """Live acceptance test against Google SecOps endpoint if configured."""

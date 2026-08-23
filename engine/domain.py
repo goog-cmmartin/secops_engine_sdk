@@ -272,8 +272,21 @@ class StatsSearchResult(UniversalBatchMixin):
         """UniversalBatchMixin support: returns list of row dicts."""
         return self.rows
 
-    def to_records(self) -> List[Dict[str, Any]]:
+    def dedup_rows(self) -> List[Dict[str, Any]]:
+        """Returns row records with duplicate rows removed while preserving order."""
+        seen = set()
+        deduped: List[Dict[str, Any]] = []
+        for r in self.rows:
+            key = tuple((k, str(v)) for k, v in sorted(r.items()))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+        return deduped
+
+    def to_records(self, dedup: bool = False) -> List[Dict[str, Any]]:
         """Returns row records as a list of column-to-value dictionaries."""
+        if dedup:
+            return self.dedup_rows()
         return self.rows
 
     def column_names(self) -> List[str]:

@@ -2,19 +2,43 @@
 
 This directory contains practical, real-world examples demonstrating how to use the SecOps Engine SDK for security operations automation.
 
-## Prerequisites
+## Quick Start
 
-All examples require:
-- A properly configured `.env` file in the repository root with Google SecOps credentials
-- The SecOps Engine SDK installed or the repository root in PYTHONPATH
+### Prerequisites
+
+1. **Configure credentials:** Set up your `.env` file in the repository root with Google SecOps credentials
+2. **Activate virtual environment:** Ensure your Python virtual environment is activated
+
+### Running Examples
+
+All examples must be run from the **repository root** with `PYTHONPATH` set:
+
+```bash
+# From the repository root directory
+cd /path/to/secops_engine_sdk
+
+# Run with PYTHONPATH
+PYTHONPATH=. python3 examples/demo_case_triage.py
+PYTHONPATH=. python3 examples/export_batch_udm.py
+PYTHONPATH=. python3 examples/demo_threat_hunting.py
+```
+
+Or set PYTHONPATH once for your shell session:
 
 ```bash
 export PYTHONPATH=/path/to/secops_engine_sdk:$PYTHONPATH
+python3 examples/demo_case_triage.py
 ```
+
+**Common Error:** If you see `ModuleNotFoundError: No module named 'engine'`, you're either:
+- Running from the wrong directory (must be repository root)
+- Missing `PYTHONPATH=.` prefix
 
 ## Examples
 
-### 1. Automated Case Triage (`demo_case_triage.py`)
+### 1. Automated Case Triage (`demo_case_triage.py`) ⚠️ **WRITES DATA**
+
+**Type:** Fully functional automation script
 
 **Purpose:** Demonstrates automated case triage by analyzing a case, its alerts, and associated entities, then generating a comprehensive triage report.
 
@@ -23,12 +47,22 @@ export PYTHONPATH=/path/to/secops_engine_sdk:$PYTHONPATH
 2. Retrieves all alerts associated with the case
 3. Analyzes entities from each alert (types, suspicious flags, internal/external)
 4. Generates a detailed triage report with recommendations
-5. Adds an automated triage comment to the case for analyst review
+5. **Adds an automated triage comment to the case** (writes to SecOps!)
 
 **Usage:**
 ```bash
-python examples/demo_case_triage.py
+PYTHONPATH=. python3 examples/demo_case_triage.py
 ```
+
+**Impact on your tenant:**
+- ✅ Reads case data (safe)
+- ✅ Reads alert data (safe)
+- ✅ Reads entity data (safe)
+- ⚠️ **WRITES a triage comment to the case** (creates real data)
+
+**Prerequisites:**
+- Valid SecOps credentials in `.env`
+- At least one case in your tenant
 
 **Key Capabilities Demonstrated:**
 - Case search and filtering
@@ -58,13 +92,13 @@ ENTITY ANALYSIS:
   Suspicious: 0
   Internal: 28
   
-TRIAGE RECOMMENDATIONS:
-  🚨 HIGH PRIORITY - Immediate attention required
-  • Escalate to senior analyst
-  • Consider activating incident response playbook
+💬 Adding Automated Triage Comment to Case...
+✅ Triage comment added successfully
 ```
 
 ### 2. Batch UDM Export (`export_batch_udm.py`)
+
+**Type:** Fully functional data export script
 
 **Purpose:** Demonstrates how to efficiently export large volumes of UDM events from Chronicle with proper batching and error handling.
 
@@ -76,8 +110,12 @@ TRIAGE RECOMMENDATIONS:
 
 **Usage:**
 ```bash
-python examples/export_batch_udm.py
+PYTHONPATH=. python3 examples/export_batch_udm.py
 ```
+
+**Impact on your tenant:**
+- ✅ Reads UDM event data (safe, read-only)
+- ❌ No writes to SecOps
 
 **Key Capabilities Demonstrated:**
 - UDM query construction and execution
@@ -104,6 +142,8 @@ Output file: udm_export_20251001_20251002.jsonl
 
 ### 3. Threat Hunting Query Reference (`demo_threat_hunting.py`)
 
+**Type:** Reference guide / documentation (no tenant activity)
+
 **Purpose:** Provides a comprehensive catalog of threat hunting queries and SDK usage patterns for UDM search operations.
 
 **What it includes:**
@@ -129,8 +169,12 @@ Output file: udm_export_20251001_20251002.jsonl
 
 **Usage:**
 ```bash
-python examples/demo_threat_hunting.py
+PYTHONPATH=. python3 examples/demo_threat_hunting.py
 ```
+
+**Impact on your tenant:**
+- ❌ No activity - completely offline reference guide
+- No credentials required
 
 **Sample Output:**
 ```
@@ -149,6 +193,14 @@ python examples/demo_threat_hunting.py
 ```
 
 **Note:** This is a reference guide showing query patterns. For working UDM search execution examples, see the SDK usage section in the script output.
+
+## Summary Table
+
+| Example | Activity Type | Writes to Tenant? | Prerequisites |
+|---------|---------------|-------------------|---------------|
+| `demo_case_triage.py` | **Fully Functional** | ⚠️ Yes (adds comment) | Valid `.env`, existing cases |
+| `export_batch_udm.py` | **Fully Functional** | ❌ No (read-only) | Valid `.env` |
+| `demo_threat_hunting.py` | **Reference Only** | ❌ No | None |
 
 ## Building Your Own Examples
 

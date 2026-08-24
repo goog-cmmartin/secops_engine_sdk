@@ -114,51 +114,6 @@ def _map_dashboard_chart(
     )
 
 
-def _normalize_query_execution_result(raw: Dict[str, Any], query_name: str) -> DashboardQueryResult:
-    """Normalizes columnar raw query execution results into row-oriented records."""
-    results = raw.get("results", [])
-    col_names: List[str] = []
-    col_values: List[List[Any]] = []
-
-    for c in results:
-        meta = c.get("metadata", {})
-        col_name = meta.get("column") or meta.get("fieldPath") or "val"
-        col_names.append(col_name)
-
-        vals: List[Any] = []
-        for v in c.get("values", []):
-            val_obj = v.get("value", {})
-            if "stringVal" in val_obj:
-                vals.append(val_obj["stringVal"])
-            elif "doubleVal" in val_obj:
-                vals.append(val_obj["doubleVal"])
-            elif "int64Val" in val_obj:
-                vals.append(val_obj["int64Val"])
-            elif "boolVal" in val_obj:
-                vals.append(val_obj["boolVal"])
-            else:
-                vals.append(val_obj)
-        col_values.append(vals)
-
-    row_count = len(col_values[0]) if col_values else 0
-    rows: List[Dict[str, Any]] = []
-    for r in range(row_count):
-        row = {col_names[i]: col_values[i][r] for i in range(len(col_names))}
-        rows.append(row)
-
-    return DashboardQueryResult(
-        query_name=query_name,
-        dialect=raw.get("dialect", "YL2"),
-        data_sources=raw.get("dataSources", []),
-        time_window=raw.get("timeWindow", {}),
-        columns=col_names,
-        rows=rows,
-        total_rows=len(rows),
-        last_cache_refreshed_time=raw.get("lastBackendCacheRefreshedTime"),
-        raw=raw,
-    )
-
-
 class SearchDashboardsWorkflow:
     """Orchestrates discovery and filtering of native Google SecOps dashboards."""
 
@@ -291,14 +246,14 @@ class ExecuteDashboardQueryWorkflow:
         use_previous_time_range: bool = False,
         query_source: str = "DASHBOARD",
     ) -> DashboardQueryResult:
-        """Executes query and normalizes result."""
-        raw_res = self.adapter.execute_dashboard_query(
+        """Executes query and returns result."""
+        # Adapter already returns normalized DashboardQueryResult
+        return self.adapter.execute_dashboard_query(
             query_name=query_name_or_id,
             filters=filters,
             use_previous_time_range=use_previous_time_range,
             query_source=query_source,
         )
-        return _normalize_query_execution_result(raw_res, query_name=query_name_or_id)
 
 
 class ValidateDashboardQueryWorkflow:
@@ -310,3 +265,136 @@ class ValidateDashboardQueryWorkflow:
     def execute(self, raw_query: str, dialect: str = "DIALECT_STATS") -> ValidationResult:
         """Validates statistical query syntax."""
         return self.adapter.validate_stats_query(raw_query=raw_query, dialect=dialect)
+
+
+def run_dashboard_health_check(
+    adapter: GoogleSecOpsAdapter,
+    dashboard_name: str,
+    project_id: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    region: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute comprehensive health check for a named dashboard.
+    
+    Workflow orchestration:
+    1. Search for dashboard by display_name
+    2. Retrieve full dashboard configuration
+    3. Execute all widget queries
+    4. Generate operational summary with error tracking
+    
+    Args:
+        adapter: Live adapter for API interaction
+        dashboard_name: Display name of target dashboard
+        project_id: Optional override for project
+        customer_id: Optional override for customer
+        region: Optional override for region
+    
+    Returns:
+        Dict containing:
+            - dashboard_id: Resolved dashboard identifier
+            - query_results: List of executed query results with metadata
+            - summary: Human-readable operational summary
+            - errors: List of any errors encountered during execution
+    
+    Raises:
+        ValueError: If dashboard not found or multiple matches
+        RuntimeError: If query execution fails critically
+    """
+    # Override tenant if specified
+    if project_id or customer_id or region:
+        orig_pid = adapter.project_id
+        orig_cid = adapter.customer_id
+        orig_reg = adapter.region
+        if project_id:
+            adapter.project_id = project_id
+        if customer_id:
+            adapter.customer_id = customer_id
+        if region:
+            adapter.region = region
+    else:
+        orig_pid = orig_cid = orig_reg = None
+    
+    try:
+        # Step 1: Search for dashboard
+        from engine.domain import DashboardSearchQuery
+        search_wf = SearchDashboardsWorkflow(adapter)
+        query_obj = DashboardSearchQuery(query=dashboard_name, limit=10)
+        search_result = search_wf.execute(query=query_obj)
+        
+        matching = [d for d in search_result.dashboards if d.display_name == dashboard_name]
+        if not matching:
+            raise ValueError(
+                f"Dashboard '{dashboard_name}' not found. "
+                f"Available: {[d.display_name for d in search_result.dashboards]}"
+            )
+        if len(matching) > 1:
+            raise ValueError(f"Multiple dashboards match '{dashboard_name}'")
+        
+        dashboard_summary = matching[0]
+        dashboard_id = dashboard_summary.name  # Resource name
+        
+        # Step 2: Get full dashboard configuration
+        get_wf = GetDashboardDetailWorkflow(adapter)
+        dashboard_detail = get_wf.execute(dashboard_summary.name)
+        
+        # Step 3: Execute all widget queries
+        exec_wf = ExecuteDashboardQueryWorkflow(adapter)
+        query_results = []
+        errors = []
+        
+        for chart in dashboard_detail.charts:
+            if chart.query:
+                query_name = chart.query.name
+                try:
+                    result = exec_wf.execute(query_name_or_id=query_name)
+                    query_results.append({
+                        "query_name": query_name,
+                        "chart_title": chart.display_name,
+                        "success": True,
+                        "row_count": len(result.rows),
+                        "columns": result.columns,
+                    })
+                except Exception as e:
+                    query_results.append({
+                        "query_name": query_name,
+                        "chart_title": chart.display_name,
+                        "success": False,
+                        "error": str(e),
+                    })
+                    errors.append(f"Query {query_name} ({chart.display_name}): {e}")
+        
+        # Step 4: Generate summary
+        total_queries = len(query_results)
+        successful = sum(1 for r in query_results if r.get("success"))
+        failed = total_queries - successful
+        
+        summary_lines = [
+            f"Dashboard Health Check: {dashboard_name}",
+            f"Dashboard ID: {dashboard_id}",
+            f"Total Queries: {total_queries}",
+            f"Successful: {successful}",
+            f"Failed: {failed}",
+        ]
+        
+        if errors:
+            summary_lines.append("\nErrors:")
+            for err in errors:
+                summary_lines.append(f"  - {err}")
+        
+        summary = "\n".join(summary_lines)
+        
+        return {
+            "dashboard_id": dashboard_id,
+            "query_results": query_results,
+            "summary": summary,
+            "errors": errors,
+        }
+    
+    finally:
+        # Restore original tenant config
+        if orig_pid is not None:
+            adapter.project_id = orig_pid
+        if orig_cid is not None:
+            adapter.customer_id = orig_cid
+        if orig_reg is not None:
+            adapter.region = orig_reg

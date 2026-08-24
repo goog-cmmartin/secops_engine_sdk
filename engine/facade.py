@@ -208,6 +208,7 @@ from engine.workflows.curated_detections import (
     SearchCuratedRuleSetsWorkflow,
 )
 from engine.workflows.dashboards import (
+    run_dashboard_health_check,
     ExecuteDashboardQueryWorkflow,
     GetDashboardDetailWorkflow,
     SearchDashboardsWorkflow,
@@ -970,6 +971,18 @@ class SecOpsEngine:
                 mcp_tool_name="validate_dashboard_query",
                 composed=False,
                 evidence_path="evidence/dashboard/validate_query",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.health_check",
+                name="Dashboard Health Check Execution",
+                description="Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary.",
+                category="dashboard",
+                handler=self.run_dashboard_health_check,
+                mcp_tool_name="run_dashboard_health_check",
+                composed=True,
+                evidence_path="evidence/dashboard/health_check",
             )
         )
         self.registry.register(
@@ -2447,6 +2460,30 @@ class SecOpsEngine:
     ) -> ValidationResult:
         """Validates statistical query syntax."""
         return self._validate_dashboard_query_wf.execute(raw_query=raw_query, dialect=dialect)
+
+
+    def run_dashboard_health_check(
+        self,
+        dashboard_name: str,
+    ) -> Dict[str, Any]:
+        """Executes comprehensive health check for a named dashboard.
+        
+        Workflow retrieves dashboard configuration, executes all widget queries,
+        and generates operational summary of ingestion health metrics.
+        
+        Args:
+            dashboard_name: Display name of dashboard (e.g., "Data Ingestion and Health")
+        
+        Returns:
+            Dict containing dashboard_id, query_results, and human-readable summary
+        """
+        return run_dashboard_health_check(
+            adapter=self.adapter,
+            dashboard_name=dashboard_name,
+            project_id=None,  # Use adapter defaults
+            customer_id=None,
+            region=None,
+        )
 
     def get_managed_domain_settings(self) -> ManagedDomainSettings:
         """Retrieves approved email domains configured for report deliveries and alerts."""

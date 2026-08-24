@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from engine.auth import CredentialProvider
 from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
 from engine.domain import (
+    DashboardQueryResult,
     RawLogPayload,
     SearchBatchResult,
     StatsColumn,
@@ -1159,8 +1160,28 @@ class GoogleSecOpsAdapter:
         filters: Optional[List[Dict[str, Any]]] = None,
         use_previous_time_range: bool = False,
         query_source: str = "DASHBOARD",
-    ) -> Dict[str, Any]:
-        """Executes a dashboard query against live SecOps telemetry."""
+    ) -> DashboardQueryResult:
+        """Executes a dashboard query and returns normalized columnar/row-oriented results.
+        
+        Dashboard queries return pre-computed analytics from the SecOps Health Hub and
+        other telemetry dashboards. This method normalizes the column-oriented API response
+        into an easy-to-use row-oriented format.
+        
+        Args:
+            query_name: Dashboard query resource name or short ID.
+            filters: Optional list of filter dictionaries to apply.
+            use_previous_time_range: Whether to use the query's previous time range.
+            query_source: Query source context (default: "DASHBOARD").
+            
+        Returns:
+            DashboardQueryResult with parsed columns and rows for easy data access.
+            
+        Example:
+            >>> result = adapter.execute_dashboard_query(query_name)
+            >>> print(f"{result.row_count} rows × {result.column_count} columns")
+            >>> for row in result.rows:
+            >>>     print(row['timestamp'], row['total_bytes_ingested'])
+        """
         full_query_name = query_name
         if not query_name.startswith("projects/"):
             clean_id = query_name.split("/")[-1]
@@ -1174,9 +1195,76 @@ class GoogleSecOpsAdapter:
             "querySource": query_source,
         }
         res = self._request("POST", path, body=body)
-        if isinstance(res, dict):
-            return res
-        return {}
+        
+        # Parse column-oriented response into rows
+        return self._parse_dashboard_result(res, query_name)
+
+    def _parse_dashboard_result(self, raw_response: Dict[str, Any], query_name: str) -> DashboardQueryResult:
+        """Transforms column-oriented dashboard API response into normalized row-oriented format.
+        
+        The SecOps dashboard query API returns data in a column-oriented structure where
+        each column has its own value array with typed values (stringVal, int64Val, etc.).
+        This method transposes that structure into row-oriented records for intuitive access.
+        
+        Args:
+            raw_response: Raw API response from dashboardQueries:execute.
+            
+        Returns:
+            DashboardQueryResult with columns list, rows list, and metadata.
+            
+        Example API Response Structure:
+            {
+              "results": [
+                {"column": "timestamp", "values": [{"value": {"stringVal": "2024-01-01"}}]},
+                {"column": "count", "values": [{"value": {"int64Val": 123}}]}
+              ],
+              "timeWindow": {"startTime": "...", "endTime": "..."},
+              "dataSources": ["feed_1"],
+              "dialect": "YL2"
+            }
+        """
+        results = raw_response.get('results', [])
+        
+        # Extract column names
+        columns = [r.get('column', f'col_{i}') for i, r in enumerate(results)]
+        
+        # Determine row count (all columns should have same length)
+        num_rows = len(results[0].get('values', [])) if results else 0
+        
+        # Transpose columns to rows
+        rows = []
+        for row_idx in range(num_rows):
+            row = {}
+            for col_idx, col_data in enumerate(results):
+                col_name = columns[col_idx]
+                values = col_data.get('values', [])
+                
+                if row_idx < len(values):
+                    val_obj = values[row_idx].get('value', {})
+                    # Extract typed value (stringVal, int64Val, doubleVal, boolVal)
+                    # Try each type in order - first non-None wins
+                    actual_val = (
+                        val_obj.get('stringVal') if val_obj.get('stringVal') is not None else
+                        val_obj.get('int64Val') if val_obj.get('int64Val') is not None else
+                        val_obj.get('doubleVal') if val_obj.get('doubleVal') is not None else
+                        val_obj.get('boolVal') if val_obj.get('boolVal') is not None else
+                        None
+                    )
+                    row[col_name] = actual_val
+            
+            rows.append(row)
+        
+        return DashboardQueryResult(
+            query_name=query_name,
+            dialect=raw_response.get('dialect', 'YL2'),
+            data_sources=raw_response.get('dataSources', []),
+            time_window=raw_response.get('timeWindow', {}),
+            columns=columns,
+            rows=rows,
+            total_rows=len(rows),
+            last_cache_refreshed_time=raw_response.get('lastBackendCacheRefreshedTime'),
+            raw=raw_response,
+        )
 
     def validate_stats_query(
         self,

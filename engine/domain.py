@@ -295,6 +295,78 @@ class StatsSearchResult(UniversalBatchMixin):
 
 
 @dataclass
+class DashboardQueryResult(UniversalBatchMixin):
+    """Normalized result of a dashboard query execution with both column and row views.
+    
+    Dashboard queries return column-oriented data from the SecOps API. This class
+    normalizes the response into an easy-to-use row-oriented format while preserving
+    access to column metadata and raw responses.
+    
+    Example:
+        >>> result = adapter.execute_dashboard_query(query_name)
+        >>> print(f"{result.row_count} rows × {result.column_count} columns")
+        >>> for row in result.rows:
+        >>>     print(row['timestamp'], row['total_bytes_ingested'])
+        >>> timestamps = result.column_values('timestamp')
+    """
+    
+    # Required fields (no defaults)
+    query_name: str
+    dialect: str
+    data_sources: List[str]
+    time_window: Dict[str, str]
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    total_rows: int
+    
+    # Optional fields (with defaults) - MUST come after required fields
+    last_cache_refreshed_time: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    @property
+    def items(self) -> List[Dict[str, Any]]:
+        """UniversalBatchMixin support: returns list of row dicts."""
+        return self.rows
+    
+    def column_values(self, column_name: str) -> List[Any]:
+        """Extract all values for a specific column.
+        
+        Args:
+            column_name: Name of the column to extract.
+            
+        Returns:
+            List of values for the specified column across all rows.
+        """
+        return [row.get(column_name) for row in self.rows if column_name in row]
+    
+    def to_records(self) -> List[Dict[str, Any]]:
+        """Returns row records as a list of column-to-value dictionaries.
+        
+        Returns:
+            List of dictionaries, one per row, with column names as keys.
+        """
+        return self.rows
+    
+    def column_names(self) -> List[str]:
+        """Returns list of column names in output order.
+        
+        Returns:
+            List of column name strings.
+        """
+        return self.columns
+    
+    @property
+    def row_count(self) -> int:
+        """Number of result rows."""
+        return len(self.rows)
+    
+    @property
+    def column_count(self) -> int:
+        """Number of result columns."""
+        return len(self.columns)
+
+
 class StatsSearchRequest:
     """Parameters for initiating a UDM Stats Search query."""
 
@@ -1559,19 +1631,6 @@ class DashboardDetail:
 
 
 @dataclass
-class DashboardQueryResult:
-    """Hydrated execution result from a dashboard widget query."""
-    query_name: str
-    dialect: str
-    data_sources: List[str]
-    time_window: Dict[str, str]
-    columns: List[str]
-    rows: List[Dict[str, Any]]
-    total_rows: int
-    last_cache_refreshed_time: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
-
-
 @dataclass
 class DashboardSearchQuery:
     """Query parameters for filtering dashboards."""

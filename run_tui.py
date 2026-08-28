@@ -139,6 +139,49 @@ def _build_demo_engine():
                 raw_case={},
             )
 
+        def investigate_alert(self, alert_name):
+            from engine.domain import AlertInvestigation
+            cid = alert_name.split("/")[1] if "cases/" in alert_name else "1000"
+            return AlertInvestigation(
+                alert_name=alert_name,
+                case_id=cid,
+                display_name=f"Alert Deep-Dive: {alert_name.split('/')[-1]}",
+                priority="CRITICAL" if "0" in alert_name else "HIGH",
+                status="OPEN",
+                rule_name="Suspicious Authentication & Token Burst",
+                rule_id="ru_88492048-291a-4932",
+                risk_score=85,
+                detection_time=now - timedelta(minutes=45),
+                product="Chronicle",
+                vendor="Google",
+                event_count=15,
+                entities=[
+                    InvolvedEntitySummary(
+                        identifier="jdoe@corp.example",
+                        display_name="jdoe@corp.example",
+                        entity_type="USER",
+                        role="source",
+                        is_suspicious=True,
+                        raw={},
+                    ),
+                    InvolvedEntitySummary(
+                        identifier="198.51.100.42",
+                        display_name="198.51.100.42",
+                        entity_type="IP",
+                        role="attacker",
+                        is_suspicious=True,
+                        raw={},
+                    ),
+                ],
+                associated_events=[
+                    {"timestamp": str(now - timedelta(minutes=40)), "event_type": "USER_LOGIN", "result": "FAILURE", "ip": "198.51.100.42"},
+                    {"timestamp": str(now - timedelta(minutes=39)), "event_type": "USER_LOGIN", "result": "SUCCESS", "ip": "198.51.100.42"},
+                    {"timestamp": str(now - timedelta(minutes=35)), "event_type": "USER_RESOURCE_ACCESS", "target": "Confidential_Docs_S3"},
+                ],
+                provenance={"demo": True},
+                raw_alert={},
+            )
+
     return _DemoEngine()
 
 

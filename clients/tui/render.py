@@ -30,6 +30,17 @@ _STATUS_STYLE = {
     "UNKNOWN": "dim",
 }
 
+_PLAYBOOK_STYLE = {
+    "COMPLETED": "green",
+    "SUCCESS": "green",
+    "RUNNING": "bold yellow",
+    "IN_PROGRESS": "bold yellow",
+    "FAILED": "bold red",
+    "ERROR": "bold red",
+    "PENDING": "cyan",
+    "SKIPPED": "dim",
+}
+
 
 def _enum_name(value: Any) -> str:
     """Return the ``.name`` of an enum, or a best-effort string otherwise."""
@@ -37,13 +48,23 @@ def _enum_name(value: Any) -> str:
 
 
 def priority_text(value: Any) -> Text:
-    name = _enum_name(value) or "UNKNOWN"
-    return Text(name, style=_PRIORITY_STYLE.get(name, "dim"))
+    name = _enum_name(value).upper() if value is not None else "UNKNOWN"
+    return Text(name or "UNKNOWN", style=_PRIORITY_STYLE.get(name, "dim"))
 
 
 def status_text(value: Any) -> Text:
-    name = _enum_name(value) or "UNKNOWN"
-    return Text(name, style=_STATUS_STYLE.get(name, "dim"))
+    name = _enum_name(value).upper() if value is not None else "UNKNOWN"
+    return Text(name or "UNKNOWN", style=_STATUS_STYLE.get(name, "dim"))
+
+
+def playbook_status_text(name: Optional[str], status: Optional[str] = None) -> Text:
+    if not name:
+        return Text("-", style="dim")
+    st = (status or "").upper()
+    style = _PLAYBOOK_STYLE.get(st, "cyan")
+    if status:
+        return Text(f"{name} [{status}]", style=style)
+    return Text(name, style="cyan")
 
 
 def _fmt_time(dt: Any) -> str:
@@ -85,6 +106,37 @@ def case_row(item: Any) -> List[Any]:
     ]
 
 
+# --- alert list columns & row mapping ------------------------------------
+
+ALERT_LIST_COLUMNS = ("Priority", "Alert ID / Name", "Status", "Product", "Rule", "Events", "Playbook")
+
+
+def alert_row(item: Any) -> List[Any]:
+    """Map a ``CaseAlertSummary`` to an alerts DataTable row."""
+    pr = getattr(item, "priority", "UNKNOWN")
+    display_name = (
+        getattr(item, "display_name", "")
+        or getattr(item, "identifier", "")
+        or getattr(item, "name", "")
+        or "-"
+    )
+    product = getattr(item, "product", None) or getattr(item, "vendor", None) or "-"
+    rule_name = getattr(item, "rule_name", None) or "-"
+    event_count = getattr(item, "event_count", 0)
+    playbook_name = getattr(item, "attached_playbook_name", None)
+    playbook_status = getattr(item, "playbook_status", None)
+
+    return [
+        priority_text(pr),
+        display_name,
+        status_text(getattr(item, "status", None)),
+        str(product),
+        str(rule_name),
+        str(event_count),
+        playbook_status_text(playbook_name, playbook_status),
+    ]
+
+
 # --- case investigation detail --------------------------------------------
 
 def _kv_table(pairs: List[tuple]) -> Table:
@@ -93,30 +145,6 @@ def _kv_table(pairs: List[tuple]) -> Table:
     t.add_column()
     for k, v in pairs:
         t.add_row(k, v if isinstance(v, Text) else str(v))
-    return t
-
-
-def _alerts_table(alerts: List[Any]) -> Table:
-    t = Table(title="Alerts", expand=True, title_style="bold", show_lines=False)
-    t.add_column("Priority", no_wrap=True)
-    t.add_column("Name")
-    t.add_column("Status", no_wrap=True)
-    t.add_column("Product", no_wrap=True)
-    t.add_column("Events", justify="right", no_wrap=True)
-    t.add_column("Playbook")
-    if not alerts:
-        t.add_row(Text("(no alerts)", style="dim"), "", "", "", "", "")
-        return t
-    for a in alerts:
-        pr = getattr(a, "priority", "") or "-"
-        t.add_row(
-            Text(str(pr), style=_PRIORITY_STYLE.get(str(pr).upper(), "")),
-            getattr(a, "display_name", "") or getattr(a, "identifier", "") or "-",
-            getattr(a, "status", "") or "-",
-            getattr(a, "product", None) or "-",
-            str(getattr(a, "event_count", 0)),
-            getattr(a, "attached_playbook_name", None) or "-",
-        )
     return t
 
 
@@ -140,33 +168,73 @@ def _entities_table(entities: List[Any]) -> Table:
     return t
 
 
-def case_detail(inv: Any) -> Group:
-    """Render a ``CaseInvestigation`` into a stacked Rich renderable group."""
+def case_summary_card(inv: Any) -> Panel:
+    """Render top summary card for a case."""
     header = _kv_table([
         ("Case", f"{getattr(inv, 'display_name', '')}  (#{getattr(inv, 'case_id', '')})"),
         ("Status", status_text(getattr(inv, "status", None))),
         ("Priority", priority_text(getattr(inv, "priority", None))),
         ("Stage", getattr(inv, "stage", "") or "-"),
         ("Assignee", getattr(inv, "assignee", None) or "-"),
-        ("Alerts", str(getattr(inv, "alert_count", 0))),
+        ("Alerts", str(getattr(inv, "alert_count", len(getattr(inv, "alerts", []))))),
         ("Created", _fmt_time(getattr(inv, "create_time", None))),
         ("Updated", _fmt_time(getattr(inv, "update_time", None))),
     ])
+    return Panel(header, title="Case Overview", border_style="cyan")
 
-    comments = getattr(inv, "comments", []) or []
+
+def case_comments_panel(comments: List[Any]) -> Panel:
     comment_lines = []
-    for c in comments[:5]:
+    for c in comments[:8]:
         txt = getattr(c, "comment", None) or getattr(c, "text", None) or str(c)
         who = getattr(c, "user", None) or getattr(c, "author", None) or "?"
-        comment_lines.append(Text(f"• [{who}] {txt}", style="dim"))
+        time_str = _fmt_time(getattr(c, "create_time", None))
+        comment_lines.append(Text(f"• [{who} @ {time_str}] {txt}", style="dim"))
     comments_block = Group(*comment_lines) if comment_lines else Text("(no comments)", style="dim")
+    return Panel(comments_block, title=f"Case Comments ({len(comments)})", border_style="grey37")
 
+
+def case_detail(inv: Any) -> Group:
+    """Render a ``CaseInvestigation`` into a stacked Rich renderable group."""
+    comments = getattr(inv, "comments", []) or []
     return Group(
-        Panel(header, title="Case Detail", border_style="cyan"),
-        _alerts_table(getattr(inv, "alerts", []) or []),
+        case_summary_card(inv),
         _entities_table(getattr(inv, "entities", []) or []),
-        Panel(comments_block, title=f"Comments ({len(comments)})", border_style="grey37"),
+        case_comments_panel(comments),
     )
+
+
+def alert_detail_panel(inv: Any) -> Group:
+    """Render full deep-dive view for an ``AlertInvestigation``."""
+    risk = getattr(inv, "risk_score", None)
+    risk_text = Text(str(risk), style="bold red" if risk and risk >= 70 else "yellow" if risk else "dim")
+
+    info_pairs = [
+        ("Alert", getattr(inv, "display_name", "") or getattr(inv, "alert_name", "")),
+        ("Case ID", f"#{getattr(inv, 'case_id', '-')}") ,
+        ("Priority", priority_text(getattr(inv, "priority", "UNKNOWN"))),
+        ("Status", status_text(getattr(inv, "status", "UNKNOWN"))),
+        ("Rule Name", getattr(inv, "rule_name", None) or "-"),
+        ("Rule ID", getattr(inv, "rule_id", None) or "-"),
+        ("Risk Score", risk_text),
+        ("Product / Vendor", f"{getattr(inv, 'product', '-') or '-'} / {getattr(inv, 'vendor', '-') or '-'}"),
+        ("Events Count", str(getattr(inv, "event_count", 0))),
+        ("Detected Time", _fmt_time(getattr(inv, "detection_time", None))),
+    ]
+    meta_table = _kv_table(info_pairs)
+    meta_panel = Panel(meta_table, title="Alert Investigation Deep-Dive", border_style="magenta")
+
+    entities = getattr(inv, "entities", []) or []
+    entities_table = _entities_table(entities)
+
+    events = getattr(inv, "associated_events", []) or []
+    event_lines = []
+    for ev in events[:5]:
+        event_lines.append(Text(f"• {str(ev)}", style="dim"))
+    events_block = Group(*event_lines) if event_lines else Text("(no raw events attached)", style="dim")
+    events_panel = Panel(events_block, title=f"Associated Events ({len(events)})", border_style="grey37")
+
+    return Group(meta_panel, entities_table, events_panel)
 
 
 def error_panel(message: str, context: Optional[str] = None) -> Panel:

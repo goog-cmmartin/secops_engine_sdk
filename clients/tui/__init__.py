@@ -18,4 +18,6 @@ Design invariants (do not violate):
      list pane, ``CaseInvestigation`` for the detail pane.
 """
 
+from .app import SecOpsTUI
+
 __all__ = ["SecOpsTUI"]

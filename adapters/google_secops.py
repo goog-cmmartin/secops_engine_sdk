@@ -547,11 +547,45 @@ class GoogleSecOpsAdapter:
             raise RuntimeError(f"Case '{case_id}' not found or invalid response from SecOps.")
         return res
 
-    def list_case_alerts(self, case_id: str) -> List[Dict[str, Any]]:
+    def update_case(
+        self,
+        case_id: str,
+        updates: Dict[str, Any],
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates case metadata and returns the confirmed case record."""
+        raw_id = case_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}"
+        params: Dict[str, Any] = {}
+        if update_mask:
+            params["updateMask"] = update_mask
+        body = dict(updates)
+        if "name" not in body:
+            body["name"] = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{raw_id}"
+        res = self._request("PATCH", path, body=body, params=params if params else None)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to update case {case_id}: invalid provider response.")
+        return res
+
+    def list_case_alerts(
+        self,
+        case_id: str,
+        expand: Optional[str] = None,
+        filter: Optional[str] = None,
+        page_size: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Lists all alerts associated with a specific case."""
-        case_id_clean = case_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(case_id.split("/")[-1], safe="")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseAlerts"
-        res = self._request("GET", path)
+        params: Dict[str, Any] = {}
+        if expand:
+            params["expand"] = expand
+        if filter:
+            params["filter"] = filter
+        if page_size:
+            params["pageSize"] = page_size
+        res = self._request("GET", path, params=params if params else None)
         if isinstance(res, dict):
             return res.get("caseAlerts", [])
         return []
@@ -565,6 +599,61 @@ class GoogleSecOpsAdapter:
         res = self._request("GET", path)
         if not isinstance(res, dict) or "name" not in res:
             raise RuntimeError(f"Case Alert '{alert_name}' not found.")
+        return res
+
+    def update_case_alert(
+        self,
+        case_id: str,
+        alert_id: str,
+        updates: Dict[str, Any],
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates case alert details (e.g. priority, status) and returns the confirmed record."""
+        raw_case_id = case_id.split("/")[-1]
+        raw_alert_id = alert_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        alert_id_clean = urllib.parse.quote(raw_alert_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseAlerts/{alert_id_clean}"
+        params: Dict[str, Any] = {}
+        if update_mask:
+            params["updateMask"] = update_mask
+        body = dict(updates)
+        if "name" not in body:
+            body["name"] = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{raw_case_id}/caseAlerts/{raw_alert_id}"
+        res = self._request("PATCH", path, body=body, params=params if params else None)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to update alert {alert_id} for case {case_id}: invalid provider response.")
+        return res
+
+    def create_case_alert_recommendation(
+        self,
+        case_id: str,
+        alert_id: str,
+    ) -> Dict[str, Any]:
+        """Initiates an asynchronous request to generate a Gemini AI recommendation for a case alert."""
+        raw_case_id = case_id.split("/")[-1]
+        raw_alert_id = alert_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        alert_id_clean = urllib.parse.quote(raw_alert_id, safe="")
+        path = f"/v1/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseAlerts/{alert_id_clean}:createRecommendationLongRunning"
+        res = self._request("POST", path, body={})
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to create recommendation for alert {alert_id} in case {case_id}: invalid response.")
+        return res
+
+    def fetch_case_alert_recommendation(
+        self,
+        case_id: str,
+        recommendation_id: str,
+    ) -> Dict[str, Any]:
+        """Fetches a previously generated AI recommendation for a case alert using its recommendationId."""
+        raw_case_id = case_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        path = f"/v1/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseAlerts:fetchRecommendation"
+        params = {"recommendationId": recommendation_id}
+        res = self._request("GET", path, params=params)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to fetch recommendation {recommendation_id} for case {case_id}: invalid response.")
         return res
 
     def list_alert_entities(self, alert_name: str) -> List[Dict[str, Any]]:
@@ -1590,12 +1679,18 @@ class GoogleSecOpsAdapter:
         self,
         page_size: int = 1000,
         page_token: Optional[str] = None,
+        filter: Optional[str] = None,
+        fields: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists SOAR users and external identity representations."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacySoarUsers"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
             params["pageToken"] = page_token
+        if filter:
+            params["filter"] = filter
+        if fields:
+            params["fields"] = fields
         return self._request("GET", path, params=params)
 
     def get_soar_user(self, user_id: str) -> Dict[str, Any]:

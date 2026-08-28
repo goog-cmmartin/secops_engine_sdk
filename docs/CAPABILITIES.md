@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-08-23 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-08-28 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**110 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**120 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-08-23 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 9 |
-| primitive | 1 |
+| workflow | 11 |
+| primitive | 9 |
 | query | 100 |
-| **total** | **110** |
+| **total** | **120** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 45 |
 | bounded | 3 |
 | unbounded | 52 |
-| (n/a — workflows/primitive) | 10 |
+| (n/a — workflows/primitive) | 20 |
 
 ## Workflows
 
@@ -36,7 +36,9 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- |
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
+| `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
+| `dashboard.health_check` | dashboard | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
 | `entity.investigate` | entity | Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases. |
 | `entity.search_udm` | entity | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
 | `event.investigate` | event | Retrieves canonical UDM fields and raw log payload with complete provenance. |
@@ -52,12 +54,21 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (3: workflow=1, primitive=1, query=1)
+### case  (12: workflow=2, primitive=9, query=1)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
+| `case_alert.get_recommendation` | workflow | — | `get_case_alert_recommendation` | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
+| `case.assign` | primitive | — | `assign_case` | Assigns a SOAR case to a SOC role (@Role) or user GUID. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
+| `case.set_incident` | primitive | — | `set_case_incident` | Marks or unmarks a SOAR case as an incident. |
+| `case.set_stage` | primitive | — | `set_case_stage` | Updates the lifecycle stage of a SOAR case. |
+| `case.update` | primitive | — | `update_case` | Mutates case attributes such as assignee, stage, incident flag, or priority. |
+| `case_alert.create_recommendation` | primitive | — | `create_case_alert_recommendation` | Initiates asynchronous generation of a Gemini AI recommendation for a case alert. |
+| `case_alert.fetch_recommendation` | primitive | — | `fetch_case_alert_recommendation` | Fetches a previously generated Gemini AI recommendation for a case alert by recommendation ID. |
+| `case_alert.set_priority` | primitive | — | `set_case_alert_priority` | Updates the priority level of a specific case alert. |
+| `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 
 ### case_config  (14: query=14)
@@ -96,11 +107,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
 
-### dashboard  (4: workflow=1, query=3)
+### dashboard  (5: workflow=2, query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `dashboard.get` | workflow | — | `get_dashboard` | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
+| `dashboard.health_check` | workflow | — | `run_dashboard_health_check` | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
 | `dashboard.execute_query` | query | `bounded` | `execute_dashboard_query` | Executes a dashboard widget query against live telemetry and transforms columnar results into tabular records. |
 | `dashboard.search` | query | `unbounded` | `search_dashboards` | Searches, lists, and filters native dashboards configured in Google SecOps. |
 | `dashboard.validate_query` | query | `bounded` | `validate_dashboard_query` | Validates statistical / dashboard widget query syntax against the live Google SecOps query compiler. |

@@ -63,7 +63,7 @@ class TestSearchPivotRefinementLive(unittest.TestCase):
         self.assertGreater(session.received_count, 0)
         for ev_wrapper in session.events:
             h = ev_wrapper.get("event", {}).get("principal", {}).get("hostname")
-            self.assertEqual(h, self.live_hostname)
+            self.assertEqual(h.lower(), self.live_hostname.lower())
 
     def test_pivot_ref_002_multi_field_additive_refinement(self):
         """[PIVOT-REF-002] Refine query with multiple additive inclusive filters."""

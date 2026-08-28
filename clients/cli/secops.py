@@ -116,6 +116,43 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_search_cmd.add_argument("--limit", type=int, default=20, help="Results page size (default: 20)")
     case_search_cmd.add_argument("--page", type=int, default=0, help="Page number (default: 0)")
 
+    case_update_cmd = case_sub.add_parser("update", help="Update case attributes (assignee, stage, incident, priority)")
+    case_update_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_update_cmd.add_argument("--assignee", "-a", help="Assign to SOC role (@Tier1) or user GUID")
+    case_update_cmd.add_argument("--stage", "-s", help="Set lifecycle stage (e.g. Assessment, Investigation, Incident)")
+    case_update_cmd.add_argument("--incident", action="store_true", default=None, help="Mark case as incident")
+    case_update_cmd.add_argument("--no-incident", action="store_false", dest="incident", help="Unmark case as incident")
+    case_update_cmd.add_argument("--priority", "-p", help="Set priority (LOW, MEDIUM, HIGH, CRITICAL)")
+
+    case_assign_cmd = case_sub.add_parser("assign", help="Assign case to SOC role (@Role) or user GUID/email")
+    case_assign_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_assign_cmd.add_argument("--to", required=True, help="Target role (@Tier1) or user GUID / email")
+
+    case_stage_cmd = case_sub.add_parser("set-stage", help="Update case lifecycle stage")
+    case_stage_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_stage_cmd.add_argument("--stage", "-s", required=True, help="Target stage (e.g. Assessment, Investigation, Incident)")
+
+    case_incident_cmd = case_sub.add_parser("set-incident", help="Mark or unmark case as incident")
+    case_incident_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_incident_cmd.add_argument("--incident", action="store_true", default=True, help="Mark as incident (default)")
+    case_incident_cmd.add_argument("--no-incident", action="store_false", dest="incident", help="Unmark as incident")
+
+    case_alert_prio_cmd = case_sub.add_parser("alert-priority", help="Update priority level of a specific case alert")
+    case_alert_prio_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_alert_prio_cmd.add_argument("alert_id", help="Alert ID or resource name")
+    case_alert_prio_cmd.add_argument("--priority", "-p", required=True, help="Priority (LOW, MEDIUM, HIGH, CRITICAL, INFO)")
+
+    case_rec_cmd = case_sub.add_parser("recommend-alert", help="Generate or retrieve Gemini AI recommendation for a case alert")
+    case_rec_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_rec_cmd.add_argument("alert_id", help="Alert ID or resource name")
+    case_rec_cmd.add_argument("--wait", action="store_true", default=True, help="Poll until completion (default: true)")
+    case_rec_cmd.add_argument("--no-wait", action="store_false", dest="wait", help="Trigger asynchronously without waiting")
+    case_rec_cmd.add_argument("--timeout", type=float, default=30.0, help="Polling timeout in seconds (default: 30)")
+
+    case_rec_fetch_cmd = case_sub.add_parser("recommend-fetch", help="Fetch Gemini AI recommendation by recommendation ID")
+    case_rec_fetch_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_rec_fetch_cmd.add_argument("recommendation_id", help="Recommendation ID (UUID)")
+
     # Alert Investigate command
     alert_parser = subparsers.add_parser("alert", help="Investigate specific SecOps alert")
     alert_sub = alert_parser.add_subparsers(dest="alert_action", required=True)
@@ -1003,6 +1040,92 @@ def run_case_cli(args):
             if c.user_assigned:
                 print(f"     Assignee: {c.user_assigned}")
             print()
+
+    elif args.case_action == "update":
+        print(f"\n[CLI] Updating Case {args.case_id}...")
+        res = engine.update_case(
+            case_id=args.case_id,
+            assignee=args.assignee,
+            stage=args.stage,
+            incident=args.incident,
+            priority=args.priority,
+        )
+        print(f" [✓] Case updated successfully.")
+        print(f"     Case ID : {res.case_id}")
+        print(f"     Assignee: {res.assignee}")
+        print(f"     Stage   : {res.stage}")
+        print(f"     Incident: {res.incident}")
+        print(f"     Priority: {res.priority}")
+
+    elif args.case_action == "assign":
+        print(f"\n[CLI] Assigning Case {args.case_id} to '{args.to}'...")
+        res = engine.assign_case(case_id=args.case_id, assignee=args.to)
+        print(f" [✓] Case assigned successfully.")
+        print(f"     Case ID : {res.case_id}")
+        print(f"     Assignee: {res.assignee}")
+
+    elif args.case_action == "set-stage":
+        print(f"\n[CLI] Updating Case {args.case_id} stage to '{args.stage}'...")
+        res = engine.set_case_stage(case_id=args.case_id, stage=args.stage)
+        print(f" [✓] Case stage updated successfully.")
+        print(f"     Case ID : {res.case_id}")
+        print(f"     Stage   : {res.stage}")
+
+    elif args.case_action == "set-incident":
+        action_label = "Marking as Incident" if args.incident else "Unmarking as Incident"
+        print(f"\n[CLI] {action_label} for Case {args.case_id}...")
+        res = engine.set_case_incident(case_id=args.case_id, incident=args.incident)
+        print(f" [✓] Case incident status updated successfully.")
+        print(f"     Case ID : {res.case_id}")
+        print(f"     Incident: {res.incident}")
+
+    elif args.case_action == "alert-priority":
+        print(f"\n[CLI] Updating Alert {args.alert_id} priority in Case {args.case_id} to '{args.priority}'...")
+        res = engine.set_case_alert_priority(case_id=args.case_id, alert_id=args.alert_id, priority=args.priority)
+        print(f" [✓] Case alert priority updated successfully.")
+        print(f"     Case ID : {res.case_id}")
+        print(f"     Alert ID: {res.alert_id}")
+        print(f"     Priority: {res.priority}")
+
+    elif args.case_action == "recommend-alert":
+        print(f"\n[CLI] Requesting Gemini AI Recommendation for Alert {args.alert_id} in Case {args.case_id}...")
+        if not args.wait:
+            job = engine.create_case_alert_recommendation(case_id=args.case_id, alert_id=args.alert_id)
+            print(f" [✓] Recommendation job initiated.")
+            print(f"     Case ID          : {job.case_id}")
+            print(f"     Alert ID         : {job.alert_id}")
+            print(f"     Recommendation ID: {job.recommendation_id}")
+            print(f"\nTo fetch later: secops case recommend-fetch {job.case_id} {job.recommendation_id}")
+        else:
+            rec = engine.get_case_alert_recommendation(
+                case_id=args.case_id,
+                alert_id=args.alert_id,
+                timeout_sec=args.timeout,
+            )
+            print(f" [✓] Recommendation fetch complete.")
+            print(f"     State            : {rec.state}")
+            print(f"     Recommendation ID: {rec.recommendation_id}")
+            if rec.recommendation:
+                print(f"\n--- GEMINI AI RECOMMENDATION ---")
+                print(rec.recommendation)
+            if rec.status_message:
+                print(f"     Status Message   : {rec.status_message}")
+            if rec.marketplace_actions_triggered_manually:
+                print(f"     Marketplace Actions Triggered: {', '.join(rec.marketplace_actions_triggered_manually)}")
+
+    elif args.case_action == "recommend-fetch":
+        print(f"\n[CLI] Fetching Gemini AI Recommendation {args.recommendation_id} for Case {args.case_id}...")
+        rec = engine.fetch_case_alert_recommendation(case_id=args.case_id, recommendation_id=args.recommendation_id)
+        print(f" [✓] Recommendation fetched successfully.")
+        print(f"     State            : {rec.state}")
+        print(f"     Recommendation ID: {rec.recommendation_id}")
+        if rec.recommendation:
+            print(f"\n--- GEMINI AI RECOMMENDATION ---")
+            print(rec.recommendation)
+        if rec.status_message:
+            print(f"     Status Message   : {rec.status_message}")
+        if rec.marketplace_actions_triggered_manually:
+            print(f"     Marketplace Actions Triggered: {', '.join(rec.marketplace_actions_triggered_manually)}")
 
 
 def run_alert_cli(args):

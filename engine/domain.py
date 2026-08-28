@@ -367,6 +367,7 @@ class DashboardQueryResult(UniversalBatchMixin):
         return len(self.columns)
 
 
+@dataclass
 class StatsSearchRequest:
     """Parameters for initiating a UDM Stats Search query."""
 
@@ -2928,6 +2929,59 @@ class EntityInvestigationReport:
     related_cases: List[Any] = field(default_factory=list)
     entity_summary: Optional[EntitySummaryResult] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CaseUpdateResult:
+    """Result of updating a Google SecOps case."""
+    case_id: str
+    name: str
+    assignee: Optional[str] = None
+    stage: Optional[str] = None
+    incident: Optional[bool] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    display_name: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CaseAlertUpdateResult:
+    """Result of updating a Google SecOps case alert."""
+    alert_name: str
+    case_id: str
+    alert_id: str
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    display_name: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CaseAlertRecommendationJob:
+    """Async generation job handle for a Gemini AI Case Alert Recommendation."""
+    case_id: str
+    alert_id: str
+    recommendation_id: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseAlertRecommendation:
+    """Gemini AI Case Alert Recommendation result and diagnostics."""
+    case_id: str
+    recommendation_id: str
+    state: str = "UNSPECIFIED"
+    recommendation: Optional[str] = None
+    alert_identifier_to_case_id: Dict[str, int] = field(default_factory=dict)
+    marketplace_actions_triggered_manually: List[str] = field(default_factory=list)
+    status_message: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 

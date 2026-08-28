@@ -13,6 +13,10 @@ from engine.domain import (
     CaseSearchQuery,
     CaseSearchResultItem,
     CaseStatus,
+    CaseUpdateResult,
+    CaseAlertUpdateResult,
+    CaseAlertRecommendationJob,
+    CaseAlertRecommendation,
     ContentPackBatch,
     ContentPackDetail,
     ContentPackSearchQuery,
@@ -191,6 +195,17 @@ from engine.domain import (
 )
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
 from engine.workflows.alert_investigation import InvestigateAlertWorkflow
+from engine.workflows.case_actions import (
+    AssignCaseWorkflow,
+    CreateCaseAlertRecommendationWorkflow,
+    FetchCaseAlertRecommendationWorkflow,
+    GetCaseAlertRecommendationWorkflow,
+    SetCaseAlertPriorityWorkflow,
+    SetCaseIncidentWorkflow,
+    SetCaseStageWorkflow,
+    UpdateCaseAlertWorkflow,
+    UpdateCaseWorkflow,
+)
 from engine.workflows.case_investigation import (
     AddCaseCommentWorkflow,
     InvestigateCaseWorkflow,
@@ -367,6 +382,15 @@ class SecOpsEngine:
         "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
         "_investigate_case_wf": lambda e: InvestigateCaseWorkflow(e.adapter),
         "_add_case_comment_wf": lambda e: AddCaseCommentWorkflow(e.adapter),
+        "_update_case_wf": lambda e: UpdateCaseWorkflow(e.adapter),
+        "_assign_case_wf": lambda e: AssignCaseWorkflow(e.adapter),
+        "_set_case_stage_wf": lambda e: SetCaseStageWorkflow(e.adapter),
+        "_set_case_incident_wf": lambda e: SetCaseIncidentWorkflow(e.adapter),
+        "_update_case_alert_wf": lambda e: UpdateCaseAlertWorkflow(e.adapter),
+        "_set_case_alert_priority_wf": lambda e: SetCaseAlertPriorityWorkflow(e.adapter),
+        "_create_case_alert_recommendation_wf": lambda e: CreateCaseAlertRecommendationWorkflow(e.adapter),
+        "_fetch_case_alert_recommendation_wf": lambda e: FetchCaseAlertRecommendationWorkflow(e.adapter),
+        "_get_case_alert_recommendation_wf": lambda e: GetCaseAlertRecommendationWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
@@ -623,6 +647,115 @@ class SecOpsEngine:
                 mcp_tool_name="add_case_comment",
                 composed=False,
                 evidence_path="evidence/case/comment",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.update",
+                name="Update SOAR Case Properties",
+                description="Mutates case attributes such as assignee, stage, incident flag, or priority.",
+                category="case",
+                handler=self.update_case,
+                mcp_tool_name="update_case",
+                composed=False,
+                evidence_path="evidence/case/update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.assign",
+                name="Assign SOAR Case",
+                description="Assigns a SOAR case to a SOC role (@Role) or user GUID.",
+                category="case",
+                handler=self.assign_case,
+                mcp_tool_name="assign_case",
+                composed=False,
+                evidence_path="evidence/case/assign",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.set_stage",
+                name="Set SOAR Case Stage",
+                description="Updates the lifecycle stage of a SOAR case.",
+                category="case",
+                handler=self.set_case_stage,
+                mcp_tool_name="set_case_stage",
+                composed=False,
+                evidence_path="evidence/case/set_stage",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.set_incident",
+                name="Set SOAR Case Incident Status",
+                description="Marks or unmarks a SOAR case as an incident.",
+                category="case",
+                handler=self.set_case_incident,
+                mcp_tool_name="set_case_incident",
+                composed=False,
+                evidence_path="evidence/case/set_incident",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case_alert.update",
+                name="Update Case Alert",
+                description="Mutates case alert attributes such as priority or status.",
+                category="case",
+                handler=self.update_case_alert,
+                mcp_tool_name="update_case_alert",
+                composed=False,
+                evidence_path="evidence/case/alert_update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case_alert.set_priority",
+                name="Set Case Alert Priority",
+                description="Updates the priority level of a specific case alert.",
+                category="case",
+                handler=self.set_case_alert_priority,
+                mcp_tool_name="set_case_alert_priority",
+                composed=False,
+                evidence_path="evidence/case/alert_set_priority",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case_alert.create_recommendation",
+                name="Create Case Alert Recommendation",
+                description="Initiates asynchronous generation of a Gemini AI recommendation for a case alert.",
+                category="case",
+                handler=self.create_case_alert_recommendation,
+                mcp_tool_name="create_case_alert_recommendation",
+                composed=False,
+                evidence_path="evidence/case/alert_create_recommendation",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case_alert.fetch_recommendation",
+                name="Fetch Case Alert Recommendation",
+                description="Fetches a previously generated Gemini AI recommendation for a case alert by recommendation ID.",
+                category="case",
+                handler=self.fetch_case_alert_recommendation,
+                mcp_tool_name="fetch_case_alert_recommendation",
+                composed=False,
+                evidence_path="evidence/case/alert_fetch_recommendation",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case_alert.get_recommendation",
+                name="Get Case Alert Recommendation",
+                description="End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure.",
+                category="case",
+                handler=self.get_case_alert_recommendation,
+                mcp_tool_name="get_case_alert_recommendation",
+                composed=True,
+                uses=("case_alert.create_recommendation", "case_alert.fetch_recommendation"),
+                evidence_path="evidence/case/alert_get_recommendation",
             )
         )
         self.registry.register(
@@ -2093,6 +2226,85 @@ class SecOpsEngine:
     def add_case_comment(self, case_id: str, comment: str) -> CaseCommentRecord:
         """Executes the Add Case Comment workflow."""
         return self._add_case_comment_wf.execute(case_id=case_id, comment=comment)
+
+    def update_case(
+        self,
+        case_id: str,
+        assignee: Optional[str] = None,
+        stage: Optional[str] = None,
+        incident: Optional[bool] = None,
+        priority: Optional[str] = None,
+        updates: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> CaseUpdateResult:
+        """Executes the Update Case workflow."""
+        return self._update_case_wf.execute(
+            case_id=case_id,
+            assignee=assignee,
+            stage=stage,
+            incident=incident,
+            priority=priority,
+            updates=updates,
+            update_mask=update_mask,
+        )
+
+    def assign_case(self, case_id: str, assignee: str) -> CaseUpdateResult:
+        """Executes the Assign Case workflow (to a role e.g. @Tier1 or user GUID/email)."""
+        return self._assign_case_wf.execute(case_id=case_id, assignee=assignee)
+
+    def set_case_stage(self, case_id: str, stage: str) -> CaseUpdateResult:
+        """Executes the Set Case Stage workflow."""
+        return self._set_case_stage_wf.execute(case_id=case_id, stage=stage)
+
+    def set_case_incident(self, case_id: str, incident: bool = True) -> CaseUpdateResult:
+        """Executes the Set Case Incident workflow."""
+        return self._set_case_incident_wf.execute(case_id=case_id, incident=incident)
+
+    def update_case_alert(
+        self,
+        case_id: str,
+        alert_id: str,
+        priority: Optional[str] = None,
+        status: Optional[str] = None,
+        updates: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> CaseAlertUpdateResult:
+        """Executes the Update Case Alert workflow."""
+        return self._update_case_alert_wf.execute(
+            case_id=case_id,
+            alert_id=alert_id,
+            priority=priority,
+            status=status,
+            updates=updates,
+            update_mask=update_mask,
+        )
+
+    def set_case_alert_priority(self, case_id: str, alert_id: str, priority: str) -> CaseAlertUpdateResult:
+        """Executes the Set Case Alert Priority workflow."""
+        return self._set_case_alert_priority_wf.execute(case_id=case_id, alert_id=alert_id, priority=priority)
+
+    def create_case_alert_recommendation(self, case_id: str, alert_id: str) -> CaseAlertRecommendationJob:
+        """Initiates async Gemini AI recommendation generation for a case alert."""
+        return self._create_case_alert_recommendation_wf.execute(case_id=case_id, alert_id=alert_id)
+
+    def fetch_case_alert_recommendation(self, case_id: str, recommendation_id: str) -> CaseAlertRecommendation:
+        """Fetches a previously generated Gemini AI recommendation for a case alert."""
+        return self._fetch_case_alert_recommendation_wf.execute(case_id=case_id, recommendation_id=recommendation_id)
+
+    def get_case_alert_recommendation(
+        self,
+        case_id: str,
+        alert_id: str,
+        timeout_sec: float = 30.0,
+        poll_interval_sec: float = 2.0,
+    ) -> CaseAlertRecommendation:
+        """Executes end-to-end Gemini AI recommendation generation and polls until complete."""
+        return self._get_case_alert_recommendation_wf.execute(
+            case_id=case_id,
+            alert_id=alert_id,
+            timeout_sec=timeout_sec,
+            poll_interval_sec=poll_interval_sec,
+        )
 
     def investigate_alert(self, alert_name: str) -> AlertInvestigation:
         """Executes the Alert Deep-Dive Investigation workflow."""

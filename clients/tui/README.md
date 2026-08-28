@@ -62,20 +62,82 @@ In **live mode**, the app constructs a `SecOpsEngine()` using the normal tenant 
 
 ---
 
-## Key Bindings
+## Workspaces & Operational Views
 
-- `/` → focus the search input
-- `r` → refresh (re-runs the current query)
-- `Enter` on the search input → execute query
-- Arrow keys / `j`/`k` → navigate case list
-- `Enter` on a row → load full case detail in right pane
-- `q` → quit
+The application provides 5 primary i3-style workspaces:
+
+| Workspace | Keybinding | Purpose & Functionality |
+| :--- | :--- | :--- |
+| **1: Triage** | `F1` or `1` | Real-time SOAR incident list and interactive Case Inspector with seamless inline sub-views: Overview (`o`), Alerts (`a`), Entity Correlation (`e`), and Playbook Run DAG (`p`), plus analyst comment posting (`c`). |
+| **2: UDM Hunt** | `F2` or `2` | Interactive 3-pane Google SecOps UDM telemetry workstation. Top: Live query bar & event table. Bottom: Side-by-side Parsed UDM Fields and Live Decoded Raw Log stream with zero-click cursor follow. |
+| **3: Detection** | `F3` or `3` | Google Cloud Threat Intelligence (GCTI) curated detection rules catalogue. Browse detection categories, inspect rule logic, and view MITRE ATT&CK tactics/techniques mappings. |
+| **4: Automation** | `F4` or `4` | SOAR automated playbook catalogue. Search workflows, view triggers and conditions, and inspect end-to-step automation DAG sequences. |
+| **5: Dashboards** | `F5` or `5` | Google SecOps Native Dashboards Hub. Browse dashboards, inspect composite graphs, and render live widget telemetry (KPI stat cards, Unicode bar charts, and data tables). |
+
+---
+
+## i3 Tiling Window Manager & Keybindings
+
+The TUI features dynamic binary-space tiling and window management inside any workspace:
+
+### Window Tiling & Splits
+- `Alt+v` → **Split Vertically**: Spawns a side-by-side tile and prompts with the tile launcher to pick any SecOps view.
+- `Alt+s` → **Split Horizontally**: Spawns a stacked top/bottom tile and prompts to pick any SecOps view.
+- `Alt+d` → **Tile Launcher**: Quick fuzzy launcher to spawn any SecOps component into the active view.
+- `Alt+f` → **Maximize / Fullscreen**: Toggles maximize on the active tile or split pane without destroying other tiles.
+- `Alt+w` or `Alt+q` → **Close Tile**: Closes the active dynamic tile.
+
+### Navigation & Search
+- `F1`–`F5` or `1`–`5` → Switch active workspace
+- `/` → Focus the active workspace search input
+- `Escape` → Blur search input back to table, return to Case Overview, or close modals
+- `Down` / `Enter` on search input → Focus data table or execute query
+- `Tab` / `Shift+Tab` → Navigate focus between controls and tiles
+
+### Zero-Click Live Cursor-Follow
+- Moving `Up` / `Down` in any table immediately live-updates all inspector panes:
+  - In **UDM Hunt**: Highlights update both Parsed Telemetry and Raw Log panes in real time without extra keypresses or modal popups.
+  - In **Cases / Triage**: Highlights immediately load the selected case and active sub-view.
+  - In **Detection / Rules**: Highlights immediately load member rules and MITRE matrices.
+  - In **Playbooks**: Highlights immediately load trigger criteria and step action DAGs.
+  - In **Dashboards**: Highlights immediately retrieve composite graphs and execute live widget queries.
+
+### Analyst Actions & Sub-Views
+- `o` → **Case Overview** (switches right pane back to case summary, metadata & comments)
+- `a` → **Alert Drill-Down** (renders alert rules, risk scores & events inline)
+- `e` → **Entity Pivot** (prompts for entity/indicator picker and renders graph & IoC correlations inline)
+- `p` → **Playbook Run DAG** (renders automated action sequence and statuses inline)
+- `c` → **Add Analyst Comment** (opens modal dialog to post comment and auto-refreshes case)
+- `i` → **Inspect Enriched UDM Event** (renders dot-separated UDM schema paths inline)
+- `l` → **View Raw Log** (renders decoded raw log payload inline)
+- `y` → **Yank / Copy to Clipboard** (copies active case ID, raw log, UDM JSON, rule logic, or dashboard ID to system clipboard)
+- `r` → **Refresh** (re-runs active query and reloads active selection)
+- `?` or `h` → **Help** (shows interactive keyboard shortcuts guide)
+- `q` on main screen → Quit application
+
+---
+
+## Modular SecOps Tile Components
+
+Any workspace can dynamically host any combination of modular SecOps tiles from the Tile Registry (`clients/tui/tiles.py`):
+
+1. **Cases Triage (`cases`)**: SOAR incident queue and case search table.
+2. **Case Investigation (`case-detail`)**: Case overview, alerts, involved entities, and comments.
+3. **UDM Event Stream (`udm-search`)**: Live UDM query input and event table.
+4. **UDM Inspector (`udm-detail`)**: Actor, Target, Network, and Security Result telemetry.
+5. **Raw Log Payload (`raw-log`)**: Decoded unparsed syslog/JSON log text with byte size.
+6. **Curated Rules (`rules`)**: GCTI detection rulesets and category browser.
+7. **Rule Heuristic & Logic (`rule-detail`)**: YARA-L rule code, deployments & MITRE ATT&CK tactics.
+8. **Playbooks Catalogue (`playbooks`)**: SOAR automation workflows and triggers.
+9. **Playbook Steps DAG (`playbook-detail`)**: Trigger criteria and automated action execution sequence.
+10. **Dashboards Hub (`dashboards`)**: Google SecOps native dashboards search and catalogue table.
+11. **Dashboard Visualizer (`dashboard-detail`)**: Composite dashboard graphs, KPI metrics, bar charts, and data tables.
 
 ---
 
 ## Threading Invariant
 
-**No facade call happens on the UI thread.** Both `search_cases` and `investigate_case` are dispatched via `@work(thread=True)` and post their results (or errors) as custom `Message` subclasses. The UI thread handles these messages by updating widgets. This keeps the interface responsive even on slow networks and demonstrates the SDK's thread-safety (the facade is designed for concurrent access by multiple workers).
+**No facade call happens on the UI thread.** All operations (`search_cases`, `investigate_case`, `investigate_alert`, `investigate_entity`, `add_case_comment`, `get_alert_playbook_instance`) are dispatched via `@work(thread=True)` and post results/errors back as custom `Message` subclasses. Message handlers on the UI thread apply updates and mount modals without freezing the terminal.
 
 The worker setup:
 

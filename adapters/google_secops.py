@@ -79,7 +79,8 @@ class GoogleSecOpsAdapter:
     ) -> Dict[str, Any]:
         """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
         token = self._get_auth_token()
-        url = f"{self.api_base}{path}"
+        encoded_path = urllib.parse.quote(path, safe="/:@&=+$,?#")
+        url = f"{self.api_base}{encoded_path}"
         if params:
             query_string = urllib.parse.urlencode(params)
             url = f"{url}?{query_string}"

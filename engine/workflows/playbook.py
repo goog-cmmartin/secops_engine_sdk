@@ -356,6 +356,7 @@ class GetAlertPlaybookInstancesWorkflow:
         for a in alerts_raw:
             candidates = {
                 str(a.get("identifier", "")),
+                str(a.get("name", "")),
                 str(a.get("name", "")).split("/")[-1],
                 str(a.get("id", "")),
             }

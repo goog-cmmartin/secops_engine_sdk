@@ -414,19 +414,20 @@ def _build_demo_engine():
             return rec
 
         def investigate_alert(self, alert_name):
+            cid = alert_name.split("/")[1] if "cases/" in alert_name else "1000"
             return AlertInvestigation(
                 alert_name=alert_name,
-                case_id="1000",
-                display_name=f"Deep Investigation — {alert_name}",
-                priority="HIGH",
+                case_id=cid,
+                display_name=f"Alert Deep-Dive: {alert_name.split('/')[-1]}",
+                priority="CRITICAL" if "0" in alert_name else "HIGH",
                 status="OPEN",
-                rule_name="rule_suspected_phishing_credential_access",
-                rule_id="r_phish_0921",
+                rule_name="Suspicious Authentication & Token Burst",
+                rule_id="ru_88492048-291a-4932",
                 risk_score=85,
-                detection_time=now - timedelta(hours=2),
-                product="Chronicle SIEM",
-                vendor="Google SecOps",
-                event_count=12,
+                detection_time=now - timedelta(minutes=45),
+                product="Chronicle",
+                vendor="Google",
+                event_count=15,
                 entities=[
                     InvolvedEntitySummary(
                         identifier="jdoe@corp.example",
@@ -434,13 +435,15 @@ def _build_demo_engine():
                         entity_type="USER",
                         role="source",
                         is_suspicious=True,
+                        raw={},
                     ),
                     InvolvedEntitySummary(
-                        identifier="198.51.100.44",
-                        display_name="198.51.100.44",
+                        identifier="198.51.100.42",
+                        display_name="198.51.100.42",
                         entity_type="IP",
-                        role="c2_endpoint",
+                        role="attacker",
                         is_suspicious=True,
+                        raw={},
                     ),
                 ],
                 associated_events=[

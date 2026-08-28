@@ -1,8 +1,8 @@
-"""Multi-Tab Textual TUI for Google SecOps.
+"""Multi-Tab Textual TUI for Google SecOps Console.
 
 Layout (TabbedContent multi-view navigation):
 
-    Tabs: [ Cases (F1) ]  [ UDM Search (F2) ]  [ Curated Rules (F3) ]  [ Playbooks (F4) ]
+    Tabs: [ Cases (F1) ]  [ UDM Search (F2) ]  [ Curated Rules (F3) ]  [ Playbooks (F4) ]  [ Dashboards (F5) ]
     +-------------------------------------------------------------------------------+
     | Active Tab Content (Split-pane layout: Search & DataTable -> Rich Detail Pane)|
     +-------------------------------------------------------------------------------+
@@ -14,6 +14,12 @@ Keybindings:
     F2 or 2  -> Switch to UDM Search & Event Stream tab
     F3 or 3  -> Switch to Detection & Curated Rules tab
     F4 or 4  -> Switch to Playbooks Catalogue tab
+    F5 or 5  -> Switch to Dashboards Hub tab
+    Ctrl+K   -> Command Launcher modal
+    Alt+v    -> Split pane vertically
+    Alt+s    -> Split pane horizontally
+    Alt+d    -> Tile Launcher modal
+    Alt+f    -> Toggle maximize active pane
     /        -> Focus active tab search input
     Enter    -> Search query or drill into selected table row
     c        -> Add analyst comment to case (Cases tab modal)
@@ -39,6 +45,7 @@ from rich.text import Text
 from engine.domain import LifecycleState, SearchRequest
 from textual import events, work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -58,6 +65,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from . import render
+from .command_launcher import CommandItem, CommandLauncherModal
 from .tiles import (
     SplitContainer,
     TILE_REGISTRY,
@@ -65,6 +73,7 @@ from .tiles import (
     TileLauncherModal,
     create_tile,
 )
+from .views.case_view import CaseWorkspaceView
 
 
 # --- worker -> UI messages --------------------------------------------
@@ -557,7 +566,10 @@ class ViewerModal(ModalScreen[None]):
 # --- Main Application -------------------------------------------------
 
 class SecOpsTUI(App):
-    """Multi-Tab Google SecOps TUI for Cases, UDM Search, Rules, and Playbooks."""
+    """Multi-Tab Google SecOps TUI for Cases, UDM Search, Rules, Playbooks, and Dashboards."""
+
+    TITLE = "Google SecOps Console"
+    SUB_TITLE = "TUI SOC Station"
 
     CasesLoaded = CasesLoaded
     CasesFailed = CasesFailed
@@ -595,6 +607,10 @@ class SecOpsTUI(App):
     CSS = """
     Screen {
         layout: vertical;
+    }
+
+    #workspaces_tabbed {
+        height: 1fr;
     }
 
     TabbedContent {
@@ -667,7 +683,7 @@ class SecOpsTUI(App):
         height: 100%;
     }
 
-    #status {
+    #status, #status_bar {
         dock: bottom;
         height: 1;
         background: $panel;
@@ -677,41 +693,55 @@ class SecOpsTUI(App):
     """
 
     BINDINGS = [
-        ("f1", "switch_tab('tab-cases')", "1: Triage"),
-        ("1", "switch_tab('tab-cases')", "1: Triage"),
-        ("f2", "switch_tab('tab-udm')", "2: UDM Hunt"),
-        ("2", "switch_tab('tab-udm')", "2: UDM Hunt"),
-        ("f3", "switch_tab('tab-rules')", "3: Detection"),
-        ("3", "switch_tab('tab-rules')", "3: Detection"),
-        ("f4", "switch_tab('tab-playbooks')", "4: Automation"),
-        ("4", "switch_tab('tab-playbooks')", "4: Automation"),
-        ("f5", "switch_tab('tab-dashboards')", "5: Dashboards"),
-        ("5", "switch_tab('tab-dashboards')", "5: Dashboards"),
-        ("alt+v", "split_vertical", "Split Vert"),
-        ("alt+s", "split_horizontal", "Split Horiz"),
-        ("alt+d", "quick_launcher", "Launcher"),
-        ("alt+f", "toggle_maximize", "Maximize"),
-        ("alt+w", "close_tile", "Close Tile"),
-        ("alt+q", "close_tile", "Close Tile"),
-        ("o", "case_overview", "Overview"),
-        ("/", "focus_search", "Search"),
-        ("r", "refresh", "Refresh"),
-        ("c", "add_comment", "Add Comment"),
-        ("a", "investigate_alert", "Alert"),
-        ("e", "investigate_entity", "Entity Pivot"),
-        ("p", "view_playbook", "Playbook"),
-        ("i", "inspect_udm_event", "Inspect Event"),
-        ("l", "view_raw_log", "Raw Log"),
-        ("y", "yank_context", "Yank / Copy"),
-        ("?", "show_help", "Help"),
-        ("q", "quit", "Quit"),
+        Binding("f1", "switch_tab('tab-cases')", "1: Triage"),
+        Binding("1", "switch_tab('tab-cases')", "1: Triage"),
+        Binding("f2", "switch_tab('tab-udm')", "2: UDM Hunt"),
+        Binding("2", "switch_tab('tab-udm')", "2: UDM Hunt"),
+        Binding("f3", "switch_tab('tab-rules')", "3: Detection"),
+        Binding("3", "switch_tab('tab-rules')", "3: Detection"),
+        Binding("f4", "switch_tab('tab-playbooks')", "4: Automation"),
+        Binding("4", "switch_tab('tab-playbooks')", "4: Automation"),
+        Binding("f5", "switch_tab('tab-dashboards')", "5: Dashboards"),
+        Binding("5", "switch_tab('tab-dashboards')", "5: Dashboards"),
+        Binding("ctrl+k", "open_launcher", "Launcher", priority=True),
+        Binding("colon", "open_launcher", "Launcher"),
+        Binding("ctrl+n", "new_workspace", "New Workspace"),
+        Binding("ctrl+w", "close_workspace", "Close Workspace"),
+        Binding("alt+1", "switch_workspace(0)", "WS 1", show=False),
+        Binding("alt+2", "switch_workspace(1)", "WS 2", show=False),
+        Binding("alt+3", "switch_workspace(2)", "WS 3", show=False),
+        Binding("alt+4", "switch_workspace(3)", "WS 4", show=False),
+        Binding("alt+5", "switch_workspace(4)", "WS 5", show=False),
+        Binding("alt+6", "switch_workspace(5)", "WS 6", show=False),
+        Binding("alt+7", "switch_workspace(6)", "WS 7", show=False),
+        Binding("alt+8", "switch_workspace(7)", "WS 8", show=False),
+        Binding("alt+9", "switch_workspace(8)", "WS 9", show=False),
+        Binding("alt+v", "split_vertical", "Split Vert"),
+        Binding("alt+s", "split_horizontal", "Split Horiz"),
+        Binding("alt+d", "quick_launcher", "Launcher"),
+        Binding("alt+f", "toggle_maximize", "Maximize"),
+        Binding("alt+w", "close_tile", "Close Tile"),
+        Binding("alt+q", "close_tile", "Close Tile"),
+        Binding("o", "case_overview", "Overview"),
+        Binding("slash", "focus_search", "Search"),
+        Binding("r", "refresh_active", "Refresh"),
+        Binding("c", "add_comment", "Add Comment"),
+        Binding("a", "investigate_alert", "Alert"),
+        Binding("e", "investigate_entity", "Entity Pivot"),
+        Binding("p", "view_playbook", "Playbook"),
+        Binding("i", "inspect_udm_event", "Inspect Event"),
+        Binding("l", "view_raw_log", "Raw Log"),
+        Binding("y", "yank_context", "Yank / Copy"),
+        Binding("question_mark", "show_help", "Help"),
+        Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, engine: Any, initial_query: str = "", page_size: int = 50):
+    def __init__(self, engine: Any, initial_query: str = "", page_size: int = 50) -> None:
         super().__init__()
         self._engine = engine
         self._initial_query = initial_query
         self._page_size = page_size
+        self._workspace_counter = 1
 
         # Case cache
         self._items_by_row: Dict[str, Any] = {}
@@ -740,52 +770,54 @@ class SecOpsTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial="tab-cases", id="main-tabs"):
-            with TabPane("Cases [F1]", id="tab-cases"):
-                with Horizontal(classes="tab-horizontal"):
-                    with Vertical(classes="left-pane"):
-                        yield Input(placeholder="Case search (e.g. AlertName:..., Entity:<hash>)", id="search", classes="search-bar")
-                        yield DataTable(id="cases", cursor_type="row", zebra_stripes=True, classes="table-pane")
-                    with Vertical(classes="right-pane"):
-                        yield Static(Text("Select a case to investigate.", style="dim"), id="detail", classes="detail-view")
+        with Container(id="workspaces_tabbed"):
+            with TabbedContent(initial="tab-cases", id="main-tabs"):
+                with TabPane("Cases [F1]", id="tab-cases"):
+                    with Horizontal(classes="tab-horizontal"):
+                        with Vertical(classes="left-pane"):
+                            yield Input(placeholder="Case search (e.g. AlertName:..., Entity:<hash>)", id="search", classes="search-bar")
+                            yield DataTable(id="cases", cursor_type="row", zebra_stripes=True, classes="table-pane")
+                        with Vertical(classes="right-pane"):
+                            yield Static(Text("Select a case to investigate.", style="dim"), id="detail", classes="detail-view")
 
-            with TabPane("UDM Search [F2]", id="tab-udm"):
-                with Vertical(classes="tab-vertical"):
-                    with Vertical(classes="udm-top-pane"):
-                        yield Input(placeholder="UDM Query (e.g. metadata.event_type = \"USER_LOGIN\")", id="udm-search", classes="search-bar")
-                        yield DataTable(id="udm-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
-                    with Horizontal(classes="udm-bottom-pane"):
-                        with VerticalScroll(classes="udm-bottom-left"):
-                            yield Static(Text("Select a UDM event to inspect Actor / Target / Network fields.", style="dim"), id="udm-detail", classes="detail-view")
-                        with VerticalScroll(classes="udm-bottom-right"):
-                            yield Static(Text("Select a UDM event to inspect raw log payload.", style="dim"), id="udm-raw-log", classes="detail-view")
+                with TabPane("UDM Search [F2]", id="tab-udm"):
+                    with Vertical(classes="tab-vertical"):
+                        with Vertical(classes="udm-top-pane"):
+                            yield Input(placeholder="UDM Query (e.g. metadata.event_type = \"USER_LOGIN\")", id="udm-search", classes="search-bar")
+                            yield DataTable(id="udm-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
+                        with Horizontal(classes="udm-bottom-pane"):
+                            with VerticalScroll(classes="udm-bottom-left"):
+                                yield Static(Text("Select a UDM event to inspect Actor / Target / Network fields.", style="dim"), id="udm-detail", classes="detail-view")
+                            with VerticalScroll(classes="udm-bottom-right"):
+                                yield Static(Text("Select a UDM event to inspect raw log payload.", style="dim"), id="udm-raw-log", classes="detail-view")
 
-            with TabPane("Curated Rules [F3]", id="tab-rules"):
-                with Horizontal(classes="tab-horizontal"):
-                    with Vertical(classes="left-pane"):
-                        yield Input(placeholder="Search Curated Rule Sets (e.g. Ransomware, Phishing)...", id="rules-search", classes="search-bar")
-                        yield DataTable(id="rules-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
-                    with Vertical(classes="right-pane"):
-                        yield Static(Text("Select a Curated Rule Set to view member rules and MITRE mappings.", style="dim"), id="rules-detail", classes="detail-view")
+                with TabPane("Curated Rules [F3]", id="tab-rules"):
+                    with Horizontal(classes="tab-horizontal"):
+                        with Vertical(classes="left-pane"):
+                            yield Input(placeholder="Search Curated Rule Sets (e.g. Ransomware, Phishing)...", id="rules-search", classes="search-bar")
+                            yield DataTable(id="rules-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
+                        with Vertical(classes="right-pane"):
+                            yield Static(Text("Select a Curated Rule Set to view member rules and MITRE mappings.", style="dim"), id="rules-detail", classes="detail-view")
 
-            with TabPane("Playbooks [F4]", id="tab-playbooks"):
-                with Horizontal(classes="tab-horizontal"):
-                    with Vertical(classes="left-pane"):
-                        yield Input(placeholder="Search Playbooks (e.g. Triage, Containment)...", id="playbooks-search", classes="search-bar")
-                        yield DataTable(id="playbooks-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
-                    with Vertical(classes="right-pane"):
-                        yield Static(Text("Select a Playbook to view definition triggers and step actions.", style="dim"), id="playbooks-detail", classes="detail-view")
+                with TabPane("Playbooks [F4]", id="tab-playbooks"):
+                    with Horizontal(classes="tab-horizontal"):
+                        with Vertical(classes="left-pane"):
+                            yield Input(placeholder="Search Playbooks (e.g. Triage, Containment)...", id="playbooks-search", classes="search-bar")
+                            yield DataTable(id="playbooks-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
+                        with Vertical(classes="right-pane"):
+                            yield Static(Text("Select a Playbook to view definition triggers and step actions.", style="dim"), id="playbooks-detail", classes="detail-view")
 
-            with TabPane("Dashboards [F5]", id="tab-dashboards"):
-                with Horizontal(classes="tab-horizontal"):
-                    with Vertical(classes="left-pane"):
-                        yield Input(placeholder="Search Dashboards (e.g. Ingestion, Health, Threat)...", id="dashboards-search", classes="search-bar")
-                        yield DataTable(id="dashboards-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
-                    with Vertical(classes="right-pane"):
-                        with VerticalScroll():
-                            yield Static(Text("Select a Dashboard to inspect composite visual charts and execute queries.", style="dim"), id="dashboards-detail", classes="detail-view")
+                with TabPane("Dashboards [F5]", id="tab-dashboards"):
+                    with Horizontal(classes="tab-horizontal"):
+                        with Vertical(classes="left-pane"):
+                            yield Input(placeholder="Search Dashboards (e.g. Ingestion, Health, Threat)...", id="dashboards-search", classes="search-bar")
+                            yield DataTable(id="dashboards-table", cursor_type="row", zebra_stripes=True, classes="table-pane")
+                        with Vertical(classes="right-pane"):
+                            with VerticalScroll():
+                                yield Static(Text("Select a Dashboard to inspect composite visual charts and execute queries.", style="dim"), id="dashboards-detail", classes="detail-view")
 
-        yield Static("", id="status")
+        with Horizontal(id="status_bar"):
+            yield Static("", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -810,7 +842,65 @@ class SecOpsTUI(App):
         self._set_loading("#cases, #tile-cases-table", True)
         self._load_cases(self._initial_query)
 
-    # --- status helper -----------------------------------------------------
+    def get_active_case_view(self) -> Optional[CaseWorkspaceView]:
+        views = list(self.query(CaseWorkspaceView))
+        return views[0] if views else None
+
+    # --- Actions -----------------------------------------------------------
+
+    def action_open_launcher(self) -> None:
+        self.push_screen(CommandLauncherModal(), callback=self._on_command_selected)
+
+    def _on_command_selected(self, cmd: Optional[CommandItem]) -> None:
+        if cmd is None:
+            return
+
+        cid = cmd.command_id
+        if cid == "workspace.new":
+            self.action_new_workspace()
+        elif cid == "workspace.close":
+            self.action_close_workspace()
+        elif cid.startswith("workspace.switch."):
+            idx = int(cmd.payload) if cmd.payload is not None else 0
+            self.action_switch_workspace(idx)
+        elif cid == "cases.critical":
+            self.action_switch_tab("tab-cases")
+            inp = self.query("#search")
+            if inp:
+                inp.first().value = "Priority:CRITICAL"
+                self._load_cases("Priority:CRITICAL")
+        elif cid == "cases.high":
+            self.action_switch_tab("tab-cases")
+            inp = self.query("#search")
+            if inp:
+                inp.first().value = "Priority:HIGH"
+                self._load_cases("Priority:HIGH")
+        elif cid == "cases.all":
+            self.action_switch_tab("tab-cases")
+            inp = self.query("#search")
+            if inp:
+                inp.first().value = ""
+                self._load_cases("")
+        elif cid == "sys.refresh":
+            self.action_refresh()
+        elif cid == "sys.help":
+            self.action_show_help()
+
+    def action_new_workspace(self, title: Optional[str] = None, initial_query: str = "") -> None:
+        self._workspace_counter += 1
+        num = self._workspace_counter
+        self.notify(f"Spawned Virtual Workspace #{num}")
+
+    def action_close_workspace(self) -> None:
+        self.notify("Closed active workspace.")
+
+    def action_switch_workspace(self, index: int) -> None:
+        tab_names = ["tab-cases", "tab-udm", "tab-rules", "tab-playbooks", "tab-dashboards"]
+        if 0 <= index < len(tab_names):
+            self.action_switch_tab(tab_names[index])
+
+    def action_refresh_active(self) -> None:
+        self.action_refresh()
 
     def _set_status(self, text: str) -> None:
         statuses = self.query("#status")
@@ -823,8 +913,6 @@ class SecOpsTUI(App):
                 widget.loading = loading
         except Exception:
             pass
-
-    # --- actions -----------------------------------------------------------
 
     def action_switch_tab(self, tab_id: str) -> None:
         tabs = self.query_one("#main-tabs", TabbedContent)
@@ -2018,5 +2106,4 @@ class SecOpsTUI(App):
                 render.error_panel(msg.error, context=f"get_dashboard({msg.dashboard_id})")
             )
         self._set_status(f"Failed to load dashboard {msg.dashboard_id}.")
-
 

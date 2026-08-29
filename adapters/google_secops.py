@@ -656,6 +656,16 @@ class GoogleSecOpsAdapter:
             raise RuntimeError(f"Failed to fetch recommendation {recommendation_id} for case {case_id}: invalid response.")
         return res
 
+    def get_or_create_case_summary(self, case_id: str) -> Dict[str, Any]:
+        """Gets or initiates creation of an AI-driven summary for a SOAR case using v1alpha endpoint."""
+        raw_case_id = case_id.split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:getOrCreateCaseSummary"
+        res = self._request("POST", path, body={})
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to get/create summary for case {case_id}: invalid response.")
+        return res
+
     def list_alert_entities(self, alert_name: str) -> List[Dict[str, Any]]:
         """Lists all involved entities for a specific alert."""
         clean_name = alert_name.lstrip("/")
@@ -2154,6 +2164,305 @@ class GoogleSecOpsAdapter:
         if end_time:
             params["timeRange.endTime"] = end_time
         return self._request("GET", path, params=params)
+
+    # -------------------------------------------------------------------------
+    # Chronicle SIEM Data Tables (projects.locations.instances.dataTables)
+    # -------------------------------------------------------------------------
+
+    def list_data_tables(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        order_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists structured data tables in Chronicle SIEM."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if order_by:
+            params["orderBy"] = order_by
+        return self._request("GET", path, params=params)
+
+    def get_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
+        """Gets metadata and schema for a specific Chronicle SIEM Data Table."""
+        clean_id = table_name_or_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        return self._request("GET", path)
+
+    def create_data_table(
+        self,
+        table_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        column_info: Optional[List[Dict[str, Any]]] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Creates a new structured Data Table in Chronicle SIEM."""
+        clean_id = table_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables"
+        params = {"dataTableId": clean_id}
+        body: Dict[str, Any] = {
+            "displayName": display_name or clean_id,
+            "columnInfo": column_info or [],
+        }
+        if description:
+            body["description"] = description
+        if row_time_to_live:
+            body["rowTimeToLive"] = row_time_to_live
+        if scope_info:
+            body["scopeInfo"] = scope_info
+        return self._request("POST", path, params=params, body=body)
+
+    def patch_data_table(
+        self,
+        table_name_or_id: str,
+        description: Optional[str] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates metadata, TTL, or scope info for an existing Data Table."""
+        clean_id = table_name_or_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        body: Dict[str, Any] = {
+            "name": f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        }
+        mask_parts = []
+        if description is not None:
+            body["description"] = description
+            mask_parts.append("description")
+        if row_time_to_live is not None:
+            body["rowTimeToLive"] = row_time_to_live
+            mask_parts.append("rowTimeToLive")
+        if scope_info is not None:
+            body["scopeInfo"] = scope_info
+            mask_parts.append("scopeInfo")
+
+        params: Dict[str, Any] = {}
+        if update_mask:
+            params["updateMask"] = update_mask
+        elif mask_parts:
+            params["updateMask"] = ",".join(mask_parts)
+
+        return self._request("PATCH", path, params=params if params else None, body=body)
+
+    def delete_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
+        """Deletes a Chronicle SIEM Data Table."""
+        clean_id = table_name_or_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        return self._request("DELETE", path)
+
+    def list_data_table_rows(
+        self,
+        table_name_or_id: str,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists rows contained within a Chronicle SIEM Data Table."""
+        clean_id = table_name_or_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}/dataTableRows"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        return self._request("GET", path, params=params)
+
+    def bulk_create_data_table_rows(
+        self,
+        table_name_or_id: str,
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Creates data table rows in bulk in Chronicle SIEM."""
+        clean_id = table_name_or_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}/dataTableRows:bulkCreate"
+        # Each row can be {"values": [...]} or raw list of values
+        requests = []
+        for r in rows:
+            if isinstance(r, dict) and "values" in r:
+                requests.append({"row": r})
+            elif isinstance(r, (list, tuple)):
+                requests.append({"row": {"values": [str(v) for v in r]}})
+            elif isinstance(r, dict):
+                requests.append({"row": r})
+        body = {"requests": requests}
+        return self._request("POST", path, body=body)
+
+    def delete_data_table_row(
+        self,
+        table_name_or_id: str,
+        row_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a specific row from a Chronicle SIEM Data Table."""
+        clean_table_id = table_name_or_id.split("/")[-1]
+        clean_row_id = row_id.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_table_id}/dataTableRows/{clean_row_id}"
+        return self._request("DELETE", path)
+
+    # -------------------------------------------------------------------------
+    # Chronicle SIEM Detection Rules (projects.locations.instances.rules)
+    # -------------------------------------------------------------------------
+
+    def list_rules(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+        view: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists custom YARA-L detection rules in Chronicle SIEM."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        if view:
+            params["view"] = view
+        return self._request("GET", path, params=params)
+
+    def get_rule(
+        self,
+        rule_id_or_name: str,
+        view: str = "FULL",
+    ) -> Dict[str, Any]:
+        """Retrieves full details of a custom Chronicle SIEM detection rule."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            path = f"/v1alpha/{clean_id}"
+        else:
+            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+        params = {"view": view} if view else None
+        return self._request("GET", path, params=params)
+
+    def verify_rule_text(self, rule_text: str) -> Dict[str, Any]:
+        """Validates/compiles YARA-L 2.0 rule text against the Chronicle compiler."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}:verifyRuleText"
+        body = {"ruleText": rule_text}
+        return self._request("POST", path, body=body)
+
+    def create_rule(self, rule_text: str) -> Dict[str, Any]:
+        """Creates a new YARA-L detection rule in Chronicle SIEM."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules"
+        body = {"text": rule_text}
+        return self._request("POST", path, body=body)
+
+    def patch_rule(
+        self,
+        rule_id_or_name: str,
+        rule_text: str,
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates a custom detection rule with new YARA-L text."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            path = f"/v1alpha/{clean_id}"
+            res_name = clean_id
+        else:
+            res_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+            path = f"/v1alpha/{res_name}"
+        body = {
+            "name": res_name,
+            "text": rule_text,
+        }
+        params: Dict[str, Any] = {}
+        if update_mask:
+            params["updateMask"] = update_mask
+        else:
+            params["updateMask"] = "text"
+        return self._request("PATCH", path, params=params, body=body)
+
+    def delete_rule(self, rule_id_or_name: str) -> Dict[str, Any]:
+        """Deletes a custom detection rule from Chronicle SIEM."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            path = f"/v1alpha/{clean_id}"
+        else:
+            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+        return self._request("DELETE", path)
+
+    def list_rule_revisions(
+        self,
+        rule_id_or_name: str,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists all revisions/version history of a custom detection rule."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            path = f"/v1alpha/{clean_id}:listRevisions"
+        else:
+            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}:listRevisions"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", path, params=params)
+
+    def get_rule_deployment(self, rule_id_or_name: str) -> Dict[str, Any]:
+        """Gets deployment, frequency, and alerting status for a detection rule."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            path = f"/v1alpha/{clean_id}/deployment"
+        else:
+            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}/deployment"
+        return self._request("GET", path)
+
+    def update_rule_deployment(
+        self,
+        rule_id_or_name: str,
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        run_frequency: Optional[str] = None,
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates deployment properties (enabled, alerting, runFrequency) of a rule."""
+        clean_id = rule_id_or_name.strip()
+        if clean_id.startswith("projects/"):
+            deployment_name = f"{clean_id}/deployment"
+            path = f"/v1alpha/{deployment_name}"
+        else:
+            deployment_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}/deployment"
+            path = f"/v1alpha/{deployment_name}"
+
+        body: Dict[str, Any] = {"name": deployment_name}
+        mask_parts = []
+        if enabled is not None:
+            body["enabled"] = enabled
+            mask_parts.append("enabled")
+        if alerting is not None:
+            body["alerting"] = alerting
+            mask_parts.append("alerting")
+        if run_frequency is not None:
+            body["runFrequency"] = run_frequency
+            mask_parts.append("runFrequency")
+
+        params: Dict[str, Any] = {}
+        if update_mask:
+            params["updateMask"] = update_mask
+        elif mask_parts:
+            params["updateMask"] = ",".join(mask_parts)
+
+        return self._request("PATCH", path, params=params if params else None, body=body)
+
+    def list_rule_execution_errors(
+        self,
+        rule_id_or_name: Optional[str] = None,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists runtime / execution errors for Chronicle detection rules."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/ruleExecutionErrors"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if rule_id_or_name:
+            clean_id = rule_id_or_name.split("/")[-1]
+            params["filter"] = f'rule_id = "{clean_id}"'
+        return self._request("GET", path, params=params)
+
 
 
 

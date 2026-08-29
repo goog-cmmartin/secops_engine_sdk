@@ -17,6 +17,22 @@ from engine.domain import (
     CaseAlertUpdateResult,
     CaseAlertRecommendationJob,
     CaseAlertRecommendation,
+    CaseSummary,
+    DataTable,
+    DataTableColumnInfo,
+    DataTableRow,
+    DataTableListResult,
+    DataTableRowListResult,
+    RuleSeverity,
+    RuleCompilationDiagnostic,
+    RuleValidationResult,
+    RuleDeployment,
+    RuleExecutionError,
+    RuleExecutionErrorListResult,
+    RuleSummary,
+    RuleDetail,
+    RuleListResult,
+    RuleRevisionListResult,
     ContentPackBatch,
     ContentPackDetail,
     ContentPackSearchQuery,
@@ -200,6 +216,8 @@ from engine.workflows.case_actions import (
     CreateCaseAlertRecommendationWorkflow,
     FetchCaseAlertRecommendationWorkflow,
     GetCaseAlertRecommendationWorkflow,
+    GetCaseSummaryWorkflow,
+    GetOrCreateCaseSummaryWorkflow,
     SetCaseAlertPriorityWorkflow,
     SetCaseIncidentWorkflow,
     SetCaseStageWorkflow,
@@ -353,6 +371,28 @@ from engine.workflows.case_config import (
     SearchCaseViewsWorkflow,
     SearchCustomFieldsWorkflow,
 )
+from engine.workflows.data_tables import (
+    ListDataTablesWorkflow,
+    GetDataTableWorkflow,
+    CreateDataTableWorkflow,
+    PatchDataTableWorkflow,
+    DeleteDataTableWorkflow,
+    ListDataTableRowsWorkflow,
+    AddDataTableRowsWorkflow,
+    DeleteDataTableRowWorkflow,
+)
+from engine.workflows.detection_rules import (
+    ListRulesWorkflow,
+    GetRuleWorkflow,
+    VerifyRuleWorkflow,
+    CreateRuleWorkflow,
+    PatchRuleWorkflow,
+    DeleteRuleWorkflow,
+    ListRuleRevisionsWorkflow,
+    GetRuleDeploymentWorkflow,
+    UpdateRuleDeploymentWorkflow,
+    ListRuleErrorsWorkflow,
+)
 
 
 
@@ -391,6 +431,8 @@ class SecOpsEngine:
         "_create_case_alert_recommendation_wf": lambda e: CreateCaseAlertRecommendationWorkflow(e.adapter),
         "_fetch_case_alert_recommendation_wf": lambda e: FetchCaseAlertRecommendationWorkflow(e.adapter),
         "_get_case_alert_recommendation_wf": lambda e: GetCaseAlertRecommendationWorkflow(e.adapter),
+        "_get_or_create_case_summary_wf": lambda e: GetOrCreateCaseSummaryWorkflow(e.adapter),
+        "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
@@ -500,6 +542,24 @@ class SecOpsEngine:
             e._search_cases_wf,
             e._summarize_entity_wf,
         ),
+        "_list_data_tables_wf": lambda e: ListDataTablesWorkflow(e.adapter),
+        "_get_data_table_wf": lambda e: GetDataTableWorkflow(e.adapter),
+        "_create_data_table_wf": lambda e: CreateDataTableWorkflow(e.adapter),
+        "_patch_data_table_wf": lambda e: PatchDataTableWorkflow(e.adapter),
+        "_delete_data_table_wf": lambda e: DeleteDataTableWorkflow(e.adapter),
+        "_list_data_table_rows_wf": lambda e: ListDataTableRowsWorkflow(e.adapter),
+        "_add_data_table_rows_wf": lambda e: AddDataTableRowsWorkflow(e.adapter),
+        "_delete_data_table_row_wf": lambda e: DeleteDataTableRowWorkflow(e.adapter),
+        "_list_rules_wf": lambda e: ListRulesWorkflow(e.adapter),
+        "_get_rule_wf": lambda e: GetRuleWorkflow(e.adapter),
+        "_verify_rule_wf": lambda e: VerifyRuleWorkflow(e.adapter),
+        "_create_rule_wf": lambda e: CreateRuleWorkflow(e.adapter),
+        "_patch_rule_wf": lambda e: PatchRuleWorkflow(e.adapter),
+        "_delete_rule_wf": lambda e: DeleteRuleWorkflow(e.adapter),
+        "_list_rule_revisions_wf": lambda e: ListRuleRevisionsWorkflow(e.adapter),
+        "_get_rule_deployment_wf": lambda e: GetRuleDeploymentWorkflow(e.adapter),
+        "_update_rule_deployment_wf": lambda e: UpdateRuleDeploymentWorkflow(e.adapter),
+        "_list_rule_errors_wf": lambda e: ListRuleErrorsWorkflow(e.adapter),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -756,6 +816,31 @@ class SecOpsEngine:
                 composed=True,
                 uses=("case_alert.create_recommendation", "case_alert.fetch_recommendation"),
                 evidence_path="evidence/case/alert_get_recommendation",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.get_or_create_summary",
+                name="Get or Create SOAR Case AI Summary",
+                description="Gets or initiates generation of a Gemini AI-driven overview, reasons, and next steps for a SOAR case.",
+                category="case",
+                handler=self.get_or_create_case_summary,
+                mcp_tool_name="get_or_create_case_summary",
+                composed=False,
+                evidence_path="evidence/case/get_or_create_summary",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.get_summary",
+                name="Get SOAR Case AI Summary (Polled)",
+                description="Requests Gemini AI case summary and polls until generation is complete or timeout.",
+                category="case",
+                handler=self.get_case_summary,
+                mcp_tool_name="get_case_summary",
+                composed=True,
+                uses=("case.get_or_create_summary",),
+                evidence_path="evidence/case/get_summary",
             )
         )
         self.registry.register(
@@ -1958,6 +2043,222 @@ class SecOpsEngine:
                 evidence_path="evidence/soar_settings/webhooks/get",
             )
         )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.list",
+                name="List Data Tables",
+                description="Lists all structured Data Tables defined in Chronicle SIEM.",
+                category="data_table",
+                handler=self.list_data_tables,
+                mcp_tool_name="list_data_tables",
+                composed=False,
+                evidence_path="evidence/data_table/list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.get",
+                name="Get Data Table",
+                description="Retrieves schema, columns, TTL, and metadata for a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.get_data_table,
+                mcp_tool_name="get_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.create",
+                name="Create Data Table",
+                description="Creates a new structured Data Table with typed column definitions in Chronicle SIEM.",
+                category="data_table",
+                handler=self.create_data_table,
+                mcp_tool_name="create_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.patch",
+                name="Update Data Table",
+                description="Updates description, TTL, or scope info of an existing Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.patch_data_table,
+                mcp_tool_name="patch_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/patch",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.delete",
+                name="Delete Data Table",
+                description="Deletes a structured Data Table from Chronicle SIEM.",
+                category="data_table",
+                handler=self.delete_data_table,
+                mcp_tool_name="delete_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.list_rows",
+                name="List Data Table Rows",
+                description="Queries and filters rows contained within a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.list_data_table_rows,
+                mcp_tool_name="list_data_table_rows",
+                composed=False,
+                evidence_path="evidence/data_table/list_rows",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.add_rows",
+                name="Add Data Table Rows",
+                description="Creates or appends rows in bulk to a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.add_data_table_rows,
+                mcp_tool_name="add_data_table_rows",
+                composed=False,
+                evidence_path="evidence/data_table/add_rows",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.delete_row",
+                name="Delete Data Table Row",
+                description="Deletes a single row from a Chronicle SIEM Data Table by row ID.",
+                category="data_table",
+                handler=self.delete_data_table_row,
+                mcp_tool_name="delete_data_table_row",
+                composed=False,
+                evidence_path="evidence/data_table/delete_row",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.list",
+                name="Search Detection Rules",
+                description="Lists custom YARA-L detection rules in Chronicle SIEM.",
+                category="rule",
+                handler=self.list_rules,
+                mcp_tool_name="list_rules",
+                composed=False,
+                evidence_path="evidence/rule/list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.get",
+                name="Get Detection Rule",
+                description="Retrieves full details and YARA-L logic of a detection rule.",
+                category="rule",
+                handler=self.get_rule,
+                mcp_tool_name="get_rule",
+                composed=False,
+                evidence_path="evidence/rule/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.verify",
+                name="Verify Rule Text",
+                description="Validates YARA-L 2.0 rule syntax against the Chronicle compiler.",
+                category="rule",
+                handler=self.verify_rule,
+                mcp_tool_name="verify_rule_text",
+                composed=False,
+                evidence_path="evidence/rule/verify",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.create",
+                name="Create Detection Rule",
+                description="Creates a new YARA-L detection rule in Chronicle SIEM.",
+                category="rule",
+                handler=self.create_rule,
+                mcp_tool_name="create_rule",
+                composed=False,
+                evidence_path="evidence/rule/create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.patch",
+                name="Patch Detection Rule",
+                description="Updates the YARA-L logic of an existing detection rule.",
+                category="rule",
+                handler=self.patch_rule,
+                mcp_tool_name="patch_rule",
+                composed=False,
+                evidence_path="evidence/rule/patch",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.delete",
+                name="Delete Detection Rule",
+                description="Deletes a custom detection rule from Chronicle SIEM.",
+                category="rule",
+                handler=self.delete_rule,
+                mcp_tool_name="delete_rule",
+                composed=False,
+                evidence_path="evidence/rule/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.revisions",
+                name="List Rule Revisions",
+                description="Lists historical revisions and version history of a detection rule.",
+                category="rule",
+                handler=self.list_rule_revisions,
+                mcp_tool_name="list_rule_revisions",
+                composed=False,
+                evidence_path="evidence/rule/revisions",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.deployment.get",
+                name="Get Rule Deployment",
+                description="Retrieves deployment, frequency, and alerting status of a rule.",
+                category="rule",
+                handler=self.get_rule_deployment,
+                mcp_tool_name="get_rule_deployment",
+                composed=False,
+                evidence_path="evidence/rule/deployment/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.deployment.update",
+                name="Update Rule Deployment",
+                description="Updates deployment properties (enabled, alerting, frequency) of a rule.",
+                category="rule",
+                handler=self.update_rule_deployment,
+                mcp_tool_name="update_rule_deployment",
+                composed=False,
+                evidence_path="evidence/rule/deployment/update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.errors",
+                name="List Rule Execution Errors",
+                description="Lists runtime and execution errors across detection rules.",
+                category="rule",
+                handler=self.list_rule_errors,
+                mcp_tool_name="list_rule_errors",
+                composed=False,
+                evidence_path="evidence/rule/errors",
+            )
+        )
 
 
 
@@ -2302,6 +2603,23 @@ class SecOpsEngine:
         return self._get_case_alert_recommendation_wf.execute(
             case_id=case_id,
             alert_id=alert_id,
+            timeout_sec=timeout_sec,
+            poll_interval_sec=poll_interval_sec,
+        )
+
+    def get_or_create_case_summary(self, case_id: str) -> CaseSummary:
+        """Gets or initiates generation of a Gemini AI summary for a SOAR case."""
+        return self._get_or_create_case_summary_wf.execute(case_id=case_id)
+
+    def get_case_summary(
+        self,
+        case_id: str,
+        timeout_sec: float = 90.0,
+        poll_interval_sec: float = 3.0,
+    ) -> CaseSummary:
+        """Requests a Gemini AI case summary and polls until complete or timeout."""
+        return self._get_case_summary_wf.execute(
+            case_id=case_id,
             timeout_sec=timeout_sec,
             poll_interval_sec=poll_interval_sec,
         )
@@ -3364,6 +3682,211 @@ class SecOpsEngine:
     def list_capabilities(self, category: Optional[str] = None) -> List[WorkflowCapability]:
         """Lists capabilities available in this engine instance."""
         return self.registry.list_capabilities(category=category)
+
+    # -------------------------------------------------------------------------
+    # Chronicle SIEM Data Tables
+    # -------------------------------------------------------------------------
+
+    def list_data_tables(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        order_by: Optional[str] = None,
+    ) -> DataTableListResult:
+        """Lists structured data tables in Chronicle SIEM."""
+        return self._list_data_tables_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            order_by=order_by,
+        )
+
+    def get_data_table(self, table_name_or_id: str) -> DataTable:
+        """Gets schema and metadata for a specific Chronicle SIEM Data Table."""
+        return self._get_data_table_wf.execute(table_name_or_id=table_name_or_id)
+
+    def create_data_table(
+        self,
+        table_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        column_info: Optional[List[Dict[str, Any]]] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+    ) -> DataTable:
+        """Creates a new structured Data Table with column definitions in Chronicle SIEM."""
+        return self._create_data_table_wf.execute(
+            table_id=table_id,
+            display_name=display_name,
+            description=description,
+            column_info=column_info,
+            row_time_to_live=row_time_to_live,
+            scope_info=scope_info,
+        )
+
+    def patch_data_table(
+        self,
+        table_name_or_id: str,
+        description: Optional[str] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> DataTable:
+        """Updates description, TTL, or scope info of an existing Data Table."""
+        return self._patch_data_table_wf.execute(
+            table_name_or_id=table_name_or_id,
+            description=description,
+            row_time_to_live=row_time_to_live,
+            scope_info=scope_info,
+            update_mask=update_mask,
+        )
+
+    def delete_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
+        """Deletes a Chronicle SIEM Data Table."""
+        return self._delete_data_table_wf.execute(table_name_or_id=table_name_or_id)
+
+    def list_data_table_rows(
+        self,
+        table_name_or_id: str,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+    ) -> DataTableRowListResult:
+        """Lists rows contained within a Chronicle SIEM Data Table."""
+        return self._list_data_table_rows_wf.execute(
+            table_name_or_id=table_name_or_id,
+            page_size=page_size,
+            page_token=page_token,
+            filter_expr=filter_expr,
+        )
+
+    def add_data_table_rows(
+        self,
+        table_name_or_id: str,
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Creates or appends rows in bulk to a Chronicle SIEM Data Table."""
+        return self._add_data_table_rows_wf.execute(
+            table_name_or_id=table_name_or_id,
+            rows=rows,
+        )
+
+    def delete_data_table_row(
+        self,
+        table_name_or_id: str,
+        row_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a single row from a Chronicle SIEM Data Table by row ID."""
+        return self._delete_data_table_row_wf.execute(
+            table_name_or_id=table_name_or_id,
+            row_id=row_id,
+        )
+
+    # -------------------------------------------------------------------------
+    # Custom YARA-L Detection Rules Facade Methods
+    # -------------------------------------------------------------------------
+
+    def list_rules(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+        view: Optional[str] = None,
+    ) -> RuleListResult:
+        """Lists custom YARA-L detection rules in Chronicle SIEM."""
+        return self._list_rules_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            filter_expr=filter_expr,
+            view=view,
+        )
+
+    def get_rule(
+        self,
+        rule_id_or_name: str,
+        view: str = "FULL",
+    ) -> RuleDetail:
+        """Retrieves full details and YARA-L logic of a detection rule."""
+        return self._get_rule_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            view=view,
+        )
+
+    def verify_rule(self, rule_text: str) -> RuleValidationResult:
+        """Validates YARA-L 2.0 rule syntax against the Chronicle compiler."""
+        return self._verify_rule_wf.execute(rule_text=rule_text)
+
+    def validate_rule(self, rule_text: str) -> RuleValidationResult:
+        """Alias for verify_rule: validates YARA-L 2.0 rule syntax."""
+        return self.verify_rule(rule_text=rule_text)
+
+    def create_rule(self, rule_text: str) -> RuleDetail:
+        """Creates a new YARA-L detection rule in Chronicle SIEM."""
+        return self._create_rule_wf.execute(rule_text=rule_text)
+
+    def patch_rule(
+        self,
+        rule_id_or_name: str,
+        rule_text: str,
+        update_mask: Optional[str] = None,
+    ) -> RuleDetail:
+        """Updates the YARA-L logic of an existing detection rule."""
+        return self._patch_rule_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            rule_text=rule_text,
+            update_mask=update_mask,
+        )
+
+    def delete_rule(self, rule_id_or_name: str) -> Dict[str, Any]:
+        """Deletes a custom detection rule from Chronicle SIEM."""
+        return self._delete_rule_wf.execute(rule_id_or_name=rule_id_or_name)
+
+    def list_rule_revisions(
+        self,
+        rule_id_or_name: str,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> RuleRevisionListResult:
+        """Lists historical revisions and version history of a detection rule."""
+        return self._list_rule_revisions_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def get_rule_deployment(self, rule_id_or_name: str) -> RuleDeployment:
+        """Retrieves deployment, frequency, and alerting status of a rule."""
+        return self._get_rule_deployment_wf.execute(rule_id_or_name=rule_id_or_name)
+
+    def update_rule_deployment(
+        self,
+        rule_id_or_name: str,
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        run_frequency: Optional[str] = None,
+        update_mask: Optional[str] = None,
+    ) -> RuleDeployment:
+        """Updates deployment properties (enabled, alerting, frequency) of a rule."""
+        return self._update_rule_deployment_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            enabled=enabled,
+            alerting=alerting,
+            run_frequency=run_frequency,
+            update_mask=update_mask,
+        )
+
+    def list_rule_errors(
+        self,
+        rule_id_or_name: Optional[str] = None,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> RuleExecutionErrorListResult:
+        """Lists runtime and execution errors across detection rules."""
+        return self._list_rule_errors_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
 
 
 

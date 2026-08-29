@@ -2983,6 +2983,277 @@ class CaseAlertRecommendation:
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass
+class CaseSummary:
+    """Gemini AI Case Summary containing high-level overview, reasons, and recommended next steps."""
+    case_id: str
+    state: str = "SUMMARY_STATE_UNSPECIFIED"
+    summary: Optional[str] = None
+    reasons: List[str] = field(default_factory=list)
+    next_steps: List[str] = field(default_factory=list)
+    markdown_results: Optional[Dict[str, Any]] = None
+    update_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class DataTableColumnInfo:
+    """Column definition within a Google Chronicle SIEM Data Table."""
+    column_index: int
+    original_column: str
+    column_type: str = "STRING"
+    mapped_column_path: Optional[str] = None
+    key_column: bool = False
+    repeated_values: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def column_name(self) -> str:
+        """Alias for original_column."""
+        return self.original_column
+
+    @property
+    def data_type(self) -> str:
+        """Alias for column_type."""
+        return self.column_type
+
+    @property
+    def is_key_column(self) -> bool:
+        """Alias for key_column."""
+        return self.key_column
+
+
+@dataclass
+class DataTableRow:
+    """Single row of values inside a Google Chronicle SIEM Data Table."""
+    name: str
+    values: List[str] = field(default_factory=list)
+    id: str = ""
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    row_time_to_live: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.id and self.name:
+            self.id = self.name.split("/")[-1]
+
+    @property
+    def row_id(self) -> str:
+        """Alias for the row identifier."""
+        return self.id
+
+
+@dataclass
+class DataTable:
+    """Google Chronicle SIEM structured Data Table metadata and schema."""
+    name: str
+    id: str
+    display_name: str
+    description: Optional[str] = None
+    column_info: List[DataTableColumnInfo] = field(default_factory=list)
+    approximate_row_count: Optional[int] = None
+    rule_associations_count: Optional[int] = None
+    rules: List[str] = field(default_factory=list)
+    row_time_to_live: Optional[str] = None
+    scope_info: Optional[Dict[str, Any]] = None
+    data_table_uuid: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def table_id(self) -> str:
+        """Alias for the data table identifier."""
+        return self.id
+
+
+@dataclass
+class DataTableListResult:
+    """Result container for listed Chronicle SIEM Data Tables."""
+    tables: List[DataTable]
+    next_page_token: Optional[str] = None
+    total_size: Optional[int] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[DataTable]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.tables
+
+    @property
+    def data_tables(self) -> List[DataTable]:
+        """Convenience alias for listed tables."""
+        return self.tables
+
+
+@dataclass
+class DataTableRowListResult:
+    """Result container for listed rows within a Chronicle SIEM Data Table."""
+    table_name: str
+    rows: List[DataTableRow]
+    next_page_token: Optional[str] = None
+    total_size: Optional[int] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[DataTableRow]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.rows
+
+
+@dataclass
+class RuleSeverity:
+    """Severity classification for a detection rule."""
+    name: str = ""
+    display_name: str = ""
+
+
+@dataclass
+class RuleCompilationDiagnostic:
+    """Diagnostic message from YARA-L rule compilation / validation."""
+    message: str = ""
+    severity: str = ""
+    start_line: Optional[int] = None
+    start_column: Optional[int] = None
+    end_line: Optional[int] = None
+    end_column: Optional[int] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleValidationResult:
+    """Result of YARA-L rule verification / validation."""
+    success: bool = False
+    diagnostics: List[RuleCompilationDiagnostic] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleDeployment:
+    """Deployment configuration and status for a Chronicle SIEM rule."""
+    name: str = ""
+    run_frequency: str = "LIVE"
+    execution_state: str = "DEFAULT"
+    enabled: bool = False
+    alerting: bool = False
+    last_alert_status_change_time: str = ""
+    display_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleExecutionError:
+    """Execution / runtime error record for a detection rule."""
+    name: str = ""
+    error_code: int = 0
+    error_message: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    rule_resource_name: str = ""
+    curated_rule: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        target = self.rule_resource_name or self.curated_rule
+        return target.split("/")[-1] if target else ""
+
+
+@dataclass
+class RuleExecutionErrorListResult:
+    """Result container for rule execution errors."""
+    errors: List[RuleExecutionError] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleExecutionError]:
+        return self.errors
+
+
+@dataclass
+class RuleSummary:
+    """Summary representation of a Chronicle SIEM custom detection rule."""
+    name: str
+    display_name: str
+    author: str = ""
+    severity: str = "INFO"
+    rule_type: str = "SINGLE_EVENT"
+    allowed_run_frequencies: List[str] = field(default_factory=list)
+    near_real_time_live_rule_eligible: bool = False
+    etag: str = ""
+    rule_text_tags: List[str] = field(default_factory=list)
+    time_window_duration: str = ""
+    create_time: str = ""
+    revision_id: str = ""
+    run_frequency: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        return self.name.split("/")[-1].split("@")[0] if self.name else ""
+
+
+@dataclass
+class RuleDetail:
+    """Full detail of a Chronicle SIEM detection rule including YARA-L logic."""
+    name: str
+    display_name: str
+    text: str
+    revision_id: str = ""
+    author: str = ""
+    severity: str = "INFO"
+    metadata: Dict[str, str] = field(default_factory=dict)
+    create_time: str = ""
+    revision_create_time: str = ""
+    compilation_state: str = "SUCCEEDED"
+    rule_type: str = "SINGLE_EVENT"
+    allowed_run_frequencies: List[str] = field(default_factory=list)
+    etag: str = ""
+    near_real_time_live_rule_eligible: bool = False
+    inputs_used: Dict[str, Any] = field(default_factory=dict)
+    rule_owner: str = "CUSTOMER"
+    run_frequency: str = "LIVE"
+    rule_language: str = "YARA_L_2_0"
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        return self.name.split("/")[-1].split("@")[0] if self.name else ""
+
+    @property
+    def yara_l_code(self) -> str:
+        return self.text
+
+
+@dataclass
+class RuleListResult:
+    """Result container for listed Chronicle SIEM detection rules."""
+    rules: List[RuleSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleSummary]:
+        return self.rules
+
+
+@dataclass
+class RuleRevisionListResult:
+    """Result container for listed revisions of a detection rule."""
+    rule_id: str
+    revisions: List[RuleDetail] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleDetail]:
+        return self.revisions
+
+
+
 
 
 

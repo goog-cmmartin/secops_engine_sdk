@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-08-28 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-08-29 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**120 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**140 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-08-28 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 11 |
-| primitive | 9 |
-| query | 100 |
-| **total** | **120** |
+| workflow | 12 |
+| primitive | 19 |
+| query | 109 |
+| **total** | **140** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 45 |
-| bounded | 3 |
-| unbounded | 52 |
-| (n/a — workflows/primitive) | 20 |
+| single | 48 |
+| bounded | 4 |
+| unbounded | 57 |
+| (n/a — workflows/primitive) | 31 |
 
 ## Workflows
 
@@ -35,6 +35,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | capability_id | domain | description |
 | :--- | :--- | :--- |
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
+| `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
@@ -54,14 +55,16 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (12: workflow=2, primitive=9, query=1)
+### case  (14: workflow=3, primitive=10, query=1)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case_alert.get_recommendation` | workflow | — | `get_case_alert_recommendation` | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `case.assign` | primitive | — | `assign_case` | Assigns a SOAR case to a SOC role (@Role) or user GUID. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
+| `case.get_or_create_summary` | primitive | — | `get_or_create_case_summary` | Gets or initiates generation of a Gemini AI-driven overview, reasons, and next steps for a SOAR case. |
 | `case.set_incident` | primitive | — | `set_case_incident` | Marks or unmarks a SOAR case as an incident. |
 | `case.set_stage` | primitive | — | `set_case_stage` | Updates the lifecycle stage of a SOAR case. |
 | `case.update` | primitive | — | `update_case` | Mutates case attributes such as assignee, stage, incident flag, or priority. |
@@ -126,6 +129,19 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `data_rbac.label.search` | query | `unbounded` | `search_data_access_labels` | Discovers Data Access Labels and their associated UDM filter query definitions. |
 | `data_rbac.scope.get` | query | `single` | `get_data_access_scope` | Retrieves deep configuration of a Data Access Scope including label attachments. |
 | `data_rbac.scope.search` | query | `unbounded` | `search_data_access_scopes` | Discovers and filters Data Access RBAC Scopes and allow/deny label counts. |
+
+### data_table  (8: primitive=5, query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `data_table.add_rows` | primitive | — | `add_data_table_rows` | Creates or appends rows in bulk to a Chronicle SIEM Data Table. |
+| `data_table.create` | primitive | — | `create_data_table` | Creates a new structured Data Table with typed column definitions in Chronicle SIEM. |
+| `data_table.delete` | primitive | — | `delete_data_table` | Deletes a structured Data Table from Chronicle SIEM. |
+| `data_table.delete_row` | primitive | — | `delete_data_table_row` | Deletes a single row from a Chronicle SIEM Data Table by row ID. |
+| `data_table.patch` | primitive | — | `patch_data_table` | Updates description, TTL, or scope info of an existing Chronicle SIEM Data Table. |
+| `data_table.get` | query | `single` | `get_data_table` | Retrieves schema, columns, TTL, and metadata for a Chronicle SIEM Data Table. |
+| `data_table.list` | query | `unbounded` | `list_data_tables` | Lists all structured Data Tables defined in Chronicle SIEM. |
+| `data_table.list_rows` | query | `unbounded` | `list_data_table_rows` | Queries and filters rows contained within a Chronicle SIEM Data Table. |
 
 ### enrichment  (3: query=3)
 
@@ -217,6 +233,21 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
+
+### rule  (10: primitive=4, query=6)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `rule.create` | primitive | — | `create_rule` | Creates a new YARA-L detection rule in Chronicle SIEM. |
+| `rule.delete` | primitive | — | `delete_rule` | Deletes a custom detection rule from Chronicle SIEM. |
+| `rule.deployment.update` | primitive | — | `update_rule_deployment` | Updates deployment properties (enabled, alerting, frequency) of a rule. |
+| `rule.patch` | primitive | — | `patch_rule` | Updates the YARA-L logic of an existing detection rule. |
+| `rule.deployment.get` | query | `single` | `get_rule_deployment` | Retrieves deployment, frequency, and alerting status of a rule. |
+| `rule.errors` | query | `unbounded` | `list_rule_errors` | Lists runtime and execution errors across detection rules. |
+| `rule.get` | query | `single` | `get_rule` | Retrieves full details and YARA-L logic of a detection rule. |
+| `rule.list` | query | `unbounded` | `list_rules` | Lists custom YARA-L detection rules in Chronicle SIEM. |
+| `rule.revisions` | query | `unbounded` | `list_rule_revisions` | Lists historical revisions and version history of a detection rule. |
+| `rule.verify` | query | `bounded` | `verify_rule_text` | Validates YARA-L 2.0 rule syntax against the Chronicle compiler. |
 
 ### search  (4: workflow=3, query=1)
 

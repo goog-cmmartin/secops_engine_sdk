@@ -56,7 +56,18 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   ├── render.py             # Stateless Rich-based rendering (Tables, Panels)
 │   ├── requirements-tui.txt  # TUI-only dependencies (textual, rich)
 │   └── README.md             # TUI design, threading, and demo mode docs
-├── run_tui.py                # TUI launcher (live or --demo)
+├── runbooks/                 # Autonomous incident response, threat hunting & operational runbooks
+│   ├── README.md             # Runbook catalog & execution guide
+│   ├── incident_response/    # Automated triage and indicator scoping
+│   └── operations/           # Tenant settings and data table inventory audits
+├── prompts/                  # Version-controlled SecOps AI prompt library & templates
+│   ├── README.md             # Prompt catalog architecture and interpolation conventions
+│   ├── operations/           # Governance & inventory prompt templates
+│   ├── incident_response/    # Triage and forensic prompt templates
+│   └── threat_hunting/       # Retrospective UDM hunt templates
+├── docs/                     # Documentation & specifications
+│   ├── CAPABILITIES.md       # Full registered SDK capability reference
+│   └── CLI_REFERENCE.md      # Exhaustive SecOps CLI commands and argument manual
 ├── specs/                    # Declarative YAML workflow contracts
 ├── schemas/                  # API & domain JSON schemas
 ├── benchmarks/               # Performance, memory & stress benchmarks

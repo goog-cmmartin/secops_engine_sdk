@@ -58,6 +58,7 @@ SINGLE_RESULT_VERBS = frozenset({
 BOUNDED_RESULT_VERBS = frozenset({
     "execute_query",
     "validate_query",
+    "verify",
 })
 
 # Terminal verbs that return an open-ended collection. This is the union of the
@@ -68,6 +69,8 @@ COLLECTION_RESULT_VERBS = frozenset({
     "search",
     "stats",
     "list",
+    "list_rows",
+    "rows",
     "search_rulesets",
     "search_enterprise",
     "instances",
@@ -77,6 +80,8 @@ COLLECTION_RESULT_VERBS = frozenset({
     "affected_items",
     "list_sources",
     "list_log_types",
+    "revisions",
+    "errors",
 })
 
 # Verb suffixes (the final dotted segment of a capability_id) that denote a
@@ -89,6 +94,8 @@ READ_VERB_SUFFIXES = frozenset({
     "search_enterprise",
     "summarize",
     "list",
+    "list_rows",
+    "rows",
     "list_log_types",
     "list_sources",
     "instances",
@@ -103,6 +110,9 @@ READ_VERB_SUFFIXES = frozenset({
     "search_rulesets",
     "execute_query",
     "validate_query",
+    "verify",
+    "revisions",
+    "errors",
 })
 
 

@@ -1706,6 +1706,170 @@ class FeedBatch(UniversalBatchMixin):
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class FeedHealthStatus(str, Enum):
+    """Health classification status for an ingestion feed."""
+    HEALTHY = "HEALTHY"
+    IRREGULAR = "IRREGULAR"
+    FAILED = "FAILED"
+    HIGH_LATENCY = "HIGH_LATENCY"
+    SILENT_PUSH_STOP = "SILENT_PUSH_STOP"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class FeedHealthFinding:
+    """Actionable finding representing the operational health of a feed."""
+    feed_id: str
+    feed_name: str
+    source_type: str
+    log_type: str
+    status: FeedHealthStatus
+    state: str = "UNKNOWN"
+    collector_name: Optional[str] = None
+    latency_p95: Optional[str] = None
+    last_event_time: Optional[str] = None
+    event_count_recent: int = 0
+    volume_funnel: Dict[str, int] = field(default_factory=dict)
+    quota_rejected_volume_mb: float = 0.0
+    quota_limit_mb_per_sec: float = 0.0
+    anomaly_description: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class FeedHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all ingestion feeds."""
+    findings: List[FeedHealthFinding]
+    healthy_count: int = 0
+    irregular_count: int = 0
+    failed_count: int = 0
+    high_latency_count: int = 0
+    quota_rejections_detected: int = 0
+    total_feeds_audited: int = 0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[FeedHealthFinding]:
+        return self.findings
+
+
+class ParserHealthStatus(str, Enum):
+    """Health classification status for a SIEM parser / log type normalizer."""
+    HEALTHY = "HEALTHY"
+    IRREGULAR = "IRREGULAR"
+    FAILED = "FAILED"
+    VERSION_DRIFT = "VERSION_DRIFT"
+    EXTENSION_CONFLICT = "EXTENSION_CONFLICT"
+    INACTIVE_NO_PARSER = "INACTIVE_NO_PARSER"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class ParserHealthFinding:
+    """Actionable finding representing the operational health of a parser or normalizer."""
+    log_type: str
+    parser_id: str
+    status: ParserHealthStatus
+    state: str = "UNKNOWN"
+    creator_source: str = "UNKNOWN"
+    collector_name: Optional[str] = None
+    version: str = ""
+    latest_version: str = ""
+    rollback_available: bool = False
+    has_extension: bool = False
+    extension_id: Optional[str] = None
+    extension_state: Optional[str] = None
+    dynamic_parsing_enabled: bool = False
+    opted_fields_count: int = 0
+    drop_reason_code: Optional[str] = None
+    zscore_anomaly_detail: Optional[str] = None
+    anomalous_since: Optional[str] = None
+    last_normalization_time: Optional[str] = None
+    event_latency: Optional[str] = None
+    volume_funnel: Dict[str, int] = field(default_factory=dict)
+    quota_rejected_volume_mb: float = 0.0
+    quota_limit_mb_per_sec: float = 0.0
+    anomaly_description: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ParserHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all SIEM parsers and extensions."""
+    findings: List[ParserHealthFinding]
+    healthy_count: int = 0
+    irregular_count: int = 0
+    failed_count: int = 0
+    version_drift_count: int = 0
+    extension_conflict_count: int = 0
+    quota_rejections_detected: int = 0
+    total_parsers_audited: int = 0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[ParserHealthFinding]:
+        return self.findings
+
+
+class RuleHealthStatus(str, Enum):
+    """Operational health classification for a Chronicle YARA-L rule."""
+    HEALTHY = "HEALTHY"
+    EXECUTION_ERROR = "EXECUTION_ERROR"
+    COMPILATION_ERROR = "COMPILATION_ERROR"
+    HIGH_LATENCY = "HIGH_LATENCY"
+    SILENT_DECAY = "SILENT_DECAY"
+    MISCONFIGURED_ALERTING = "MISCONFIGURED_ALERTING"
+    DISABLED = "DISABLED"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class RuleHealthFinding:
+    """Actionable finding representing the operational health of a detection rule."""
+    rule_id: str
+    display_name: str
+    rule_owner: str = "CUSTOMER"  # CUSTOMER or GOOGLE
+    severity: str = "MEDIUM"
+    status: RuleHealthStatus = RuleHealthStatus.HEALTHY
+    enabled: bool = True
+    alerting: bool = True
+    run_frequency: str = "LIVE"
+    detection_count_recent: int = 0
+    execution_error_count: int = 0
+    last_error_message: Optional[str] = None
+    ingestion_to_detection_latency_min: Optional[float] = None
+    event_to_detection_latency_min: Optional[float] = None
+    mitre_tactics: List[str] = field(default_factory=list)
+    mitre_techniques: List[str] = field(default_factory=list)
+    details: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets."""
+    findings: List[RuleHealthFinding]
+    healthy_count: int = 0
+    failing_count: int = 0
+    decay_count: int = 0
+    latency_alert_count: int = 0
+    misconfigured_count: int = 0
+    disabled_count: int = 0
+    total_rules_audited: int = 0
+    total_detections_24h: int = 0
+    average_risk_score: float = 0.0
+    top_mitre_tactics: List[Dict[str, Any]] = field(default_factory=list)
+    top_threat_categories: List[Dict[str, Any]] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[RuleHealthFinding]:
+        return self.findings
+
+
 @dataclass
 class LogProcessingPipelineSummary:
     """Summary of a Data Processing Pipeline."""
@@ -3251,6 +3415,102 @@ class RuleRevisionListResult:
     @property
     def items(self) -> List[RuleDetail]:
         return self.revisions
+
+
+class DashboardHealthStatus(str, Enum):
+    """Classification states for Google SecOps Native Dashboards."""
+    HEALTHY = "HEALTHY"
+    RECENTLY_CREATED = "RECENTLY_CREATED"
+    RECENTLY_MODIFIED = "RECENTLY_MODIFIED"
+    BROKEN_QUERY = "BROKEN_QUERY"
+    EMPTY_DASHBOARD = "EMPTY_DASHBOARD"
+    ORPHAN_CHART = "ORPHAN_CHART"
+    STALE = "STALE"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class DashboardHealthFinding:
+    """Detailed health, recency, and syntax evaluation for a single dashboard."""
+    dashboard_id: str
+    display_name: str
+    dashboard_type: str  # CUSTOM, CURATED, DEFAULT
+    create_user_id: str
+    update_user_id: str
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    charts_count: int
+    broken_queries_count: int
+    status: DashboardHealthStatus
+    details: str
+    remediation_steps: List[str] = field(default_factory=list)
+    broken_query_details: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DashboardHealthReport:
+    """Comprehensive health and lifecycle audit report for Google SecOps dashboards."""
+    total_dashboards_audited: int
+    healthy_count: int
+    recently_created_count: int
+    recently_modified_count: int
+    broken_query_count: int
+    empty_dashboard_count: int
+    stale_count: int
+    custom_count: int
+    curated_count: int
+    findings: List[DashboardHealthFinding] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DataTableHealthStatus(str, Enum):
+    """Health classification and governance status for Data Tables."""
+    HEALTHY = "HEALTHY"
+    EMPTY_REFERENCED = "EMPTY_REFERENCED"
+    ORPHAN = "ORPHAN"
+    RECENTLY_CREATED = "RECENTLY_CREATED"
+    RECENTLY_MODIFIED = "RECENTLY_MODIFIED"
+    SCHEMA_ISSUE = "SCHEMA_ISSUE"
+    STALE = "STALE"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class DataTableHealthFinding:
+    """Actionable health and lineage finding for an individual Data Table."""
+    table_id: str
+    display_name: str
+    description: Optional[str]
+    approximate_row_count: Optional[int]
+    column_count: int
+    key_columns: List[str]
+    row_time_to_live: Optional[str]
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    associated_rules: List[str]
+    associated_dashboards: List[str]
+    rule_associations_count: int
+    status: DataTableHealthStatus
+    details: str
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DataTableHealthReport:
+    """Comprehensive health, lineage, and governance audit report for Data Tables."""
+    total_tables_audited: int
+    healthy_count: int
+    empty_referenced_count: int
+    orphan_count: int
+    recently_created_count: int
+    recently_modified_count: int
+    stale_count: int
+    schema_issue_count: int
+    findings: List[DataTableHealthFinding] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 

@@ -1,5 +1,3 @@
-"""End-to-end async tests for SecOpsTUI running in Textual test pilot."""
-
 import unittest
 from datetime import datetime, timezone
 
@@ -13,11 +11,17 @@ from engine.domain import (
     InvolvedEntitySummary,
     AlertInvestigation,
 )
-from clients.tui.app import SecOpsTUI
-from clients.tui.views.case_view import CaseWorkspaceView
-from clients.tui.command_launcher import CommandLauncherModal
+
+try:
+    from clients.tui.app import SecOpsTUI
+    from clients.tui.views.case_view import CaseWorkspaceView
+    from clients.tui.command_launcher import CommandLauncherModal
+    HAS_TUI = True
+except ImportError:
+    HAS_TUI = False
 
 
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class MockEngine:
     """Mock engine for asynchronous Textual test runner."""
 
@@ -127,6 +131,7 @@ class MockEngine:
         )
 
 
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestTUIAppAsync(unittest.IsolatedAsyncioTestCase):
     """Asynchronous testing of SecOpsTUI in Textual pilot mode."""
 

@@ -13,6 +13,13 @@ from engine.auth import CredentialProvider, AUTH_SCOPES
 from engine.config import SecOpsConfigurationError
 
 
+try:
+    import google.auth
+    HAS_GOOGLE_AUTH = True
+except ImportError:
+    HAS_GOOGLE_AUTH = False
+
+
 class TestCredentialProvider(unittest.TestCase):
     # ---- static / override ------------------------------------------------
 
@@ -41,6 +48,7 @@ class TestCredentialProvider(unittest.TestCase):
 
     # ---- library ADC ------------------------------------------------------
 
+    @unittest.skipUnless(HAS_GOOGLE_AUTH, "google-auth not installed")
     def test_library_adc_returns_token_and_refreshes(self):
         fake_creds = MagicMock()
         fake_creds.valid = False
@@ -57,6 +65,7 @@ class TestCredentialProvider(unittest.TestCase):
                 _, kwargs = fake_default.call_args
                 self.assertEqual(kwargs.get("scopes"), AUTH_SCOPES)
 
+    @unittest.skipUnless(HAS_GOOGLE_AUTH, "google-auth not installed")
     def test_library_adc_no_refresh_when_valid(self):
         fake_creds = MagicMock()
         fake_creds.valid = True

@@ -131,6 +131,52 @@ secops playbook audit [--type REGULAR|NESTED] [--environment <ENV>] [--out soar_
 
 ---
 
+### `operations.curated_detections_health`
+Performs a comprehensive health check, deployment posture review, and hygiene audit across Google SecOps Curated Rule Sets:
+1. **Deployment Posture**: Evaluates `PRECISE` vs `BROAD` deployment coverage and Alerting status across categories.
+2. **Misconfiguration Risks**: Flags high-risk states such as `BROAD` set to `Alerting ON` ([HIGH]) and `BROAD` enabled while `PRECISE` is disabled ([MEDIUM]).
+3. **Firing Volume**: Identifies top firing and noisy rule sets over a specified evaluation window (default: 7 days).
+4. **Content Freshness**: Lists newest threat intelligence releases and oldest legacy rules.
+5. **Remediation CLI**: Provides exact commands to remediate misconfigured rule sets.
+
+#### Execution:
+```bash
+# Formatted console health check report:
+python3 -m runbooks.operations.curated_detections_health --days 7
+
+# Export structured JSON to file:
+python3 -m runbooks.operations.curated_detections_health --days 14 --out curated_audit.json
+
+# Or via SecOps CLI:
+secops runbook run curated-detections-health [--days <N>] [--out curated_audit.json]
+secops curated audit [--days <N>] [--out curated_audit.json]
+```
+
+---
+
+### `operations.soar_playbook_health`
+Performs a comprehensive health check, execution telemetry review, and operational triage across Google SecOps SOAR Playbooks and Reusable Modular Blocks:
+1. **Structural & Operational Fusion**: Synthesizes structural playbook configurations with live operational metrics from the native **"Playbook Dashboard (SOAR)"**.
+2. **Prioritized Health Findings**: Isolates critical stuck queues (`PENDING_IN_QUEUE`), playbooks with persistent 100% failure rates, and faulted connector action hotspots.
+3. **Execution Metrics**: Aggregates tenant-wide playbook execution volume, failure counts, faulted actions, and mean execution runtimes over a lookback window (default: 7 days).
+4. **Latency & Bottleneck Detection**: Identifies slow-running workflows exceeding execution time thresholds (> 3 minutes).
+5. **Remediation CLI**: Generates direct inspection commands for failing workflows and faulted connector instances.
+
+#### Execution:
+```bash
+# Formatted console health check report:
+python3 -m runbooks.operations.soar_playbook_health --days 7
+
+# Export structured JSON to file:
+python3 -m runbooks.operations.soar_playbook_health --days 7 --out soar_health.json
+
+# Or via SecOps CLI:
+secops runbook run soar-playbook-health [--lookback-days 7] [--out soar_health.json]
+secops playbook audit-health [--days 7] [--out soar_health.json]
+```
+
+---
+
 ## 3. Authoring Guidelines for New Runbooks
 
 1. **Strict Live Data Origin**: Use `SecOpsEngine` methods exclusively. Zero mock data is permitted in production runbooks.

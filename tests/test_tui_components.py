@@ -1,5 +1,3 @@
-"""Unit tests for SecOps TUI Components, Workspaces, Command Launcher, and Alert Rendering."""
-
 import unittest
 from datetime import datetime, timezone
 from engine.domain import (
@@ -11,12 +9,18 @@ from engine.domain import (
     InvolvedEntitySummary,
     AlertInvestigation,
 )
-from clients.tui import render
-from clients.tui.command_launcher import CommandItem, CommandLauncherModal, default_commands
-from clients.tui.app import SecOpsTUI
-from clients.tui.views.case_view import CaseWorkspaceView
+
+try:
+    from clients.tui import render
+    from clients.tui.command_launcher import CommandItem, CommandLauncherModal, default_commands
+    from clients.tui.app import SecOpsTUI
+    from clients.tui.views.case_view import CaseWorkspaceView
+    HAS_TUI = True
+except ImportError:
+    HAS_TUI = False
 
 
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestTUIRenderHelpers(unittest.TestCase):
     """Test pure rendering functions in render.py."""
 
@@ -105,6 +109,7 @@ class TestTUIRenderHelpers(unittest.TestCase):
         self.assertIsNotNone(card)
 
 
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestCommandLauncher(unittest.TestCase):
     """Test command launcher items and filtering."""
 
@@ -122,6 +127,7 @@ class TestCommandLauncher(unittest.TestCase):
         self.assertEqual(len(modal._filtered_commands), len(default_commands()))
 
 
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestTUIAppInit(unittest.TestCase):
     """Test TUI application instantiation and workspace composition."""
 

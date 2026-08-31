@@ -1111,6 +1111,57 @@ class GoogleSecOpsAdapter:
             return res
         return {"curatedRuleSetDeployments": []}
 
+    def update_curated_ruleset_deployment(
+        self,
+        deployment_name: str,
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        sync_rules: bool = True,
+    ) -> Dict[str, Any]:
+        """Updates enabled and/or alerting states for a Curated Rule Set precision deployment."""
+        clean_name = deployment_name.strip()
+        if not clean_name.startswith("projects/"):
+            raise ValueError(f"Full resource name required for deployment update: '{deployment_name}'")
+
+        path = f"/v1alpha/{clean_name}"
+        body: Dict[str, Any] = {"name": clean_name}
+        mask_fields: List[str] = []
+        if enabled is not None:
+            body["enabled"] = enabled
+            mask_fields.append("enabled")
+        if alerting is not None:
+            body["alerting"] = alerting
+            mask_fields.append("alerting")
+
+        if not mask_fields:
+            raise ValueError("At least one field ('enabled' or 'alerting') must be specified for update")
+
+        params: Dict[str, Any] = {
+            "updateMask": ",".join(mask_fields),
+        }
+        if not sync_rules:
+            params["ruleSetDeploymentSyncDisabled"] = True
+
+        res = self._request("PATCH", path, params=params, body=body)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def batch_update_curated_ruleset_deployments(
+        self,
+        requests: List[Dict[str, Any]],
+        parent: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates multiple Curated Rule Set deployments in a single batch request."""
+        if not parent:
+            parent = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRuleSetCategories/-/curatedRuleSets/-"
+        path = f"/v1alpha/{parent}/curatedRuleSetDeployments:batchUpdate"
+        body = {"requests": requests}
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict):
+            return res
+        return {"deployments": []}
+
     def list_curated_rules(self, page_size: int = 1000) -> Dict[str, Any]:
         """Lists all Google-curated individual rules."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules"

@@ -194,6 +194,14 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     pb_audit.add_argument("--out", "-o", help="Optional path to output JSON report file")
     pb_audit.add_argument("--json", action="store_true", help="Print raw JSON output")
 
+    pb_health = playbook_sub.add_parser("audit-health", help="Comprehensive SOAR Playbook Health Check, failure triage, faulted action hotspots, and queue latency using native Playbook Dashboard telemetry")
+    pb_health.add_argument("--days", "-d", type=int, default=7, help="Evaluation lookback period in days (default: 7)")
+    pb_health.add_argument("--no-deep-scan", action="store_true", help="Skip deep query analytics and run inventory-only audit")
+    pb_health.add_argument("--fail-threshold", type=float, default=15.0, help="Failure percentage threshold for high risk findings (default: 15.0)")
+    pb_health.add_argument("--slow-threshold", type=float, default=3.0, help="Runtime duration threshold in minutes for slow playbooks (default: 3.0)")
+    pb_health.add_argument("--out", "-o", help="Optional path to output JSON report file")
+    pb_health.add_argument("--json", action="store_true", help="Print raw JSON output")
+
     pb_cats = playbook_sub.add_parser("categories", help="List all SOAR playbook categories/folders")
 
     # Integration command
@@ -292,6 +300,22 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     cur_metrics = curated_sub.add_parser("metrics", help="Show tenant-wide rule quotas and top firing Curated Rule Sets")
     cur_metrics.add_argument("--days", type=int, default=7, help="Time window in days (default: 7)")
+
+    cur_set = curated_sub.add_parser("set-deployment", help="Enable/disable a Curated Rule Set deployment and toggle alerting")
+    cur_set.add_argument("identifier", help="Curated Rule Set UUID, resource name, or title")
+    cur_set.add_argument("--precision", choices=["PRECISE", "BROAD", "precise", "broad"], default="PRECISE", help="Precision profile (default: PRECISE)")
+    cur_set_state = cur_set.add_mutually_exclusive_group()
+    cur_set_state.add_argument("--enabled", dest="enabled", action="store_true", default=None, help="Enable deployment")
+    cur_set_state.add_argument("--disabled", dest="enabled", action="store_false", default=None, help="Disable deployment")
+    cur_set_alert = cur_set.add_mutually_exclusive_group()
+    cur_set_alert.add_argument("--alerting", dest="alerting", action="store_true", default=None, help="Enable alerting")
+    cur_set_alert.add_argument("--no-alerting", dest="alerting", action="store_false", default=None, help="Disable alerting (silent detection)")
+    cur_set.add_argument("--no-sync-rules", dest="sync_rules", action="store_false", default=True, help="Do not cascade status to individual rules")
+
+    cur_audit = curated_sub.add_parser("audit", help="Run comprehensive Curated Detections Health Check & Operational Audit")
+    cur_audit.add_argument("--days", type=int, default=7, help="Evaluation timeframe in days (default: 7)")
+    cur_audit.add_argument("--out", help="Optional output filepath to save JSON report")
+    cur_audit.add_argument("--json", action="store_true", help="Output raw JSON instead of text tables")
 
     # Marketplace Response Integrations command
     mp_parser = subparsers.add_parser("marketplace", help="Search Content Hub Marketplace Response Integrations, compare version diffs, and inspect affected playbooks")
@@ -695,6 +719,11 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
             "soar-playbook-inventory",
             "playbook-inventory",
             "soar_playbook_inventory",
+            "soar-playbook-health",
+            "soar_playbook_health",
+            "playbook-health",
+            "curated-detections-health",
+            "curated_detections_health",
         ],
         help="Name of the runbook to execute",
     )
@@ -982,6 +1011,16 @@ def run_runbook_cli(args):
         print("     Summary  : Comprehensive audit of SOAR Playbooks & Blocks: types (REGULAR/NESTED), enabled status, priority, and environment mappings")
         print("     Usage    : secops runbook run soar-playbook-inventory [--out <FILE>]")
         print()
+        print("  6. curated-detections-health (curated_detections_health)")
+        print("     Category : Operations & Detection Engineering")
+        print("     Summary  : Health check & hygiene audit across Curated Rule Sets: misconfiguration risks (BROAD alerting), top firing rules, newest/oldest intelligence")
+        print("     Usage    : secops runbook run curated-detections-health [--days <N>] [--out <FILE>]")
+        print()
+        print("  7. soar-playbook-health (soar_playbook_health / playbook-health)")
+        print("     Category : Operations & SOAR Automation")
+        print("     Summary  : Comprehensive SOAR Playbook Health Check: failure rates, faulted connector actions, queue latency, and Playbook Dashboard (SOAR) telemetry")
+        print("     Usage    : secops runbook run soar-playbook-health [--lookback-days <N>] [--out <FILE>]")
+        print()
     elif args.runbook_action == "run":
         if args.name in ("case-ai-triage", "autonomous_case_ai_triage"):
             from runbooks.incident_response.autonomous_case_ai_triage import run_autonomous_case_ai_triage
@@ -1042,6 +1081,34 @@ def run_runbook_cli(args):
                 print(f"[+] SOAR Playbook inventory written to {args.out}")
             else:
                 print_playbook_inventory_console(report)
+        elif args.name in ("curated-detections-health", "curated_detections_health"):
+            import json
+            from runbooks.operations.curated_detections_health import (
+                generate_curated_detections_health_report,
+                print_curated_detections_health_console,
+            )
+            days = getattr(args, "lookback_days", 7) or 7
+            report = generate_curated_detections_health_report(days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] Curated Detections health audit written to {args.out}")
+            else:
+                print_curated_detections_health_console(report)
+        elif args.name in ("soar-playbook-health", "soar_playbook_health", "playbook-health"):
+            import json
+            from runbooks.operations.soar_playbook_health import (
+                generate_soar_playbook_health_report,
+                print_soar_playbook_health_console,
+            )
+            days = getattr(args, "lookback_days", 7) or 7
+            report = generate_soar_playbook_health_report(days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] SOAR Playbook health audit written to {args.out}")
+            else:
+                print_soar_playbook_health_console(report)
 
 
 def run_entity_search_cli(args):
@@ -1522,6 +1589,39 @@ def run_playbook_cli(args):
                 json.dump(report, f, indent=2, default=str)
             print(f"[+] Playbook audit report written to: {args.out}")
 
+    elif args.playbook_action == "audit-health":
+        import json
+        from runbooks.operations.soar_playbook_health import (
+            generate_soar_playbook_health_report,
+            print_soar_playbook_health_console,
+        )
+
+        days = getattr(args, "days", 7)
+        scan_deep = not getattr(args, "no_deep_scan", False)
+        fail_thresh = getattr(args, "fail_threshold", 15.0)
+        slow_thresh = getattr(args, "slow_threshold", 3.0)
+
+        if not getattr(args, "json", False):
+            print(f"\n[CLI] Running SOAR Playbook Health Check (lookback={days}d, deep_scan={scan_deep})...")
+
+        report = generate_soar_playbook_health_report(
+            engine=engine,
+            days=days,
+            scan_deep=scan_deep,
+            fail_threshold_pct=fail_thresh,
+            slow_threshold_minutes=slow_thresh,
+        )
+
+        if getattr(args, "json", False):
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print_soar_playbook_health_console(report)
+
+        if getattr(args, "out", None):
+            with open(args.out, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"[+] SOAR Playbook health report written to: {args.out}")
+
 
 def run_integration_cli(args):
     engine = SecOpsEngine()
@@ -1967,6 +2067,50 @@ def run_curated_cli(args):
         except Exception as e:
             print(f"Error fetching curated metrics: {e}", file=sys.stderr)
             sys.exit(1)
+
+    elif args.curated_action == "set-deployment":
+        if args.enabled is None and args.alerting is None:
+            print("Error: Must specify at least one state flag (--enabled/--disabled or --alerting/--no-alerting)", file=sys.stderr)
+            sys.exit(1)
+
+        prec = args.precision.upper()
+        print(f"\n[CLI] Updating Curated Rule Set '{args.identifier}' deployment ({prec})...")
+        try:
+            res = engine.set_curated_ruleset_deployment(
+                ruleset_id_or_title=args.identifier,
+                precision=prec,
+                enabled=args.enabled,
+                alerting=args.alerting,
+                sync_rules=args.sync_rules,
+            )
+            state_str = "ENABLED" if res.enabled else "DISABLED"
+            alert_str = "ALERTING ON" if res.alerting else "ALERTING OFF"
+            print(f"\n[Success] Curated Rule Set Deployment updated successfully:")
+            print(f"  Resource : {res.resource_name}")
+            print(f"  Precision: {res.precision}")
+            print(f"  Status   : {state_str}")
+            print(f"  Alerting : {alert_str}\n")
+        except Exception as e:
+            print(f"Error updating curated deployment: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.curated_action == "audit":
+        from runbooks.operations.curated_detections_health import (
+            generate_curated_detections_health_report,
+            print_curated_detections_health_console,
+        )
+        days = getattr(args, "days", 7) or 7
+        try:
+            report = generate_curated_detections_health_report(engine=engine, days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] Curated Detections health report saved to {args.out}")
+            print_curated_detections_health_console(report, json_output=getattr(args, "json", False))
+        except Exception as e:
+            print(f"Error running curated detections health audit: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 
 def run_marketplace_cli(args):

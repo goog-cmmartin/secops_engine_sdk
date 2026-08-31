@@ -209,6 +209,9 @@ secops playbook categories
 # Comprehensive audit of all playbooks, blocks, priorities, and environment mappings
 secops playbook audit [--type <REGULAR|NESTED>] [--environment <ENV>] [--out <FILE>] [--json]
 
+# Comprehensive SOAR Playbook Health Check with Playbook Dashboard (SOAR) telemetry
+secops playbook audit-health [--days <N>] [--out <FILE>] [--json]
+
 # List integrations
 secops integration list
 
@@ -275,7 +278,55 @@ secops rule set-deployment ru_6cb096c8-2270-4d03-860b-3c3db443a7e4 --alerting
 
 ---
 
-## 7. Ingestion, Feeds & Parsers
+## 7. Curated Detections & Content Hub
+
+### `secops curated`
+Discover Google Cloud Threat Intelligence (GCTI) and Mandiant Curated Rule Sets, inspect individual YARA-L logic, manage Broad/Precise deployment profiles, and monitor detection telemetry.
+
+```bash
+# Search Curated Rule Sets by keyword, category, MITRE tactic/technique, or log source
+secops curated rulesets [QUERY] [--category <CAT>] [--tactic <TA>] [--technique <T>] [--log-source <LOG>] [--limit <N>]
+
+# Deep-inspect a Curated Rule Set (Broad & Precise deployment states, 7-day hits, member rules)
+secops curated get <RULESET_UUID_OR_TITLE>
+
+# Inspect a specific Curated Rule and view its executable YARA-L logic
+secops curated rule <RULE_ID>
+
+# Query tenant rule engine quotas and top firing Curated Rule Sets
+secops curated metrics [--days <N>]
+
+# Enable/disable a Curated Rule Set deployment profile and toggle alerting
+secops curated set-deployment <RULESET_ID_OR_TITLE> [--precision <PRECISE|BROAD>] [--enabled | --disabled] [--alerting | --no-alerting] [--no-sync-rules]
+
+# Run full health check, deployment posture review, and misconfiguration hygiene audit
+secops curated audit [--days <N>] [--out <FILE>] [--json]
+```
+
+**Examples:**
+```bash
+# Search for Cloud Threat rulesets covering Azure
+secops curated rulesets "Azure" --category "Cloud Threats"
+
+# Deep-inspect "Azure - Network" curated ruleset
+secops curated get "Azure - Network"
+
+# Enable PRECISE mode with Alerting ON
+secops curated set-deployment "Azure - Network" --precision PRECISE --enabled --alerting
+
+# Enable BROAD mode with Silent Detection (Alerting OFF)
+secops curated set-deployment "Azure - Network" --precision BROAD --enabled --no-alerting
+
+# Run curated detections operational health check over 14 days
+secops curated audit --days 14 --out curated_audit.json
+
+# View top firing curated rulesets over the last 14 days
+secops curated metrics --days 14
+```
+
+---
+
+## 8. Ingestion, Feeds & Parsers
 
 ### `secops feed`
 Manage log ingestion feeds.
@@ -307,7 +358,7 @@ secops preview run --log-type <LOG_TYPE> --log-data "<RAW_LOG_STRING>"
 
 ---
 
-## 7. Platform Administration & SOC Topography
+## 9. Platform Administration & SOC Topography
 
 Inspect governance, RBAC scopes, environments, and network boundaries:
 
@@ -330,7 +381,7 @@ secops soar-data-retention
 
 ---
 
-## 8. Autonomous Runbooks
+## 10. Autonomous Runbooks
 
 Execute multi-step autonomous incident response, threat hunting, and operational audit procedures.
 
@@ -355,4 +406,10 @@ secops runbook run yara-l-rules-audit [--out yara_rules_audit.json]
 
 # Google SecOps SOAR Playbooks & Reusable Blocks Inventory Audit (Operations & Automation)
 secops runbook run soar-playbook-inventory [--out soar_playbooks_audit.json]
+
+# Curated Rule Sets Deployment & Hygiene Health Check (Operations & Detection)
+secops runbook run curated-detections-health [--lookback-days 7] [--out curated_audit.json]
+
+# Google SecOps SOAR Playbook Health & Telemetry Audit (Operations & SOAR Telemetry)
+secops runbook run soar-playbook-health [--lookback-days 7] [--out soar_health.json]
 ```

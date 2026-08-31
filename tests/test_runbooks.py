@@ -17,6 +17,12 @@ from runbooks.operations.yara_l_rules_audit import (
 from runbooks.operations.soar_playbook_inventory import (
     generate_playbook_inventory_report,
 )
+from runbooks.operations.curated_detections_health import (
+    generate_curated_detections_health_report,
+)
+from runbooks.operations.soar_playbook_health import (
+    generate_soar_playbook_health_report,
+)
 
 
 class TestAutonomousRunbooks(unittest.TestCase):
@@ -124,6 +130,47 @@ class TestAutonomousRunbooks(unittest.TestCase):
         self.assertIsInstance(summary.get("disabled_count"), int)
         self.assertIsInstance(summary.get("priority_breakdown"), dict)
         self.assertIsInstance(summary.get("environment_distribution"), dict)
+
+    def test_curated_detections_health_report(self):
+        """Validates that Curated Detections health audit compiles findings, quotas, top firing rules, and freshness."""
+        report = generate_curated_detections_health_report(engine=self.engine, days=7, scan_deployments=True)
+        self.assertIsInstance(report, dict)
+        self.assertIn("summary", report)
+        self.assertIn("tenant_quotas", report)
+        self.assertIn("health_findings", report)
+        self.assertIn("top_firing_rulesets", report)
+        self.assertIn("newest_rules", report)
+        self.assertIn("oldest_rules", report)
+        self.assertIn("category_coverage", report)
+
+        summary = report["summary"]
+        self.assertGreater(summary.get("total_rulesets", 0), 0)
+        self.assertGreater(summary.get("total_curated_rules", 0), 0)
+        self.assertIsInstance(summary.get("broad_enabled_count"), int)
+        self.assertIsInstance(summary.get("precise_enabled_count"), int)
+        self.assertIsInstance(report.get("health_findings"), list)
+
+    def test_soar_playbook_health_report(self):
+        """Validates that SOAR Playbook health audit compiles telemetry, findings, failure ranking, and actions."""
+        report = generate_soar_playbook_health_report(engine=self.engine, days=7, scan_deep=True)
+        self.assertIsInstance(report, dict)
+        self.assertEqual(report.get("report_type"), "soar_playbook_health_and_telemetry_audit")
+        self.assertIn("summary", report)
+        self.assertIn("operational_telemetry", report)
+        self.assertIn("health_findings", report)
+        self.assertIn("top_failing_playbooks", report)
+        self.assertIn("top_executed_playbooks", report)
+        self.assertIn("top_faulted_actions", report)
+        self.assertIn("slowest_playbooks", report)
+
+        summary = report["summary"]
+        self.assertGreater(summary.get("total_playbooks", 0), 0)
+        self.assertIsInstance(summary.get("enabled_count"), int)
+
+        telemetry = report["operational_telemetry"]
+        self.assertGreaterEqual(telemetry.get("total_playbook_runs", 0), 0)
+        self.assertIsInstance(telemetry.get("failure_rate_pct"), float)
+        self.assertIsInstance(report.get("health_findings"), list)
 
 
 if __name__ == "__main__":

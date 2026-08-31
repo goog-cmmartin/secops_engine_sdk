@@ -13,7 +13,9 @@ prompts/
 │   ├── data_table_inventory.md         # Data Table schema, lifecycle & metadata inventory
 │   ├── tenant_settings_audit.md        # Comprehensive tenant governance & configuration audit
 │   ├── yara_l_rules_audit.md           # Detection rules health, deployment & error audit
-│   └── soar_playbook_inventory.md      # SOAR playbooks & modular blocks configuration audit
+│   ├── soar_playbook_inventory.md      # SOAR playbooks & modular blocks configuration audit
+│   ├── soar_playbook_health.md         # SOAR playbook health, telemetry & dashboard operational audit
+│   └── curated_detections_health.md    # Curated detections deployment, hygiene & misconfiguration audit
 ├── incident_response/
 │   ├── case_ai_triage.md               # 4-stage case triage, indicator extraction & escalation
 │   └── alert_investigation_brief.md    # Single-alert forensic summary & next steps

@@ -915,6 +915,7 @@ class SecOpsTUI(App):
             pass
 
     def action_switch_tab(self, tab_id: str) -> None:
+        self.set_focus(None)
         tabs = self.query_one("#main-tabs", TabbedContent)
         tabs.active = tab_id
 

@@ -148,6 +148,30 @@ def _kv_table(pairs: List[tuple]) -> Table:
     return t
 
 
+def _alerts_table(alerts: List[Any]) -> Table:
+    t = Table(title="Alerts", expand=True, title_style="bold", show_lines=False)
+    t.add_column("Priority", no_wrap=True)
+    t.add_column("Name")
+    t.add_column("Status", no_wrap=True)
+    t.add_column("Product", no_wrap=True)
+    t.add_column("Events", justify="right", no_wrap=True)
+    t.add_column("Playbook")
+    if not alerts:
+        t.add_row(Text("(no alerts)", style="dim"), "", "", "", "", "")
+        return t
+    for a in alerts:
+        pr = getattr(a, "priority", "") or "-"
+        t.add_row(
+            Text(str(pr), style=_PRIORITY_STYLE.get(str(pr).upper(), "")),
+            getattr(a, "display_name", "") or getattr(a, "identifier", "") or "-",
+            getattr(a, "status", "") or "-",
+            getattr(a, "product", None) or "-",
+            str(getattr(a, "event_count", 0)),
+            getattr(a, "attached_playbook_name", None) or "-",
+        )
+    return t
+
+
 def _entities_table(entities: List[Any]) -> Table:
     t = Table(title="Involved Entities", expand=True, title_style="bold")
     t.add_column("Type", no_wrap=True)

@@ -578,7 +578,7 @@ class TestTUIAppAsync(unittest.IsolatedAsyncioTestCase):
             # Search filter
             search_input = app.query_one("#dashboards-search")
             search_input.value = "Threat"
-            await search_input.post_message(search_input.Submitted(value="Threat", input=search_input))
+            search_input.post_message(search_input.Submitted(value="Threat", input=search_input))
             await app.workers.wait_for_complete()
             await pilot.pause()
             self.assertEqual(dash_table.row_count, 1)

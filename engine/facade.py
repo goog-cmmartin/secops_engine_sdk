@@ -13,10 +13,41 @@ from engine.domain import (
     CaseSearchQuery,
     CaseSearchResultItem,
     CaseStatus,
+    CaseTimeline,
+    CaseTimelineEvent,
+    CaseTriageAssessment,
+    CaseTriageBatch,
+    CaseWallRecord,
+    CaseWallResult,
+    TriageVerdict,
+    CasePrecedentSummary,
+    EntityPrecedentItem,
     CaseUpdateResult,
     CaseAlertUpdateResult,
     CaseAlertRecommendationJob,
     CaseAlertRecommendation,
+    CaseSummary,
+    DataTable,
+    DataTableColumnInfo,
+    DataTableHealthFinding,
+    DataTableHealthReport,
+    DataTableHealthStatus,
+    DataTableRow,
+    DataTableListResult,
+    DataTableRowListResult,
+    RuleSeverity,
+    RuleCompilationDiagnostic,
+    RuleValidationResult,
+    RuleDeployment,
+    RuleExecutionError,
+    RuleExecutionErrorListResult,
+    RuleSummary,
+    RuleDetail,
+    RuleListResult,
+    RuleRevisionListResult,
+    RuleHealthFinding,
+    RuleHealthReport,
+    RuleHealthStatus,
     ContentPackBatch,
     ContentPackDetail,
     ContentPackSearchQuery,
@@ -25,12 +56,16 @@ from engine.domain import (
     CuratedRuleDetail,
     CuratedRuleSearchQuery,
     CuratedRuleSetBatch,
+    CuratedRuleSetDeployment,
     CuratedRuleSetDetail,
     CuratedRuleSetSummary,
     CuratedRuleSummary,
     DashboardBatch,
     DashboardChart,
     DashboardDetail,
+    DashboardHealthFinding,
+    DashboardHealthReport,
+    DashboardHealthStatus,
     DashboardQuery,
     DashboardQueryResult,
     DashboardSearchQuery,
@@ -44,6 +79,9 @@ from engine.domain import (
     EventReference,
     FeedBatch,
     FeedDetail,
+    FeedHealthFinding,
+    FeedHealthReport,
+    FeedHealthStatus,
     FeedLogTypeBatch,
     FeedLogTypeSchema,
     FeedSearchQuery,
@@ -85,6 +123,9 @@ from engine.domain import (
     ParserExtensionBatch,
     ParserExtensionDetail,
     ParserExtensionSummary,
+    ParserHealthFinding,
+    ParserHealthReport,
+    ParserHealthStatus,
     ParserSummary,
     PlaybookBatch,
     PlaybookCategory,
@@ -200,6 +241,8 @@ from engine.workflows.case_actions import (
     CreateCaseAlertRecommendationWorkflow,
     FetchCaseAlertRecommendationWorkflow,
     GetCaseAlertRecommendationWorkflow,
+    GetCaseSummaryWorkflow,
+    GetOrCreateCaseSummaryWorkflow,
     SetCaseAlertPriorityWorkflow,
     SetCaseIncidentWorkflow,
     SetCaseStageWorkflow,
@@ -211,6 +254,11 @@ from engine.workflows.case_investigation import (
     InvestigateCaseWorkflow,
 )
 from engine.workflows.case_search import SearchCasesWorkflow
+from engine.workflows.case_triage import OrchestrateCaseTriageWorkflow
+from engine.workflows.case_wall import (
+    GetCaseWallWorkflow,
+    ListCaseCommentsWorkflow,
+)
 from engine.workflows.content_pack import (
     GetContentPackDetailWorkflow,
     ListContentPackCategoriesWorkflow,
@@ -221,6 +269,7 @@ from engine.workflows.curated_detections import (
     GetCuratedRuleDetailWorkflow,
     GetCuratedRuleSetDetailWorkflow,
     SearchCuratedRuleSetsWorkflow,
+    SetCuratedRuleSetDeploymentWorkflow,
 )
 from engine.workflows.dashboards import (
     run_dashboard_health_check,
@@ -229,6 +278,7 @@ from engine.workflows.dashboards import (
     SearchDashboardsWorkflow,
     ValidateDashboardQueryWorkflow,
 )
+from engine.workflows.dashboard_health import AuditDashboardHealthWorkflow
 from engine.workflows.data_rbac import (
     GetDataAccessLabelWorkflow,
     GetDataAccessScopeWorkflow,
@@ -254,6 +304,7 @@ from engine.workflows.feed import (
     ListFeedSourceTypeSchemasWorkflow,
     SearchFeedsWorkflow,
 )
+from engine.workflows.feed_health import AuditFeedHealthWorkflow
 from engine.workflows.integration import (
     GetIntegrationDetailWorkflow,
     ListIntegrationInstancesWorkflow,
@@ -281,12 +332,14 @@ from engine.workflows.parser import (
     SearchParserExtensionsWorkflow,
     SearchParsersWorkflow,
 )
+from engine.workflows.parser_health import AuditParserHealthWorkflow
 from engine.workflows.playbook import (
     GetAlertPlaybookInstancesWorkflow,
     GetPlaybookWorkflow,
     ListPlaybookCategoriesWorkflow,
     SearchPlaybooksWorkflow,
 )
+from engine.workflows.playbook_health import AuditPlaybookHealthWorkflow
 from engine.workflows.preview_feature import (
     GetPreviewFeatureWorkflow,
     ListPreviewFeaturesWorkflow,
@@ -353,6 +406,32 @@ from engine.workflows.case_config import (
     SearchCaseViewsWorkflow,
     SearchCustomFieldsWorkflow,
 )
+from engine.workflows.data_tables import (
+    ListDataTablesWorkflow,
+    GetDataTableWorkflow,
+    CreateDataTableWorkflow,
+    PatchDataTableWorkflow,
+    DeleteDataTableWorkflow,
+    ListDataTableRowsWorkflow,
+    AddDataTableRowsWorkflow,
+    DeleteDataTableRowWorkflow,
+)
+from engine.workflows.data_table_health import (
+    AuditDataTableHealthWorkflow,
+)
+from engine.workflows.detection_rules import (
+    ListRulesWorkflow,
+    GetRuleWorkflow,
+    VerifyRuleWorkflow,
+    CreateRuleWorkflow,
+    PatchRuleWorkflow,
+    DeleteRuleWorkflow,
+    ListRuleRevisionsWorkflow,
+    GetRuleDeploymentWorkflow,
+    UpdateRuleDeploymentWorkflow,
+    ListRuleErrorsWorkflow,
+)
+from engine.workflows.rule_health import AuditRuleHealthWorkflow
 
 
 
@@ -382,6 +461,8 @@ class SecOpsEngine:
         "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
         "_investigate_case_wf": lambda e: InvestigateCaseWorkflow(e.adapter),
         "_add_case_comment_wf": lambda e: AddCaseCommentWorkflow(e.adapter),
+        "_list_case_comments_wf": lambda e: ListCaseCommentsWorkflow(e.adapter),
+        "_get_case_wall_wf": lambda e: GetCaseWallWorkflow(e.adapter),
         "_update_case_wf": lambda e: UpdateCaseWorkflow(e.adapter),
         "_assign_case_wf": lambda e: AssignCaseWorkflow(e.adapter),
         "_set_case_stage_wf": lambda e: SetCaseStageWorkflow(e.adapter),
@@ -391,12 +472,16 @@ class SecOpsEngine:
         "_create_case_alert_recommendation_wf": lambda e: CreateCaseAlertRecommendationWorkflow(e.adapter),
         "_fetch_case_alert_recommendation_wf": lambda e: FetchCaseAlertRecommendationWorkflow(e.adapter),
         "_get_case_alert_recommendation_wf": lambda e: GetCaseAlertRecommendationWorkflow(e.adapter),
+        "_get_or_create_case_summary_wf": lambda e: GetOrCreateCaseSummaryWorkflow(e.adapter),
+        "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
+        "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter),
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
         "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
         "_alert_playbook_instances_wf": lambda e: GetAlertPlaybookInstancesWorkflow(e.adapter),
+        "_audit_soar_playbook_health_wf": lambda e: AuditPlaybookHealthWorkflow(e),
         "_search_integrations_wf": lambda e: SearchIntegrationsWorkflow(e.adapter),
         "_get_integration_wf": lambda e: GetIntegrationDetailWorkflow(e.adapter),
         "_list_integration_instances_wf": lambda e: ListIntegrationInstancesWorkflow(e.adapter),
@@ -412,6 +497,7 @@ class SecOpsEngine:
         "_get_curated_ruleset_wf": lambda e: GetCuratedRuleSetDetailWorkflow(e.adapter),
         "_get_curated_rule_wf": lambda e: GetCuratedRuleDetailWorkflow(e.adapter),
         "_get_curated_metrics_wf": lambda e: GetCuratedDetectionMetricsWorkflow(e.adapter),
+        "_set_curated_ruleset_deployment_wf": lambda e: SetCuratedRuleSetDeploymentWorkflow(e.adapter),
         "_search_marketplace_integrations_wf": lambda e: SearchMarketplaceIntegrationsWorkflow(e.adapter),
         "_get_marketplace_integration_wf": lambda e: GetMarketplaceIntegrationDetailWorkflow(e.adapter),
         "_get_marketplace_integration_diff_wf": lambda e: GetMarketplaceIntegrationDiffWorkflow(e.adapter),
@@ -420,9 +506,11 @@ class SecOpsEngine:
         "_get_dashboard_wf": lambda e: GetDashboardDetailWorkflow(e.adapter),
         "_execute_dashboard_query_wf": lambda e: ExecuteDashboardQueryWorkflow(e.adapter),
         "_validate_dashboard_query_wf": lambda e: ValidateDashboardQueryWorkflow(e.adapter),
+        "_audit_dashboard_health_wf": lambda e: AuditDashboardHealthWorkflow(e.adapter),
         "_get_managed_domains_wf": lambda e: GetManagedDomainSettingsWorkflow(e.adapter),
         "_search_feeds_wf": lambda e: SearchFeedsWorkflow(e.adapter),
         "_get_feed_wf": lambda e: GetFeedDetailWorkflow(e.adapter),
+        "_audit_feed_health_wf": lambda e: AuditFeedHealthWorkflow(e.adapter),
         "_search_pipelines_wf": lambda e: SearchLogProcessingPipelinesWorkflow(e.adapter),
         "_get_pipeline_wf": lambda e: GetLogProcessingPipelineDetailWorkflow(e.adapter),
         "_list_feed_source_types_wf": lambda e: ListFeedSourceTypeSchemasWorkflow(e.adapter),
@@ -433,6 +521,7 @@ class SecOpsEngine:
         "_search_parser_extensions_wf": lambda e: SearchParserExtensionsWorkflow(e.adapter),
         "_get_parser_extension_wf": lambda e: GetParserExtensionDetailWorkflow(e.adapter),
         "_get_log_type_setting_wf": lambda e: GetLogTypeSettingWorkflow(e.adapter),
+        "_audit_parser_health_wf": lambda e: AuditParserHealthWorkflow(e.adapter),
         "_list_preview_features_wf": lambda e: ListPreviewFeaturesWorkflow(e.adapter),
         "_get_preview_feature_wf": lambda e: GetPreviewFeatureWorkflow(e.adapter),
         "_search_data_access_scopes_wf": lambda e: SearchDataAccessScopesWorkflow(e.adapter),
@@ -500,6 +589,26 @@ class SecOpsEngine:
             e._search_cases_wf,
             e._summarize_entity_wf,
         ),
+        "_list_data_tables_wf": lambda e: ListDataTablesWorkflow(e.adapter),
+        "_get_data_table_wf": lambda e: GetDataTableWorkflow(e.adapter),
+        "_create_data_table_wf": lambda e: CreateDataTableWorkflow(e.adapter),
+        "_patch_data_table_wf": lambda e: PatchDataTableWorkflow(e.adapter),
+        "_delete_data_table_wf": lambda e: DeleteDataTableWorkflow(e.adapter),
+        "_list_data_table_rows_wf": lambda e: ListDataTableRowsWorkflow(e.adapter),
+        "_add_data_table_rows_wf": lambda e: AddDataTableRowsWorkflow(e.adapter),
+        "_delete_data_table_row_wf": lambda e: DeleteDataTableRowWorkflow(e.adapter),
+        "_audit_data_table_health_wf": lambda e: AuditDataTableHealthWorkflow(e.adapter),
+        "_list_rules_wf": lambda e: ListRulesWorkflow(e.adapter),
+        "_get_rule_wf": lambda e: GetRuleWorkflow(e.adapter),
+        "_verify_rule_wf": lambda e: VerifyRuleWorkflow(e.adapter),
+        "_create_rule_wf": lambda e: CreateRuleWorkflow(e.adapter),
+        "_patch_rule_wf": lambda e: PatchRuleWorkflow(e.adapter),
+        "_delete_rule_wf": lambda e: DeleteRuleWorkflow(e.adapter),
+        "_list_rule_revisions_wf": lambda e: ListRuleRevisionsWorkflow(e.adapter),
+        "_get_rule_deployment_wf": lambda e: GetRuleDeploymentWorkflow(e.adapter),
+        "_update_rule_deployment_wf": lambda e: UpdateRuleDeploymentWorkflow(e.adapter),
+        "_list_rule_errors_wf": lambda e: ListRuleErrorsWorkflow(e.adapter),
+        "_audit_rule_health_wf": lambda e: AuditRuleHealthWorkflow(e.adapter),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -651,6 +760,30 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.list_comments",
+                name="List SOAR Case Comments",
+                description="Lists all analyst comments and AI assessment notes for a SOAR case.",
+                category="case",
+                handler=self.list_case_comments,
+                mcp_tool_name="list_case_comments",
+                composed=False,
+                evidence_path="evidence/case/comments",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.get_wall",
+                name="Get SOAR Case Activity Wall",
+                description="Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps.",
+                category="case",
+                handler=self.get_case_wall,
+                mcp_tool_name="get_case_wall",
+                composed=False,
+                evidence_path="evidence/case/wall",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="case.update",
                 name="Update SOAR Case Properties",
                 description="Mutates case attributes such as assignee, stage, incident flag, or priority.",
@@ -760,6 +893,31 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.get_or_create_summary",
+                name="Get or Create SOAR Case AI Summary",
+                description="Gets or initiates generation of a Gemini AI-driven overview, reasons, and next steps for a SOAR case.",
+                category="case",
+                handler=self.get_or_create_case_summary,
+                mcp_tool_name="get_or_create_case_summary",
+                composed=False,
+                evidence_path="evidence/case/get_or_create_summary",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.get_summary",
+                name="Get SOAR Case AI Summary (Polled)",
+                description="Requests Gemini AI case summary and polls until generation is complete or timeout.",
+                category="case",
+                handler=self.get_case_summary,
+                mcp_tool_name="get_case_summary",
+                composed=True,
+                uses=("case.get_or_create_summary",),
+                evidence_path="evidence/case/get_summary",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="alert.investigate",
                 name="SOAR Security Alert Deep Investigation",
                 description="Retrieves security alert details with root-cause entities and raw log attachments.",
@@ -780,6 +938,45 @@ class SecOpsEngine:
                 mcp_tool_name="search_cases",
                 composed=False,
                 evidence_path="evidence/case/search",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.orchestrate_triage",
+                name="Orchestrate Case Triage",
+                description="Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases.",
+                category="case",
+                handler=self.orchestrate_case_triage,
+                mcp_tool_name="orchestrate_case_triage",
+                composed=True,
+                uses=("case.search", "case.investigate", "case.get_summary"),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.triage",
+                name="Triage Single Case",
+                description="End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions.",
+                category="case",
+                handler=self.triage_case,
+                mcp_tool_name="triage_case",
+                composed=True,
+                uses=("case.investigate", "case.get_summary", "case.search"),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.timeline",
+                name="Get Case Chronological Timeline",
+                description="Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates.",
+                category="case",
+                handler=self.get_case_timeline,
+                mcp_tool_name="get_case_timeline",
+                composed=True,
+                uses=("case.investigate",),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
             )
         )
         self.registry.register(
@@ -828,6 +1025,18 @@ class SecOpsEngine:
                 mcp_tool_name="get_alert_playbook_instances",
                 composed=False,
                 evidence_path="evidence/playbook/instances",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="playbook.audit_health",
+                name="SOAR Playbook Health & Telemetry Audit",
+                description="Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics.",
+                category="playbook",
+                handler=self.audit_soar_playbook_health,
+                mcp_tool_name="audit_soar_playbook_health",
+                composed=False,
+                evidence_path="evidence/playbook/audit_health",
             )
         )
         self.registry.register(
@@ -1012,6 +1221,31 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="curated_detections.set_deployment",
+                name="Set Curated Rule Set Deployment",
+                description="Updates enabled and alerting states for a Curated Rule Set precision deployment.",
+                category="curated_detections",
+                handler=self.set_curated_ruleset_deployment,
+                mcp_tool_name="set_curated_ruleset_deployment",
+                composed=False,
+                evidence_path="evidence/curated_detections/deployment_set",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.audit_health",
+                name="Curated Detections Health & Hygiene Audit",
+                description="Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content.",
+                category="curated_detections",
+                handler=self.audit_curated_detections_health,
+                mcp_tool_name="audit_curated_detections_health",
+                composed=True,
+                uses=["curated_detections.metrics"],
+                evidence_path="evidence/curated_detections/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="marketplace_integration.search",
                 name="Search Marketplace Response Integrations",
                 description="Discovers, searches, and filters Marketplace Response Integrations across categories and update states.",
@@ -1120,6 +1354,19 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="dashboard.audit_health",
+                name="Audit Dashboard Health & Governance",
+                description="Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness.",
+                category="dashboard",
+                handler=self.audit_dashboard_health,
+                mcp_tool_name="audit_dashboard_health",
+                composed=True,
+                uses=("dashboard.search", "dashboard.get", "dashboard.validate_query"),
+                evidence_path="evidence/dashboard/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="siem.managed_domains.get",
                 name="Get Managed Email Domains Settings",
                 description="Retrieves approved email domains for report deliveries and alerts.",
@@ -1152,6 +1399,19 @@ class SecOpsEngine:
                 mcp_tool_name="get_feed",
                 composed=False,
                 evidence_path="evidence/feed/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="feed.audit_health",
+                name="Audit Ingestion Feed Health",
+                description="Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency.",
+                category="feed",
+                handler=self.audit_feed_health,
+                mcp_tool_name="audit_feed_health",
+                composed=True,
+                uses=("feed.search", "dashboard.execute_query"),
+                evidence_path="evidence/feed/audit_health",
             )
         )
         self.registry.register(
@@ -1272,6 +1532,19 @@ class SecOpsEngine:
                 mcp_tool_name="get_log_type_setting",
                 composed=False,
                 evidence_path="evidence/parser/settings",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="parser.audit_health",
+                name="Audit SIEM Parser Health",
+                description="Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry.",
+                category="parser",
+                handler=self.audit_parser_health,
+                mcp_tool_name="audit_parser_health",
+                composed=True,
+                uses=("parser.search", "parser.extensions.search", "dashboard.execute_query"),
+                evidence_path="evidence/parser/audit_health",
             )
         )
         self.registry.register(
@@ -1958,6 +2231,248 @@ class SecOpsEngine:
                 evidence_path="evidence/soar_settings/webhooks/get",
             )
         )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.list",
+                name="List Data Tables",
+                description="Lists all structured Data Tables defined in Chronicle SIEM.",
+                category="data_table",
+                handler=self.list_data_tables,
+                mcp_tool_name="list_data_tables",
+                composed=False,
+                evidence_path="evidence/data_table/list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.get",
+                name="Get Data Table",
+                description="Retrieves schema, columns, TTL, and metadata for a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.get_data_table,
+                mcp_tool_name="get_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.create",
+                name="Create Data Table",
+                description="Creates a new structured Data Table with typed column definitions in Chronicle SIEM.",
+                category="data_table",
+                handler=self.create_data_table,
+                mcp_tool_name="create_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.patch",
+                name="Update Data Table",
+                description="Updates description, TTL, or scope info of an existing Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.patch_data_table,
+                mcp_tool_name="patch_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/patch",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.delete",
+                name="Delete Data Table",
+                description="Deletes a structured Data Table from Chronicle SIEM.",
+                category="data_table",
+                handler=self.delete_data_table,
+                mcp_tool_name="delete_data_table",
+                composed=False,
+                evidence_path="evidence/data_table/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.list_rows",
+                name="List Data Table Rows",
+                description="Queries and filters rows contained within a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.list_data_table_rows,
+                mcp_tool_name="list_data_table_rows",
+                composed=False,
+                evidence_path="evidence/data_table/list_rows",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.add_rows",
+                name="Add Data Table Rows",
+                description="Creates or appends rows in bulk to a Chronicle SIEM Data Table.",
+                category="data_table",
+                handler=self.add_data_table_rows,
+                mcp_tool_name="add_data_table_rows",
+                composed=False,
+                evidence_path="evidence/data_table/add_rows",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.delete_row",
+                name="Delete Data Table Row",
+                description="Deletes a single row from a Chronicle SIEM Data Table by row ID.",
+                category="data_table",
+                handler=self.delete_data_table_row,
+                mcp_tool_name="delete_data_table_row",
+                composed=False,
+                evidence_path="evidence/data_table/delete_row",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="data_table.audit_health",
+                name="Audit Data Table Governance & Lineage",
+                description="Audits Data Tables across the tenant for lifecycle recency, schema integrity, and detection false-negative risks.",
+                category="data_table",
+                handler=self.audit_data_table_health,
+                mcp_tool_name="audit_data_tables",
+                composed=True,
+                uses=("data_table.list", "rule.list"),
+                evidence_path="evidence/data_table/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.list",
+                name="Search Detection Rules",
+                description="Lists custom YARA-L detection rules in Chronicle SIEM.",
+                category="rule",
+                handler=self.list_rules,
+                mcp_tool_name="list_rules",
+                composed=False,
+                evidence_path="evidence/rule/list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.get",
+                name="Get Detection Rule",
+                description="Retrieves full details and YARA-L logic of a detection rule.",
+                category="rule",
+                handler=self.get_rule,
+                mcp_tool_name="get_rule",
+                composed=False,
+                evidence_path="evidence/rule/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.verify",
+                name="Verify Rule Text",
+                description="Validates YARA-L 2.0 rule syntax against the Chronicle compiler.",
+                category="rule",
+                handler=self.verify_rule,
+                mcp_tool_name="verify_rule_text",
+                composed=False,
+                evidence_path="evidence/rule/verify",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.create",
+                name="Create Detection Rule",
+                description="Creates a new YARA-L detection rule in Chronicle SIEM.",
+                category="rule",
+                handler=self.create_rule,
+                mcp_tool_name="create_rule",
+                composed=False,
+                evidence_path="evidence/rule/create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.patch",
+                name="Patch Detection Rule",
+                description="Updates the YARA-L logic of an existing detection rule.",
+                category="rule",
+                handler=self.patch_rule,
+                mcp_tool_name="patch_rule",
+                composed=False,
+                evidence_path="evidence/rule/patch",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.delete",
+                name="Delete Detection Rule",
+                description="Deletes a custom detection rule from Chronicle SIEM.",
+                category="rule",
+                handler=self.delete_rule,
+                mcp_tool_name="delete_rule",
+                composed=False,
+                evidence_path="evidence/rule/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.revisions",
+                name="List Rule Revisions",
+                description="Lists historical revisions and version history of a detection rule.",
+                category="rule",
+                handler=self.list_rule_revisions,
+                mcp_tool_name="list_rule_revisions",
+                composed=False,
+                evidence_path="evidence/rule/revisions",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.deployment.get",
+                name="Get Rule Deployment",
+                description="Retrieves deployment, frequency, and alerting status of a rule.",
+                category="rule",
+                handler=self.get_rule_deployment,
+                mcp_tool_name="get_rule_deployment",
+                composed=False,
+                evidence_path="evidence/rule/deployment/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.deployment.update",
+                name="Update Rule Deployment",
+                description="Updates deployment properties (enabled, alerting, frequency) of a rule.",
+                category="rule",
+                handler=self.update_rule_deployment,
+                mcp_tool_name="update_rule_deployment",
+                composed=False,
+                evidence_path="evidence/rule/deployment/update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.errors",
+                name="List Rule Execution Errors",
+                description="Lists runtime and execution errors across detection rules.",
+                category="rule",
+                handler=self.list_rule_errors,
+                mcp_tool_name="list_rule_errors",
+                composed=False,
+                evidence_path="evidence/rule/errors",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.audit_health",
+                name="Audit Detection Rule Health",
+                description="Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay.",
+                category="rule",
+                handler=self.audit_rule_health,
+                mcp_tool_name="audit_rule_health",
+                composed=True,
+                uses=("rule.list", "rule.errors", "dashboard.execute_query"),
+                evidence_path="evidence/rule/audit_health",
+            )
+        )
 
 
 
@@ -2227,6 +2742,25 @@ class SecOpsEngine:
         """Executes the Add Case Comment workflow."""
         return self._add_case_comment_wf.execute(case_id=case_id, comment=comment)
 
+    def list_case_comments(self, case_id: str) -> List[CaseCommentRecord]:
+        """Lists all analyst comments and AI assessment notes for a SOAR case (`case.list_comments`)."""
+        return self._list_case_comments_wf.execute(case_id=case_id)
+
+    def get_case_wall(
+        self,
+        case_id: str,
+        limit: int = 50,
+        page_token: Optional[str] = None,
+        activity_type: Optional[str] = None,
+    ) -> CaseWallResult:
+        """Retrieves and parses the complete SOAR Case Activity Wall (`case.get_wall`)."""
+        return self._get_case_wall_wf.execute(
+            case_id=case_id,
+            limit=limit,
+            page_token=page_token,
+            activity_type=activity_type,
+        )
+
     def update_case(
         self,
         case_id: str,
@@ -2306,6 +2840,23 @@ class SecOpsEngine:
             poll_interval_sec=poll_interval_sec,
         )
 
+    def get_or_create_case_summary(self, case_id: str) -> CaseSummary:
+        """Gets or initiates generation of a Gemini AI summary for a SOAR case."""
+        return self._get_or_create_case_summary_wf.execute(case_id=case_id)
+
+    def get_case_summary(
+        self,
+        case_id: str,
+        timeout_sec: float = 90.0,
+        poll_interval_sec: float = 3.0,
+    ) -> CaseSummary:
+        """Requests a Gemini AI case summary and polls until complete or timeout."""
+        return self._get_case_summary_wf.execute(
+            case_id=case_id,
+            timeout_sec=timeout_sec,
+            poll_interval_sec=poll_interval_sec,
+        )
+
     def investigate_alert(self, alert_name: str) -> AlertInvestigation:
         """Executes the Alert Deep-Dive Investigation workflow."""
         return self._investigate_alert_wf.execute(alert_name=alert_name)
@@ -2380,6 +2931,72 @@ class SecOpsEngine:
             page_number=page_number,
         )
 
+    def triage_case(
+        self,
+        case_id: str,
+        fetch_summary: bool = True,
+        search_precedents: bool = True,
+        summary_timeout_sec: float = 15.0,
+        apply_stage_update: bool = False,
+        post_comment: bool = False,
+    ) -> CaseTriageAssessment:
+        """Executes full analyst triage workflow for a single specific case (`case.triage`).
+
+        Runs deep case investigation (alerts, entities, comments), retrieves Gemini AI
+        summary, performs historical title and entity precedent correlation, evaluates
+        novelty vs repeat pattern, and optionally updates stage or posts triage audit comments.
+        """
+        return self._orchestrate_case_triage_wf.triage_single_case(
+            case_id=case_id,
+            fetch_summary=fetch_summary,
+            search_precedents=search_precedents,
+            summary_timeout_sec=summary_timeout_sec,
+            apply_stage_update=apply_stage_update,
+            post_comment=post_comment,
+        )
+
+    def get_case_timeline(self, case_id: str) -> CaseTimeline:
+        """Constructs a unified, chronologically sorted timeline of events and milestones in a case (`case.timeline`)."""
+        from engine.workflows.case_triage import GetCaseTimelineWorkflow
+        return GetCaseTimelineWorkflow(self.adapter).execute(case_id=case_id)
+
+    def orchestrate_case_triage(
+        self,
+        case_ids: Optional[List[str]] = None,
+        limit: int = 5,
+        open_only: bool = True,
+        query_text: str = "",
+        priorities: Optional[List[str]] = None,
+        stages: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        environments: Optional[List[str]] = None,
+        assigned_users: Optional[List[str]] = None,
+        is_important: Optional[bool] = None,
+        page_number: int = 0,
+        search_precedents: bool = True,
+        fetch_summary: bool = False,
+    ) -> CaseTriageBatch:
+        """Executes the Case Orchestrate Triage workflow (`case.orchestrate_triage`).
+
+        Batched retrieval, parallel deep multi-resource investigation, precedent correlation,
+        and automated triage scoring & subagent prompt synthesis for SOAR cases.
+        """
+        return self._orchestrate_case_triage_wf.execute(
+            case_ids=case_ids,
+            limit=limit,
+            open_only=open_only,
+            query_text=query_text,
+            priorities=priorities,
+            stages=stages,
+            tags=tags,
+            environments=environments,
+            assigned_users=assigned_users,
+            is_important=is_important,
+            page_number=page_number,
+            search_precedents=search_precedents,
+            fetch_summary=fetch_summary,
+        )
+
     def get_case_filter_values(
         self,
         filter_type: str,
@@ -2422,6 +3039,21 @@ class SecOpsEngine:
     def list_playbook_categories(self) -> List[PlaybookCategory]:
         """Lists all SOAR Playbook categories/folders."""
         return self._list_playbook_cats_wf.execute()
+
+    def audit_soar_playbook_health(
+        self,
+        days: int = 7,
+        scan_deep: bool = True,
+        fail_threshold_pct: float = 15.0,
+        slow_threshold_minutes: float = 3.0,
+    ) -> Dict[str, Any]:
+        """Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency."""
+        return self._audit_soar_playbook_health_wf.execute(
+            days=days,
+            scan_deep=scan_deep,
+            fail_threshold_pct=fail_threshold_pct,
+            slow_threshold_minutes=slow_threshold_minutes,
+        )
 
     def search_integrations(
         self,
@@ -2589,6 +3221,36 @@ class SecOpsEngine:
         """Aggregates detection firing counts and retrieves tenant rule engine quotas."""
         return self._get_curated_metrics_wf.execute(start_time=start_time, end_time=end_time)
 
+    def set_curated_ruleset_deployment(
+        self,
+        ruleset_id_or_title: str,
+        precision: str = "PRECISE",
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        sync_rules: bool = True,
+    ) -> CuratedRuleSetDeployment:
+        """Updates enabled and alerting states for a Curated Rule Set precision deployment."""
+        return self._set_curated_ruleset_deployment_wf.execute(
+            ruleset_id_or_title=ruleset_id_or_title,
+            precision=precision,
+            enabled=enabled,
+            alerting=alerting,
+            sync_rules=sync_rules,
+        )
+
+    def audit_curated_detections_health(
+        self,
+        days: int = 7,
+        scan_deployments: bool = True,
+    ) -> Dict[str, Any]:
+        """Performs a comprehensive health check and misconfiguration audit across Curated Detections."""
+        from runbooks.operations.curated_detections_health import generate_curated_detections_health_report
+        return generate_curated_detections_health_report(
+            engine=self,
+            days=days,
+            scan_deployments=scan_deployments,
+        )
+
     # --- Milestone 5.8: Content Hub Marketplace Response Integrations Methods ---
 
     def search_marketplace_integrations(
@@ -2697,6 +3359,21 @@ class SecOpsEngine:
             region=None,
         )
 
+    def audit_dashboard_health(
+        self,
+        lookback_days: int = 14,
+        stale_days: int = 180,
+        validate_queries: bool = True,
+        max_deep_dashboards: int = 50,
+    ) -> DashboardHealthReport:
+        """Audits native dashboards for creations, modifications, broken widget queries, and staleness."""
+        return self._audit_dashboard_health_wf.execute(
+            lookback_days=lookback_days,
+            stale_days=stale_days,
+            validate_queries=validate_queries,
+            max_deep_dashboards=max_deep_dashboards,
+        )
+
     def get_managed_domain_settings(self) -> ManagedDomainSettings:
         """Retrieves approved email domains configured for report deliveries and alerts."""
         return self._get_managed_domains_wf.execute()
@@ -2721,6 +3398,10 @@ class SecOpsEngine:
     def get_feed(self, identifier_or_title: str) -> FeedDetail:
         """Retrieves complete configuration details for a specific ingestion feed."""
         return self._get_feed_wf.execute(identifier_or_title)
+
+    def audit_feed_health(self, lookback_days: int = 7) -> FeedHealthReport:
+        """Audits all configured ingestion feeds against Health Hub telemetry and decay indicators."""
+        return self._audit_feed_health_wf.execute(lookback_days=lookback_days)
 
     def search_log_processing_pipelines(
         self,
@@ -2805,6 +3486,10 @@ class SecOpsEngine:
     def get_log_type_setting(self, log_type: str) -> LogTypeSetting:
         """Retrieves autonomous parsing settings for a log type."""
         return self._get_log_type_setting_wf.execute(log_type=log_type)
+
+    def audit_parser_health(self, lookback_days: int = 7) -> ParserHealthReport:
+        """Audits all configured SIEM parsers and extensions against Health Hub telemetry and version drift."""
+        return self._audit_parser_health_wf.execute(lookback_days=lookback_days)
 
     # --------------------------------------------------------------------------
     # Milestone 5.12: SIEM Settings - Preview Features & Data RBAC
@@ -3364,6 +4049,239 @@ class SecOpsEngine:
     def list_capabilities(self, category: Optional[str] = None) -> List[WorkflowCapability]:
         """Lists capabilities available in this engine instance."""
         return self.registry.list_capabilities(category=category)
+
+    # -------------------------------------------------------------------------
+    # Chronicle SIEM Data Tables
+    # -------------------------------------------------------------------------
+
+    def list_data_tables(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        order_by: Optional[str] = None,
+    ) -> DataTableListResult:
+        """Lists structured data tables in Chronicle SIEM."""
+        return self._list_data_tables_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            order_by=order_by,
+        )
+
+    def get_data_table(self, table_name_or_id: str) -> DataTable:
+        """Gets schema and metadata for a specific Chronicle SIEM Data Table."""
+        return self._get_data_table_wf.execute(table_name_or_id=table_name_or_id)
+
+    def create_data_table(
+        self,
+        table_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        column_info: Optional[List[Dict[str, Any]]] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+    ) -> DataTable:
+        """Creates a new structured Data Table with column definitions in Chronicle SIEM."""
+        return self._create_data_table_wf.execute(
+            table_id=table_id,
+            display_name=display_name,
+            description=description,
+            column_info=column_info,
+            row_time_to_live=row_time_to_live,
+            scope_info=scope_info,
+        )
+
+    def patch_data_table(
+        self,
+        table_name_or_id: str,
+        description: Optional[str] = None,
+        row_time_to_live: Optional[str] = None,
+        scope_info: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> DataTable:
+        """Updates description, TTL, or scope info of an existing Data Table."""
+        return self._patch_data_table_wf.execute(
+            table_name_or_id=table_name_or_id,
+            description=description,
+            row_time_to_live=row_time_to_live,
+            scope_info=scope_info,
+            update_mask=update_mask,
+        )
+
+    def delete_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
+        """Deletes a Chronicle SIEM Data Table."""
+        return self._delete_data_table_wf.execute(table_name_or_id=table_name_or_id)
+
+    def list_data_table_rows(
+        self,
+        table_name_or_id: str,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+    ) -> DataTableRowListResult:
+        """Lists rows contained within a Chronicle SIEM Data Table."""
+        return self._list_data_table_rows_wf.execute(
+            table_name_or_id=table_name_or_id,
+            page_size=page_size,
+            page_token=page_token,
+            filter_expr=filter_expr,
+        )
+
+    def add_data_table_rows(
+        self,
+        table_name_or_id: str,
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Creates or appends rows in bulk to a Chronicle SIEM Data Table."""
+        return self._add_data_table_rows_wf.execute(
+            table_name_or_id=table_name_or_id,
+            rows=rows,
+        )
+
+    def delete_data_table_row(
+        self,
+        table_name_or_id: str,
+        row_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a single row from a Chronicle SIEM Data Table by row ID."""
+        return self._delete_data_table_row_wf.execute(
+            table_name_or_id=table_name_or_id,
+            row_id=row_id,
+        )
+
+    def audit_data_table_health(
+        self,
+        lookback_days: int = 14,
+        stale_days: int = 180,
+        correlate_rules: bool = True,
+        max_tables: int = 200,
+    ) -> DataTableHealthReport:
+        """Audits Data Tables for recency, schema hygiene, empty referenced detection risks, and lineage."""
+        return self._audit_data_table_health_wf.execute(
+            lookback_days=lookback_days,
+            stale_days=stale_days,
+            correlate_rules=correlate_rules,
+            max_tables=max_tables,
+        )
+
+    # -------------------------------------------------------------------------
+    # Custom YARA-L Detection Rules Facade Methods
+    # -------------------------------------------------------------------------
+
+    def list_rules(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+        view: Optional[str] = None,
+    ) -> RuleListResult:
+        """Lists custom YARA-L detection rules in Chronicle SIEM."""
+        return self._list_rules_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            filter_expr=filter_expr,
+            view=view,
+        )
+
+    def get_rule(
+        self,
+        rule_id_or_name: str,
+        view: str = "FULL",
+    ) -> RuleDetail:
+        """Retrieves full details and YARA-L logic of a detection rule."""
+        return self._get_rule_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            view=view,
+        )
+
+    def verify_rule(self, rule_text: str) -> RuleValidationResult:
+        """Validates YARA-L 2.0 rule syntax against the Chronicle compiler."""
+        return self._verify_rule_wf.execute(rule_text=rule_text)
+
+    def validate_rule(self, rule_text: str) -> RuleValidationResult:
+        """Alias for verify_rule: validates YARA-L 2.0 rule syntax."""
+        return self.verify_rule(rule_text=rule_text)
+
+    def create_rule(self, rule_text: str) -> RuleDetail:
+        """Creates a new YARA-L detection rule in Chronicle SIEM."""
+        return self._create_rule_wf.execute(rule_text=rule_text)
+
+    def patch_rule(
+        self,
+        rule_id_or_name: str,
+        rule_text: str,
+        update_mask: Optional[str] = None,
+    ) -> RuleDetail:
+        """Updates the YARA-L logic of an existing detection rule."""
+        return self._patch_rule_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            rule_text=rule_text,
+            update_mask=update_mask,
+        )
+
+    def delete_rule(self, rule_id_or_name: str) -> Dict[str, Any]:
+        """Deletes a custom detection rule from Chronicle SIEM."""
+        return self._delete_rule_wf.execute(rule_id_or_name=rule_id_or_name)
+
+    def list_rule_revisions(
+        self,
+        rule_id_or_name: str,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> RuleRevisionListResult:
+        """Lists historical revisions and version history of a detection rule."""
+        return self._list_rule_revisions_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def get_rule_deployment(self, rule_id_or_name: str) -> RuleDeployment:
+        """Retrieves deployment, frequency, and alerting status of a rule."""
+        return self._get_rule_deployment_wf.execute(rule_id_or_name=rule_id_or_name)
+
+    def update_rule_deployment(
+        self,
+        rule_id_or_name: str,
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        run_frequency: Optional[str] = None,
+        update_mask: Optional[str] = None,
+    ) -> RuleDeployment:
+        """Updates deployment properties (enabled, alerting, frequency) of a rule."""
+        return self._update_rule_deployment_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            enabled=enabled,
+            alerting=alerting,
+            run_frequency=run_frequency,
+            update_mask=update_mask,
+        )
+
+    def list_rule_errors(
+        self,
+        rule_id_or_name: Optional[str] = None,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> RuleExecutionErrorListResult:
+        """Lists runtime and execution errors across detection rules."""
+        return self._list_rule_errors_wf.execute(
+            rule_id_or_name=rule_id_or_name,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def audit_rule_health(
+        self,
+        include_curated: bool = True,
+        latency_threshold_min: float = 30.0,
+        page_size: int = 100,
+    ) -> RuleHealthReport:
+        """Audits detection rule health, errors, latencies, and decay."""
+        return self._audit_rule_health_wf.execute(
+            include_curated=include_curated,
+            latency_threshold_min=latency_threshold_min,
+            page_size=page_size,
+        )
+
 
 
 

@@ -1,0 +1,2596 @@
+[
+  {
+    "id": "monitored_users",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/monitored_users",
+    "display_name": "monitored_users",
+    "description": "Users leaving cymbal-investments",
+    "row_ttl": null,
+    "approximate_row_count": 3,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_933a640c-32db-48b5-8c7e-791eefeac41c"
+    ],
+    "scope_info": {
+      "dataAccessScopes": [
+        "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataAccessScopes/namespace-cymbal"
+      ]
+    },
+    "data_table_uuid": "01c03f9fa09d453c91ad1bf9480647de",
+    "create_time": "2025-08-27 23:17:39.840864+00:00",
+    "update_time": "2026-02-26 02:43:35.213061+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "user_email",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "expiry_date",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "compliance_analyst_001",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/compliance_analyst_001",
+    "display_name": "compliance_analyst_001",
+    "description": "monitored users",
+    "row_ttl": "168h",
+    "approximate_row_count": null,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_bd1d73b8-f4da-4c8d-9b16-cd97dc1081af"
+    ],
+    "scope_info": {
+      "dataAccessScopes": [
+        "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataAccessScopes/compliance-analyst"
+      ]
+    },
+    "data_table_uuid": "0327e06c9375410e96a624224d76f9f5",
+    "create_time": "2026-06-16 15:48:52.704991+00:00",
+    "update_time": "2026-06-23 17:10:04.259569+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "monitored_user",
+        "type": "STRING",
+        "key_column": true,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "owning_analyst",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "COE_GCP_PUBLIC_IP_ADDRESSES",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/COE_GCP_PUBLIC_IP_ADDRESSES",
+    "display_name": "COE_GCP_PUBLIC_IP_ADDRESSES",
+    "description": "added by @cmmartin 20240809",
+    "row_ttl": null,
+    "approximate_row_count": 10,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_43eb61a4-7275-433e-89d3-0aec922ea888"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "0fb6d28bd3554a58ab3691bca7d66e09",
+    "create_time": "2024-08-09 11:19:39.470751+00:00",
+    "update_time": "2026-02-26 02:43:35.572030+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "address",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.artifact.ip"
+      },
+      {
+        "column_index": 1,
+        "name": "name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.artifact.network.dhcp.client_hostname"
+      },
+      {
+        "column_index": 2,
+        "name": "location",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.asset.attribute.cloud.project.id"
+      }
+    ]
+  },
+  {
+    "id": "powershell_staging",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/powershell_staging",
+    "display_name": "powershell_staging",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 4,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "259957ce619e4bb8b3b3e4393d307aca",
+    "create_time": "2025-10-16 17:11:03.586383+00:00",
+    "update_time": "2026-02-26 02:43:35.494116+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "userid",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "suppression_dt",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/suppression_dt",
+    "display_name": "suppression_dt",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "28f0fe6abb6046feb7b532e48526d992",
+    "create_time": "2026-06-29 12:37:55.093011+00:00",
+    "update_time": "2026-06-29 12:42:56.524905+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "ruleid",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "col1",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "col2",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "col3",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "Majestic_Million",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/Majestic_Million",
+    "display_name": "Majestic_Million",
+    "description": "https://majestic.com/reports/majestic-million",
+    "row_ttl": null,
+    "approximate_row_count": 10000,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_03be78bf-cfab-463c-9156-40fcb77698a8"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "299ed200badf49beacbf15aa3e938da5",
+    "create_time": "2025-03-26 09:50:57.336684+00:00",
+    "update_time": "2026-02-26 02:43:35.778889+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "GlobalRank",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "TldRank",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Domain",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "TLD",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "RefSubNets",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "RefIPs",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "IDN_Domain",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "IDN_TLD",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "PrevGlobalRank",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "PrevTldRank",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 10,
+        "name": "PrevRefSubNets",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 11,
+        "name": "PrevRefIPs",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "BASELINE_AUTH_WITH_USER_AGENT",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/BASELINE_AUTH_WITH_USER_AGENT",
+    "display_name": "BASELINE_AUTH_WITH_USER_AGENT",
+    "description": "cmmartin@",
+    "row_ttl": null,
+    "approximate_row_count": 17,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_6daac04b-5533-4d63-8218-6a4eaebd73ad"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "2f7803f9e79c4995b5482710a442898d",
+    "create_time": "2025-05-02 10:12:42.652011+00:00",
+    "update_time": "2026-02-26 02:43:35.471498+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "user",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "ip",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "userAgent",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "userAgentFamily",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "userAgentFamilyEnum",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "userAgentOS",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "firstSeen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "lastSeen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "count_per_day",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "GTI_VULN_EXPORT",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/GTI_VULN_EXPORT",
+    "display_name": "GTI_VULN_EXPORT",
+    "description": "collection_type:vulnerability creation_date:30d+ (exploitation_state:Confirmed or exploitation_state:Suspected)",
+    "row_ttl": null,
+    "approximate_row_count": 13,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "30fba53a58a441dfacc37b465f6686ba",
+    "create_time": "2025-03-14 11:45:46.651337+00:00",
+    "update_time": "2026-02-26 02:43:35.512829+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "priority",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "risk_rating",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "cvssv3_base_score",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "exploitation_consequence",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "creation_date",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "last_modification_date",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "date_of_disclosure",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "mttx_schedule_1_completion_rates",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/mttx_schedule_1_completion_rates",
+    "display_name": "mttx_schedule_1_completion_rates",
+    "description": "MTTx metrics export for go-preview-americas",
+    "row_ttl": null,
+    "approximate_row_count": 367,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "318ba3c142d24552b146c27847e173c7",
+    "create_time": "2025-09-19 13:08:39.475914+00:00",
+    "update_time": "2026-02-26 02:43:35.968096+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "MTTA_completion_percent",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "MTTC_completion_percent",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "MTTR_completion_percent",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "MTTD_completion_percent",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "total_cases",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "tenant_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "export_datetime",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "Country_geo_map",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/Country_geo_map",
+    "display_name": "Country_geo_map",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 232,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "32af39b5f3294a88a460a1abb387af7a",
+    "create_time": "2025-07-01 15:47:30.503690+00:00",
+    "update_time": "2026-02-26 02:43:35.820664+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "country_code",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "country_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "subregion",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "lat",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "lon",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "bad_hosts",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/bad_hosts",
+    "display_name": "bad_hosts",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "3c59629bef53481bbb21eaa280304a85",
+    "create_time": "2026-08-18 13:39:39.349384+00:00",
+    "update_time": "2026-08-18 13:44:42.013801+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "hostname",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "userid",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "LOLBAS_CLI",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/LOLBAS_CLI",
+    "display_name": "LOLBAS_CLI",
+    "description": "Command line arguments used by LOLBAS",
+    "row_ttl": null,
+    "approximate_row_count": 32,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_fb4f4e40-685f-483f-938c-95f4eb3f1811"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "40705bbad8d243fe981d214fecd540e0",
+    "create_time": "2025-04-28 10:16:54.971411+00:00",
+    "update_time": "2026-02-26 02:43:35.705641+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "LOLBAS_process",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "LOLBAS_cli",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "LOLBAS_cli_fingerprint",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "LOLBAS_cli_entropy",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "LOLBAS1",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/LOLBAS1",
+    "display_name": "LOLBAS1",
+    "description": "added by cmmartin@",
+    "row_ttl": null,
+    "approximate_row_count": 721,
+    "rule_associations_count": 3,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_15f13105-29f4-470a-b0d7-51323c11fe0c",
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_e465c79d-d4ce-4400-8f34-376b6be07797",
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_fb4f4e40-685f-483f-938c-95f4eb3f1811"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "53605db7057147f5ab9684b7af1c9bf9",
+    "create_time": "2025-04-28 07:24:38.301180+00:00",
+    "update_time": "2026-02-26 02:43:35.705680+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Filename",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Command_Category",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Command_Privileges",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "MITRE_ATT_CK_technique",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "Paths",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "LOLBAS",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/LOLBAS",
+    "display_name": "LOLBAS",
+    "description": "added by cmmartin@",
+    "row_ttl": null,
+    "approximate_row_count": 727,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "5852528a9dff4d22b6ab7922788138e2",
+    "create_time": "2025-04-28 06:42:42.819852+00:00",
+    "update_time": "2026-02-26 02:43:35.829990+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Filename",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Command_Category",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Command_Privileges",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "MITRE_ATTACK_Technique",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "Paths",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "Sukeerth_Test_dDT",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/Sukeerth_Test_dDT",
+    "display_name": "Sukeerth_Test_dDT",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 5,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "59ddc99dc66f4dd6911082326fc62e49",
+    "create_time": "2025-10-10 17:57:20.446475+00:00",
+    "update_time": "2026-02-26 02:43:35.634349+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "CI_ID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "CI_Name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "CI_Type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Manufacturer",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "Model",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "Serial_Number",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "Asset_Tag",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "IP_Address",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "Location",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "Owner",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "asoc_investigation_timeline",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/asoc_investigation_timeline",
+    "display_name": "asoc_investigation_timeline",
+    "description": "Agentic SOC Investigation Timeline (V2)",
+    "row_ttl": null,
+    "approximate_row_count": 127,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "5bafa71251744733956415dd26f8f599",
+    "create_time": "2026-04-12 20:09:30.615371+00:00",
+    "update_time": "2026-05-21 13:03:07.733316+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "session_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "event_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "incident_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "timestamp",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "actor",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "agent",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "action_taken",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "duration_sec",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "step_count",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "average_log_size",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/average_log_size",
+    "display_name": "average_log_size",
+    "description": "cmmartin",
+    "row_ttl": null,
+    "approximate_row_count": 67,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "633e3663509c4836a06d6c19f63a5911",
+    "create_time": "2026-06-17 09:00:34.968537+00:00",
+    "update_time": "2026-06-17 09:05:36.588790+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "lt",
+        "type": "STRING",
+        "key_column": true,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "lc",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "lv",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "avgLogSize",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "regex_list",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/regex_list",
+    "display_name": "regex_list",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 2,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "6acbc449e2c04fe28d87f464487a932a",
+    "create_time": "2025-06-17 07:51:28.320149+00:00",
+    "update_time": "2026-02-26 02:43:35.634917+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "regexes",
+        "type": "REGEX",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "trusted_domains",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/trusted_domains",
+    "display_name": "trusted_domains",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 4,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "75c0e9d64e7f434caf16889ed02d02ef",
+    "create_time": "2025-09-03 14:50:30.710810+00:00",
+    "update_time": "2026-02-26 02:43:36.049393+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "domain",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "asoc_malicious_iocs",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/asoc_malicious_iocs",
+    "display_name": "asoc_malicious_iocs",
+    "description": "Agentic SOC Malicious IOCs (V2)",
+    "row_ttl": null,
+    "approximate_row_count": 39,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "77afcb70d61d475e90fccb3de319e03f",
+    "create_time": "2026-04-12 20:09:43.343208+00:00",
+    "update_time": "2026-04-17 02:57:52.473339+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "session_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "ioc_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "incident_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "indicator_type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "indicator_value",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "is_malicious",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "actor",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "agent",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "mttx_schedule_1_average_metrics",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/mttx_schedule_1_average_metrics",
+    "display_name": "mttx_schedule_1_average_metrics",
+    "description": "MTTx metrics export for go-preview-americas",
+    "row_ttl": null,
+    "approximate_row_count": 367,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "7a5eabcf4fa44c8e97524d57fa22a16c",
+    "create_time": "2025-09-19 13:08:37.014370+00:00",
+    "update_time": "2026-02-26 02:43:35.894773+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Average_MTTA_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Average_MTTC_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Average_MTTR_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Average_MTTD_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "tenant_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "export_datetime",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "INTERESTING_WINDOWS_EVENTS",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/INTERESTING_WINDOWS_EVENTS",
+    "display_name": "INTERESTING_WINDOWS_EVENTS",
+    "description": "@cmmartin",
+    "row_ttl": null,
+    "approximate_row_count": 381,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "8125b7c6c58b429788710edfa9b099c7",
+    "create_time": "2025-04-19 13:38:36.345058+00:00",
+    "update_time": "2026-02-26 02:43:35.653785+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Current_Windows_Event_ID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Legacy_Windows_Event_ID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Potential_Criticality",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Event_Summary",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "authorized_backup_servers",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/authorized_backup_servers",
+    "display_name": "authorized_backup_servers",
+    "description": "Authorized backup servers in the organization to exclude from data movement rules.",
+    "row_ttl": null,
+    "approximate_row_count": 8,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_2b2da1df-5db5-4e17-a956-baba9976bbd8"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "8160cb0395d94131ad0e2b887750f859",
+    "create_time": "2026-06-16 17:21:54.037455+00:00",
+    "update_time": "2026-06-16 17:26:56.159688+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "ip_address",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "description",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "ip_port",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/ip_port",
+    "display_name": "ip_port",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 4,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "92cfcd1fc2d14d4e890624218b154196",
+    "create_time": "2026-08-25 05:33:42.984859+00:00",
+    "update_time": "2026-08-25 05:38:44.395869+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "ip",
+        "type": "CIDR",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "port",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "CISA_CVE",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/CISA_CVE",
+    "display_name": "CISA_CVE",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 2319,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "9716c55f7f1e49049999cedab7f45387",
+    "create_time": "2024-10-17 16:06:06.155671+00:00",
+    "update_time": "2026-02-26 02:43:35.502670+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "cveID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.asset.vulnerabilities.cve_id"
+      },
+      {
+        "column_index": 1,
+        "name": "vendorProject",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "product",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "vulnerabilityName",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "dateAdded",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "shortDescription",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "requiredAction",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "dueDate",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "knownRansomwareCampaignUse",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "notes",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 10,
+        "name": "cwes",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "CMDB",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/CMDB",
+    "display_name": "CMDB",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 10,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "9cf73803c9be41d8938069d72d5cf78b",
+    "create_time": "2025-08-28 16:53:04.095387+00:00",
+    "update_time": "2026-02-26 02:43:35.395661+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "CI_ID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "CI_Name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "CI_Type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Manufacturer",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "Model",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "Serial_Number",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "Asset_Tag",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "IP_Address",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "Location",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "Owner",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "powershell_staging2",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/powershell_staging2",
+    "display_name": "powershell_staging2",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": null,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "a097178968034a93b237ec5b2847fbe9",
+    "create_time": "2025-10-16 17:07:50.067379+00:00",
+    "update_time": "2026-02-26 02:43:35.309763+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "userid",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "command",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "host",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "MITRE_ATTACK_Tactics",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/MITRE_ATTACK_Tactics",
+    "display_name": "MITRE_ATTACK_Tactics",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 14,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "a95b48b3afe24a7bb9d2b8d2387754d4",
+    "create_time": "2025-08-05 11:12:07.592006+00:00",
+    "update_time": "2026-02-26 02:43:35.386410+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "ID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Description",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "MTTx_Average_Metrics",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/MTTx_Average_Metrics",
+    "display_name": "MTTx_Average_Metrics",
+    "description": "cmmartin@",
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "bc1ee7b5e41f45eda47080612f260f1d",
+    "create_time": "2025-09-16 11:55:26.216180+00:00",
+    "update_time": "2026-02-26 02:43:35.447173+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Average_MTTA_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Average_MTTC_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Average_MTTR_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Average_MTTD_seconds",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "tenant_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "export_datetime",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "al_test_criticalassets",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/al_test_criticalassets",
+    "display_name": "al_test_criticalassets",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 2,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "bf1108afc764442995144a180d7721d3",
+    "create_time": "2025-10-10 19:36:14.507867+00:00",
+    "update_time": "2026-02-26 02:43:35.371671+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "hostname",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "asset_type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "priority",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "KNOWN_BOTS",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/KNOWN_BOTS",
+    "display_name": "KNOWN_BOTS",
+    "description": "Well known BOTS",
+    "row_ttl": null,
+    "approximate_row_count": 70,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "bf1ef6dd45d647c4aa09832dc33ad607",
+    "create_time": "2024-08-09 15:16:03.615302+00:00",
+    "update_time": "2026-02-26 02:43:35.905107+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "cidr",
+        "type": "CIDR",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "source",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "CISA_CVE_1",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/CISA_CVE_1",
+    "display_name": "CISA_CVE_1",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 1193,
+    "rule_associations_count": 2,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_968572cb-7a11-4eee-bc66-1980a3bd09a9",
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_efc3d0dd-9dca-421c-a7f9-6694e8f729ee"
+    ],
+    "scope_info": {
+      "dataAccessScopes": [
+        "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataAccessScopes/namespace-cymbal"
+      ]
+    },
+    "data_table_uuid": "c0c004a1e5304c189baeb24e37809ae1",
+    "create_time": "2024-10-18 11:31:34.319548+00:00",
+    "update_time": "2026-02-26 02:43:35.567313+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "cveID",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.asset.vulnerabilities.cve_id"
+      },
+      {
+        "column_index": 1,
+        "name": "vendorProject",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "product",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "vulnerabilityName",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "dateAdded",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "shortDescription",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "requiredAction",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "dueDate",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "knownRansomwareCampaignUse",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "notes",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 10,
+        "name": "cwes",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "scotty_test_hd",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/scotty_test_hd",
+    "display_name": "scotty_test_hd",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 4636,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "c97bc394eb3b42fda1e2c157d075bbce",
+    "create_time": "2025-11-04 16:11:05.595455+00:00",
+    "update_time": "2026-02-26 02:43:35.701747+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "host",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "ips",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "gti_replayed_iocs",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/gti_replayed_iocs",
+    "display_name": "gti_replayed_iocs",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 140,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "ca50e93141f24197b6428b82f510db0d",
+    "create_time": "2025-08-17 21:13:02.598690+00:00",
+    "update_time": "2026-02-26 02:43:35.309046+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "hash",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "GTI_24_10017389_MD5",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/GTI_24_10017389_MD5",
+    "display_name": "GTI_24_10017389_MD5",
+    "description": "Campaign 24.036: Suspected Russia-Nexus Activity Cluster Targets Ukrainian Entities Via Signal Messenger Phishing",
+    "row_ttl": null,
+    "approximate_row_count": 10,
+    "rule_associations_count": 2,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_0bb2a613-a3ec-4fa3-b142-cbb3ad92e877",
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_5cb1b0fb-359e-48bb-ba43-68d38c4157df"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "cb5bc04912d148f7a1d4dec3e2b4b3d9",
+    "create_time": "2024-08-09 12:33:33.235110+00:00",
+    "update_time": "2026-02-26 02:43:35.306933+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Indicator_Value",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.file.md5"
+      },
+      {
+        "column_index": 1,
+        "name": "Indicator_Type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "IC_Score",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": "entity.security_result.verdict_info.confidence_score"
+      },
+      {
+        "column_index": 3,
+        "name": "Associated_Actors",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "Associated_Malware",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "Associated_Tools",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "Associated_Campaigns",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "Exclusive",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "First_Seen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "Last_Seen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "unauthorized_countries_table",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/unauthorized_countries_table",
+    "display_name": "unauthorized_countries_table",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "d08e22f08b3f4c2ea7e1131b15c28dcf",
+    "create_time": "2026-05-26 08:34:59.429526+00:00",
+    "update_time": "2026-05-26 08:40:00.446092+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "country_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "SLA_Mapping",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/SLA_Mapping",
+    "display_name": "SLA_Mapping",
+    "description": "Table with SLA Mappings",
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "dbc561d8e71447c78f846aa3a1219ab6",
+    "create_time": "2025-06-27 13:47:33.943338+00:00",
+    "update_time": "2026-02-26 02:43:35.378647+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "Status",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "Priority",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "Team",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "Time_to_Escalation",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "SLA",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "test_008",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/test_008",
+    "display_name": "test_008",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 10,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_33f3d705-de4b-45a9-a66e-3a440087c9b6"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "dd8229215fb3416a8d9f53718d3a21fb",
+    "create_time": "2025-05-02 13:59:44.859363+00:00",
+    "update_time": "2026-02-26 02:43:35.821216+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "process",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "total",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "departments",
+        "type": "REGEX",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "first_seen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "last_seen",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "asoc_detection_tuning",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/asoc_detection_tuning",
+    "display_name": "asoc_detection_tuning",
+    "description": "Agentic SOC Detection Tuning (V2)",
+    "row_ttl": null,
+    "approximate_row_count": 16,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "de73220a48184203b3ecfb29ac3c443d",
+    "create_time": "2026-04-12 20:10:00.508050+00:00",
+    "update_time": "2026-04-17 03:08:18.527344+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "session_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "tuning_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "incident_id",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "rule_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "exclusion_type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "exclusion_value",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "rule_logic",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "rationale",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "actor",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "agent",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "test_dt",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/test_dt",
+    "display_name": "test_dt",
+    "description": "added by cmmartin@",
+    "row_ttl": null,
+    "approximate_row_count": 4,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "e3b1dd31b8dd44c4b22da7cd2ee52e94",
+    "create_time": "2026-05-19 12:22:01.544449+00:00",
+    "update_time": "2026-05-19 12:27:02.851531+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "username",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "hostname",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "status",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "ips_with_hostnames",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/ips_with_hostnames",
+    "display_name": "ips_with_hostnames",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": 3,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "e693bf79705d4b4590ffad4efee2ba27",
+    "create_time": "2025-12-03 17:15:04.635851+00:00",
+    "update_time": "2026-02-26 02:43:35.475458+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "employeeid",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "hostname",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "Suspicious_Name_Pipes",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/Suspicious_Name_Pipes",
+    "display_name": "Suspicious_Name_Pipes",
+    "description": "https://raw.githubusercontent.com/mthcht/awesome-lists/refs/heads/main/Lists/suspicious_named_pipe_list.csv",
+    "row_ttl": null,
+    "approximate_row_count": 326,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "eaa8d00f80684acfa955ae346035ea0b",
+    "create_time": "2025-03-26 11:44:35.122669+00:00",
+    "update_time": "2026-02-26 02:43:35.569578+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "pipe_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "metadata_description",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "metadata_tool",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "metadata_category",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "metadata_link",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "metadata_priority",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "metadata_fp_risk",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "metadata_severity",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "metadata_tool_type",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "metadata_usage",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 10,
+        "name": "metadata_comment",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 11,
+        "name": "metadata_reference",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "logged_users",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/logged_users",
+    "display_name": "logged_users",
+    "description": null,
+    "row_ttl": null,
+    "approximate_row_count": null,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_ef358f10-a377-425a-b50e-fa46ed644ccc"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "eaad4804351e4a8496c71b8da48baeb3",
+    "create_time": "2025-08-26 18:44:07.211314+00:00",
+    "update_time": "2026-02-26 02:43:35.787999+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "user",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "mttx_schedule_1_individual_cases",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/mttx_schedule_1_individual_cases",
+    "display_name": "mttx_schedule_1_individual_cases",
+    "description": "MTTx metrics export for go-preview-americas",
+    "row_ttl": null,
+    "approximate_row_count": 361,
+    "rule_associations_count": 0,
+    "rules": [],
+    "scope_info": null,
+    "data_table_uuid": "eef1c63af17542ac9012075f2421618f",
+    "create_time": "2025-09-21 20:20:50.875361+00:00",
+    "update_time": "2026-02-26 02:43:35.094787+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "case_id",
+        "type": "STRING",
+        "key_column": true,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "MTTD",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 2,
+        "name": "MTTA",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 3,
+        "name": "MTTC",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 4,
+        "name": "MTTR",
+        "type": "NUMBER",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 5,
+        "name": "tags",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 6,
+        "name": "environment",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 7,
+        "name": "detection_rule_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 8,
+        "name": "tenant_name",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 9,
+        "name": "export_datetime",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  },
+  {
+    "id": "enigma_towers_physical_site_list",
+    "name": "projects/sdl-preview-americas/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/dataTables/enigma_towers_physical_site_list",
+    "display_name": "enigma_towers_physical_site_list",
+    "description": "Maps Enigma Towers (ET) physical site list to Azure Named Networks.  Used for Physical to Logical sign in mapping.",
+    "row_ttl": null,
+    "approximate_row_count": 1,
+    "rule_associations_count": 1,
+    "rules": [
+      "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/rules/ru_68ee5bdc-c546-40e9-95d5-66fb70bb55e3"
+    ],
+    "scope_info": null,
+    "data_table_uuid": "f21b6e8262b443258e7329ea961ff805",
+    "create_time": "2024-08-20 14:39:12.628068+00:00",
+    "update_time": "2026-02-26 02:43:35.217605+00:00",
+    "columns": [
+      {
+        "column_index": 0,
+        "name": "azure_namedNetwork",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      },
+      {
+        "column_index": 1,
+        "name": "buildingName",
+        "type": "STRING",
+        "key_column": false,
+        "repeated": false,
+        "mapped_path": null
+      }
+    ]
+  }
+]

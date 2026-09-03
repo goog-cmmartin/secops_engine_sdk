@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-08-28 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-09-01 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**120 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**153 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-08-28 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 11 |
-| primitive | 9 |
-| query | 100 |
-| **total** | **120** |
+| workflow | 21 |
+| primitive | 21 |
+| query | 111 |
+| **total** | **153** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 45 |
-| bounded | 3 |
-| unbounded | 52 |
-| (n/a — workflows/primitive) | 20 |
+| single | 48 |
+| bounded | 4 |
+| unbounded | 59 |
+| (n/a — workflows/primitive) | 42 |
 
 ## Workflows
 
@@ -35,13 +35,23 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | capability_id | domain | description |
 | :--- | :--- | :--- |
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
+| `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
+| `case.orchestrate_triage` | case | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
+| `case.timeline` | case | Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates. |
+| `case.triage` | case | End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions. |
 | `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
+| `curated_detections.audit_health` | curated_detections | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
+| `dashboard.audit_health` | dashboard | Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.health_check` | dashboard | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
+| `data_table.audit_health` | data_table | Audits Data Tables across the tenant for lifecycle recency, schema integrity, and detection false-negative risks. |
 | `entity.investigate` | entity | Correlates an indicator across UDM Entity Graph, UDM Events, Enterprise IoC Intelligence, and SOAR Cases. |
 | `entity.search_udm` | entity | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
 | `event.investigate` | event | Retrieves canonical UDM fields and raw log payload with complete provenance. |
+| `feed.audit_health` | feed | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
+| `parser.audit_health` | parser | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
+| `rule.audit_health` | rule | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
 | `search.from_entity` | search | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | search | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | search | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
@@ -54,14 +64,19 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (12: workflow=2, primitive=9, query=1)
+### case  (19: workflow=6, primitive=10, query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
+| `case.orchestrate_triage` | workflow | — | `orchestrate_case_triage` | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
+| `case.timeline` | workflow | — | `get_case_timeline` | Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates. |
+| `case.triage` | workflow | — | `triage_case` | End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions. |
 | `case_alert.get_recommendation` | workflow | — | `get_case_alert_recommendation` | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `case.assign` | primitive | — | `assign_case` | Assigns a SOAR case to a SOC role (@Role) or user GUID. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
+| `case.get_or_create_summary` | primitive | — | `get_or_create_case_summary` | Gets or initiates generation of a Gemini AI-driven overview, reasons, and next steps for a SOAR case. |
 | `case.set_incident` | primitive | — | `set_case_incident` | Marks or unmarks a SOAR case as an incident. |
 | `case.set_stage` | primitive | — | `set_case_stage` | Updates the lifecycle stage of a SOAR case. |
 | `case.update` | primitive | — | `update_case` | Mutates case attributes such as assignee, stage, incident flag, or priority. |
@@ -69,6 +84,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.fetch_recommendation` | primitive | — | `fetch_case_alert_recommendation` | Fetches a previously generated Gemini AI recommendation for a case alert by recommendation ID. |
 | `case_alert.set_priority` | primitive | — | `set_case_alert_priority` | Updates the priority level of a specific case alert. |
 | `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
+| `case.get_wall` | query | `unbounded` | `get_case_wall` | Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps. |
+| `case.list_comments` | query | `unbounded` | `list_case_comments` | Lists all analyst comments and AI assessment notes for a SOAR case. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 
 ### case_config  (14: query=14)
@@ -98,19 +115,22 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
 | `content_pack.search` | query | `unbounded` | `search_content_packs` | Searches, lists, and filters Content Hub Marketplace Content Packs across categories and pack types. |
 
-### curated_detections  (4: query=4)
+### curated_detections  (6: workflow=1, primitive=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `curated_detections.audit_health` | workflow | — | `audit_curated_detections_health` | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
+| `curated_detections.set_deployment` | primitive | — | `set_curated_ruleset_deployment` | Updates enabled and alerting states for a Curated Rule Set precision deployment. |
 | `curated_detections.get_rule` | query | `single` | `get_curated_rule` | Retrieves an individual Curated Rule, its MITRE techniques, false positives, and raw YARA-L logic. |
 | `curated_detections.get_ruleset` | query | `single` | `get_curated_ruleset` | Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry. |
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
 
-### dashboard  (5: workflow=2, query=3)
+### dashboard  (6: workflow=3, query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `dashboard.audit_health` | workflow | — | `audit_dashboard_health` | Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness. |
 | `dashboard.get` | workflow | — | `get_dashboard` | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.health_check` | workflow | — | `run_dashboard_health_check` | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
 | `dashboard.execute_query` | query | `bounded` | `execute_dashboard_query` | Executes a dashboard widget query against live telemetry and transforms columnar results into tabular records. |
@@ -126,6 +146,20 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `data_rbac.label.search` | query | `unbounded` | `search_data_access_labels` | Discovers Data Access Labels and their associated UDM filter query definitions. |
 | `data_rbac.scope.get` | query | `single` | `get_data_access_scope` | Retrieves deep configuration of a Data Access Scope including label attachments. |
 | `data_rbac.scope.search` | query | `unbounded` | `search_data_access_scopes` | Discovers and filters Data Access RBAC Scopes and allow/deny label counts. |
+
+### data_table  (9: workflow=1, primitive=5, query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `data_table.audit_health` | workflow | — | `audit_data_tables` | Audits Data Tables across the tenant for lifecycle recency, schema integrity, and detection false-negative risks. |
+| `data_table.add_rows` | primitive | — | `add_data_table_rows` | Creates or appends rows in bulk to a Chronicle SIEM Data Table. |
+| `data_table.create` | primitive | — | `create_data_table` | Creates a new structured Data Table with typed column definitions in Chronicle SIEM. |
+| `data_table.delete` | primitive | — | `delete_data_table` | Deletes a structured Data Table from Chronicle SIEM. |
+| `data_table.delete_row` | primitive | — | `delete_data_table_row` | Deletes a single row from a Chronicle SIEM Data Table by row ID. |
+| `data_table.patch` | primitive | — | `patch_data_table` | Updates description, TTL, or scope info of an existing Chronicle SIEM Data Table. |
+| `data_table.get` | query | `single` | `get_data_table` | Retrieves schema, columns, TTL, and metadata for a Chronicle SIEM Data Table. |
+| `data_table.list` | query | `unbounded` | `list_data_tables` | Lists all structured Data Tables defined in Chronicle SIEM. |
+| `data_table.list_rows` | query | `unbounded` | `list_data_table_rows` | Queries and filters rows contained within a Chronicle SIEM Data Table. |
 
 ### enrichment  (3: query=3)
 
@@ -149,10 +183,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `event.investigate` | workflow | — | `investigate_event` | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 
-### feed  (4: query=4)
+### feed  (5: workflow=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `feed.audit_health` | workflow | — | `audit_feed_health` | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
 | `feed.get` | query | `single` | `get_feed` | Retrieves full configuration details and source parameters for an ingestion feed. |
 | `feed.search` | query | `unbounded` | `search_feeds` | Searches, lists, and filters push/pull ingestion feeds across source types and log types. |
 | `feed_schema.list_log_types` | query | `unbounded` | `list_feed_log_type_schemas` | Lists log types supported by a specific feed source with lean payload handling. |
@@ -191,10 +226,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `marketplace_integration.get` | query | `single` | `get_marketplace_integration` | Retrieves complete integration composite, actions, connectors, jobs, managers, and release notes. |
 | `marketplace_integration.search` | query | `unbounded` | `search_marketplace_integrations` | Discovers, searches, and filters Marketplace Response Integrations across categories and update states. |
 
-### parser  (6: query=6)
+### parser  (7: workflow=1, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `parser.audit_health` | workflow | — | `audit_parser_health` | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
 | `parser.extensions.get` | query | `single` | `get_parser_extension` | Retrieves full parser extension configuration, decoded snippet, and test log. |
 | `parser.extensions.search` | query | `unbounded` | `search_parser_extensions` | Discovers parser extensions and dynamic parsing configurations across log types. |
 | `parser.get` | query | `single` | `get_parser` | Retrieves complete parser metadata and decoded Logstash CBN filter code. |
@@ -202,10 +238,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.log_types.list` | query | `unbounded` | `list_log_types` | Discovers and filters supported ingestion log types cataloged in Google SecOps. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (4: query=4)
+### playbook  (5: primitive=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `playbook.audit_health` | primitive | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
 | `playbook.instances` | query | `unbounded` | `get_alert_playbook_instances` | Retrieves authoritative per-alert playbook run instances and the executed step DAG. |
@@ -217,6 +254,22 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
+
+### rule  (11: workflow=1, primitive=4, query=6)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `rule.audit_health` | workflow | — | `audit_rule_health` | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
+| `rule.create` | primitive | — | `create_rule` | Creates a new YARA-L detection rule in Chronicle SIEM. |
+| `rule.delete` | primitive | — | `delete_rule` | Deletes a custom detection rule from Chronicle SIEM. |
+| `rule.deployment.update` | primitive | — | `update_rule_deployment` | Updates deployment properties (enabled, alerting, frequency) of a rule. |
+| `rule.patch` | primitive | — | `patch_rule` | Updates the YARA-L logic of an existing detection rule. |
+| `rule.deployment.get` | query | `single` | `get_rule_deployment` | Retrieves deployment, frequency, and alerting status of a rule. |
+| `rule.errors` | query | `unbounded` | `list_rule_errors` | Lists runtime and execution errors across detection rules. |
+| `rule.get` | query | `single` | `get_rule` | Retrieves full details and YARA-L logic of a detection rule. |
+| `rule.list` | query | `unbounded` | `list_rules` | Lists custom YARA-L detection rules in Chronicle SIEM. |
+| `rule.revisions` | query | `unbounded` | `list_rule_revisions` | Lists historical revisions and version history of a detection rule. |
+| `rule.verify` | query | `bounded` | `verify_rule_text` | Validates YARA-L 2.0 rule syntax against the Chronicle compiler. |
 
 ### search  (4: workflow=3, query=1)
 

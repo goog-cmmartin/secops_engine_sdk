@@ -116,6 +116,64 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_search_cmd.add_argument("--limit", type=int, default=20, help="Results page size (default: 20)")
     case_search_cmd.add_argument("--page", type=int, default=0, help="Page number (default: 0)")
 
+    case_triage_single_cmd = case_sub.add_parser(
+        "triage",
+        help="End-to-end single case triage: investigation, Gemini AI summary, title/entity precedents, novelty, and updates",
+    )
+    case_triage_single_cmd.add_argument("case_id", help="Case ID to triage (e.g. 104839)")
+    case_triage_single_cmd.add_argument("--summary", action="store_true", default=True, help="Fetch and analyze Gemini AI summary (default: True)")
+    case_triage_single_cmd.add_argument("--no-summary", action="store_false", dest="summary", help="Skip Gemini AI summary")
+    case_triage_single_cmd.add_argument("--precedents", action="store_true", default=True, help="Search historical title and entity precedents (default: True)")
+    case_triage_single_cmd.add_argument("--no-precedents", action="store_false", dest="precedents", help="Skip precedent search")
+    case_triage_single_cmd.add_argument("--update-stage", action="store_true", default=False, help="Auto-apply suggested stage update in SecOps")
+    case_triage_single_cmd.add_argument("--comment", action="store_true", default=False, help="Post structured triage report as a case comment")
+    case_triage_single_cmd.add_argument("--generate-prompts", action="store_true", default=False, help="Output ready-to-use Antigravity subagent dispatch prompts")
+    case_triage_single_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_timeline_cmd = case_sub.add_parser(
+        "timeline",
+        help="Synthesize and display a chronological event timeline for a case",
+    )
+    case_timeline_cmd.add_argument("case_id", help="Case ID (e.g. 104839)")
+    case_timeline_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_comments_cmd = case_sub.add_parser(
+        "comments",
+        help="List analyst comments and AI assessment notes for a case",
+    )
+    case_comments_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_comments_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_wall_cmd = case_sub.add_parser(
+        "wall",
+        help="Retrieve the complete SOAR case activity wall records",
+    )
+    case_wall_cmd.add_argument("case_id", help="Case ID (e.g. 104839)")
+    case_wall_cmd.add_argument("--limit", "-n", type=int, default=50, help="Number of records to retrieve (default: 50)")
+    case_wall_cmd.add_argument("--type", choices=["CASE_STATUS_CHANGE", "CASE_ACTION", "CASE_COMMENT"], help="Filter by activity type")
+    case_wall_cmd.add_argument("--page-token", help="Pagination token for subsequent pages")
+    case_wall_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_triage_cmd = case_sub.add_parser(
+        "orchestrate-triage",
+        aliases=["triage-batch"],
+        help="Batch retrieve latest SOAR cases, perform deep investigation, and derive triage verdicts",
+    )
+    case_triage_cmd.add_argument("--case-id", "-c", action="append", default=[], help="Specific Case ID(s) to triage (can be specified multiple times)")
+    case_triage_cmd.add_argument("--limit", "-n", type=int, default=5, help="Number of cases to retrieve and triage (default: 5)")
+    case_triage_cmd.add_argument("--all-statuses", action="store_true", default=False, help="Include closed cases (default: open only)")
+    case_triage_cmd.add_argument("--query", "-q", default="", help="Optional search query filter")
+    case_triage_cmd.add_argument("--priority", "-p", action="append", default=[], help="Filter by priority (LOW, MEDIUM, HIGH, CRITICAL)")
+    case_triage_cmd.add_argument("--stage", "-s", action="append", default=[], help="Filter by stage")
+    case_triage_cmd.add_argument("--tag", "-t", action="append", default=[], help="Filter by tag")
+    case_triage_cmd.add_argument("--environment", "-env", action="append", default=[], help="Filter by environment")
+    case_triage_cmd.add_argument("--assignee", "-u", action="append", default=[], help="Filter by assignee")
+    case_triage_cmd.add_argument("--summary", action="store_true", default=False, help="Fetch Gemini AI case summaries for each candidate (default: False)")
+    case_triage_cmd.add_argument("--precedents", action="store_true", default=True, help="Search historical title and entity precedents (default: True)")
+    case_triage_cmd.add_argument("--no-precedents", action="store_false", dest="precedents", help="Skip precedent search")
+    case_triage_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+    case_triage_cmd.add_argument("--generate-prompts", action="store_true", default=False, help="Output ready-to-use Antigravity subagent dispatch prompts")
+
     case_update_cmd = case_sub.add_parser("update", help="Update case attributes (assignee, stage, incident, priority)")
     case_update_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
     case_update_cmd.add_argument("--assignee", "-a", help="Assign to SOC role (@Tier1) or user GUID")
@@ -153,6 +211,12 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_rec_fetch_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
     case_rec_fetch_cmd.add_argument("recommendation_id", help="Recommendation ID (UUID)")
 
+    case_summary_cmd = case_sub.add_parser("summary", help="Retrieve or generate Gemini AI summary for a SOAR case")
+    case_summary_cmd.add_argument("case_id", help="Case ID (e.g. 104655)")
+    case_summary_cmd.add_argument("--wait", action="store_true", default=True, help="Poll until completion (default: true)")
+    case_summary_cmd.add_argument("--no-wait", action="store_false", dest="wait", help="Fetch or initiate asynchronously without polling")
+    case_summary_cmd.add_argument("--timeout", type=float, default=45.0, help="Polling timeout in seconds (default: 45)")
+
     # Alert Investigate command
     alert_parser = subparsers.add_parser("alert", help="Investigate specific SecOps alert")
     alert_sub = alert_parser.add_subparsers(dest="alert_action", required=True)
@@ -177,6 +241,24 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     pb_get = playbook_sub.add_parser("get", help="Get full playbook details, trigger, and step DAG")
     pb_get.add_argument("identifier", help="Playbook UUID identifier or numeric ID (e.g. 2277)")
+
+    pb_audit = playbook_sub.add_parser("audit", help="Audit all playbooks & blocks, priorities, enabled status, and environment mappings")
+    pb_audit.add_argument("--type", "-t", choices=["REGULAR", "NESTED"], help="Filter by playbook type (REGULAR or NESTED)")
+    pb_audit.add_argument("--environment", "-e", help="Filter by SOC environment name")
+    pb_audit.add_argument("--category", "-c", help="Filter by category folder")
+    pb_audit.add_argument("--enabled", action="store_true", help="Filter for enabled workflows only")
+    pb_audit.add_argument("--disabled", action="store_true", help="Filter for disabled workflows only")
+    pb_audit.add_argument("--limit", type=int, default=500, help="Maximum workflows to retrieve (default: 500)")
+    pb_audit.add_argument("--out", "-o", help="Optional path to output JSON report file")
+    pb_audit.add_argument("--json", action="store_true", help="Print raw JSON output")
+
+    pb_health = playbook_sub.add_parser("audit-health", help="Comprehensive SOAR Playbook Health Check, failure triage, faulted action hotspots, and queue latency using native Playbook Dashboard telemetry")
+    pb_health.add_argument("--days", "-d", type=int, default=7, help="Evaluation lookback period in days (default: 7)")
+    pb_health.add_argument("--no-deep-scan", action="store_true", help="Skip deep query analytics and run inventory-only audit")
+    pb_health.add_argument("--fail-threshold", type=float, default=15.0, help="Failure percentage threshold for high risk findings (default: 15.0)")
+    pb_health.add_argument("--slow-threshold", type=float, default=3.0, help="Runtime duration threshold in minutes for slow playbooks (default: 3.0)")
+    pb_health.add_argument("--out", "-o", help="Optional path to output JSON report file")
+    pb_health.add_argument("--json", action="store_true", help="Print raw JSON output")
 
     pb_cats = playbook_sub.add_parser("categories", help="List all SOAR playbook categories/folders")
 
@@ -276,6 +358,22 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     cur_metrics = curated_sub.add_parser("metrics", help="Show tenant-wide rule quotas and top firing Curated Rule Sets")
     cur_metrics.add_argument("--days", type=int, default=7, help="Time window in days (default: 7)")
+
+    cur_set = curated_sub.add_parser("set-deployment", help="Enable/disable a Curated Rule Set deployment and toggle alerting")
+    cur_set.add_argument("identifier", help="Curated Rule Set UUID, resource name, or title")
+    cur_set.add_argument("--precision", choices=["PRECISE", "BROAD", "precise", "broad"], default="PRECISE", help="Precision profile (default: PRECISE)")
+    cur_set_state = cur_set.add_mutually_exclusive_group()
+    cur_set_state.add_argument("--enabled", dest="enabled", action="store_true", default=None, help="Enable deployment")
+    cur_set_state.add_argument("--disabled", dest="enabled", action="store_false", default=None, help="Disable deployment")
+    cur_set_alert = cur_set.add_mutually_exclusive_group()
+    cur_set_alert.add_argument("--alerting", dest="alerting", action="store_true", default=None, help="Enable alerting")
+    cur_set_alert.add_argument("--no-alerting", dest="alerting", action="store_false", default=None, help="Disable alerting (silent detection)")
+    cur_set.add_argument("--no-sync-rules", dest="sync_rules", action="store_false", default=True, help="Do not cascade status to individual rules")
+
+    cur_audit = curated_sub.add_parser("audit", help="Run comprehensive Curated Detections Health Check & Operational Audit")
+    cur_audit.add_argument("--days", type=int, default=7, help="Evaluation timeframe in days (default: 7)")
+    cur_audit.add_argument("--out", help="Optional output filepath to save JSON report")
+    cur_audit.add_argument("--json", action="store_true", help="Output raw JSON instead of text tables")
 
     # Marketplace Response Integrations command
     mp_parser = subparsers.add_parser("marketplace", help="Search Content Hub Marketplace Response Integrations, compare version diffs, and inspect affected playbooks")
@@ -658,6 +756,42 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     cc_ag_settings = case_config_sub.add_parser("alert-grouping-settings", help="Get global SOAR alert grouping configuration parameters")
 
+    # Runbook command group
+    runbook_parser = subparsers.add_parser("runbook", help="List and execute autonomous SecOps incident response and threat hunting runbooks")
+    runbook_sub = runbook_parser.add_subparsers(dest="runbook_action", required=True)
+
+    runbook_list = runbook_sub.add_parser("list", help="List available autonomous SecOps runbooks")
+
+    runbook_run = runbook_sub.add_parser("run", help="Execute an autonomous SecOps runbook")
+    runbook_run.add_argument(
+        "name",
+        choices=[
+            "case-ai-triage",
+            "autonomous_case_ai_triage",
+            "tenant-settings-audit",
+            "tenant_settings_audit",
+            "data-table-inventory",
+            "data_table_inventory",
+            "yara-l-rules-audit",
+            "yara_l_rules_audit",
+            "soar-playbook-inventory",
+            "playbook-inventory",
+            "soar_playbook_inventory",
+            "soar-playbook-health",
+            "soar_playbook_health",
+            "playbook-health",
+            "curated-detections-health",
+            "curated_detections_health",
+        ],
+        help="Name of the runbook to execute",
+    )
+    runbook_run.add_argument("--case-id", "-c", default="104655", help="Target SecOps case ID (default: 104655)")
+    runbook_run.add_argument("--lookback-days", type=int, default=14, help="Threat hunt telemetry lookback days (default: 14)")
+    runbook_run.add_argument("--limit", type=int, default=50, help="Per-query threat hunt event cap (default: 50)")
+    runbook_run.add_argument("--timeout", type=float, default=90.0, help="Summary polling timeout in seconds (default: 90)")
+    runbook_run.add_argument("--out", "-o", help="Filepath to save report output (for tenant-settings-audit)")
+    runbook_run.add_argument("--dry-run", action="store_true", help="Execute in read-only preview mode")
+
     # Entity command group
     entity_grp = subparsers.add_parser("entity", help="Search UDM Entity Graph, summarize entities, and run composite investigations")
     entity_sub = entity_grp.add_subparsers(dest="entity_action", required=True)
@@ -687,9 +821,103 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     ioc_search = ioc_sub.add_parser("search", help="Search enterprise-wide IoCs")
     ioc_search.add_argument("value", help="IoC value (hash, IP, domain, etc.)")
     ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, IP_ADDRESS, DOMAIN_NAME)")
-    ioc_search.add_argument("--start", help="Start timestamp ISO8601")
-    ioc_search.add_argument("--end", help="End timestamp ISO8601")
-    ioc_search.add_argument("--limit", type=int, default=100, help="Max matches (default: 100)")
+    # Chronicle SIEM Data Tables command
+    dt_parser = subparsers.add_parser("data-table", help="Manage Chronicle SIEM Data Tables and row entries")
+    dt_sub = dt_parser.add_subparsers(dest="dt_action", required=True)
+
+    dt_list = dt_sub.add_parser("list", help="List Chronicle SIEM Data Tables")
+    dt_list.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    dt_list.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    dt_get = dt_sub.add_parser("get", help="Get Data Table schema and metadata")
+    dt_get.add_argument("table", help="Name or ID of the Data Table")
+    dt_get.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    dt_create = dt_sub.add_parser("create", help="Create a new Data Table")
+    dt_create.add_argument("table_id", help="Unique ID for the new Data Table")
+    dt_create.add_argument("--display-name", help="Display name for the Data Table")
+    dt_create.add_argument("--description", help="Description of the Data Table")
+    dt_create.add_argument("--columns", required=True, help="Comma-separated column defs: name:TYPE[:key] e.g. 'user:STRING:key,ip:CIDR'")
+    dt_create.add_argument("--ttl", help="Optional row time to live e.g. '168h'")
+    dt_create.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    dt_delete = dt_sub.add_parser("delete", help="Delete a Data Table")
+    dt_delete.add_argument("table", help="Name or ID of the Data Table to delete")
+
+    dt_rows = dt_sub.add_parser("rows", help="List rows inside a Data Table")
+    dt_rows.add_argument("table", help="Name or ID of the Data Table")
+    dt_rows.add_argument("--filter", "-f", help="Filter expression for rows")
+    dt_rows.add_argument("--limit", type=int, default=50, help="Results limit (default: 50)")
+    dt_rows.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    dt_add_row = dt_sub.add_parser("add-row", help="Add a row of values to a Data Table")
+    dt_add_row.add_argument("table", help="Name or ID of the Data Table")
+    dt_add_row.add_argument("--values", "-v", required=True, help="Comma-separated row values e.g. 'user@corp.com,192.168.1.1'")
+    dt_add_row.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    dt_del_row = dt_sub.add_parser("delete-row", help="Delete a row from a Data Table")
+    dt_del_row.add_argument("table", help="Name or ID of the Data Table")
+    dt_del_row.add_argument("row_id", help="Row ID or resource path to delete")
+
+    # Chronicle SIEM Detection Rules command
+    rule_parser = subparsers.add_parser("rule", help="Manage custom Chronicle SIEM YARA-L detection rules")
+    rule_sub = rule_parser.add_subparsers(dest="rule_action", required=True)
+
+    rule_list = rule_sub.add_parser("list", help="List custom detection rules")
+    rule_list.add_argument("--filter", "-f", help="Filter expression (e.g. 'display_name:\"my_rule\"')")
+    rule_list.add_argument("--view", choices=["BASIC", "FULL"], default="BASIC", help="Rule view (default: BASIC)")
+    rule_list.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_list.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_get = rule_sub.add_parser("get", help="Get detection rule details and YARA-L logic")
+    rule_get.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_get.add_argument("--view", choices=["BASIC", "FULL"], default="FULL", help="Rule view (default: FULL)")
+    rule_get.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_verify = rule_sub.add_parser("verify", help="Validate YARA-L 2.0 rule syntax against the Chronicle compiler")
+    rule_verify.add_argument("rule_input", help="File path (.yaral / .yara) or raw YARA-L rule text string")
+    rule_verify.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_create = rule_sub.add_parser("create", help="Create a new custom detection rule")
+    rule_create.add_argument("rule_input", help="File path (.yaral / .yara) or raw YARA-L rule text string")
+    rule_create.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_patch = rule_sub.add_parser("patch", help="Update the YARA-L logic of an existing detection rule")
+    rule_patch.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_patch.add_argument("rule_input", help="File path (.yaral / .yara) or raw YARA-L rule text string")
+    rule_patch.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_delete = rule_sub.add_parser("delete", help="Delete a custom detection rule")
+    rule_delete.add_argument("rule", help="Rule ID (ru_...) or resource name to delete")
+
+    rule_revisions = rule_sub.add_parser("revisions", help="List version history and past revisions of a rule")
+    rule_revisions.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_revisions.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_revisions.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_dep = rule_sub.add_parser("deployment", help="Get rule deployment, schedule, and alerting status")
+    rule_dep.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_dep.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_set_dep = rule_sub.add_parser("set-deployment", help="Update rule deployment configuration")
+    rule_set_dep.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_set_dep.add_argument("--enabled", action="store_true", help="Enable rule execution")
+    rule_set_dep.add_argument("--disabled", action="store_true", help="Disable rule execution")
+    rule_set_dep.add_argument("--alerting", action="store_true", help="Enable alerting for rule detections")
+    rule_set_dep.add_argument("--no-alerting", action="store_true", help="Disable alerting for rule detections")
+    rule_set_dep.add_argument("--frequency", choices=["LIVE", "HOURLY", "DAILY"], help="Execution run frequency")
+    rule_set_dep.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_errors = rule_sub.add_parser("errors", help="List runtime / execution errors across detection rules")
+    rule_errors.add_argument("--rule", "-r", help="Optional Rule ID to filter errors by")
+    rule_errors.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_errors.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_audit = rule_sub.add_parser("audit", help="Audit all rules, deployment status, and cross-correlate errors")
+    rule_audit.add_argument("--filter", "-f", help="Optional filter expression for listing rules")
+    rule_audit.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_audit.add_argument("--out", "-o", help="Optional path to output JSON report file")
+    rule_audit.add_argument("--json", action="store_true", help="Output raw JSON")
 
     args = parser.parse_args()
 
@@ -805,10 +1033,140 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_soar_webhook_get_cli(args)
     elif args.command == "case-config":
         run_case_config_cli(args)
+    elif args.command == "data-table":
+        run_data_table_cli(args)
+    elif args.command == "rule":
+        run_rule_cli(args)
+    elif args.command == "runbook":
+        run_runbook_cli(args)
 
 
-
-
+def run_runbook_cli(args):
+    if args.runbook_action == "list":
+        print("\n=== Available Autonomous SecOps Runbooks ===")
+        print("  1. case-ai-triage (autonomous_case_ai_triage)")
+        print("     Category : Incident Response")
+        print("     Summary  : 4-stage loop: Gemini AI Summary -> Indicator Extraction -> UDM Threat Hunt -> Incident Escalation & Audit Comment")
+        print("     Usage    : secops runbook run case-ai-triage --case-id <ID> [--dry-run]")
+        print()
+        print("  2. tenant-settings-audit (tenant_settings_audit)")
+        print("     Category : Operations & Governance")
+        print("     Summary  : Complete audit of Root Instance, Gemini AI/UEBA, Pipelines, SOAR Settings, and Topography")
+        print("     Usage    : secops runbook run tenant-settings-audit [--out <FILE>]")
+        print()
+        print("  3. data-table-inventory (data_table_inventory)")
+        print("     Category : Operations & Governance")
+        print("     Summary  : Comprehensive audit of Chronicle SIEM Data Tables: schemas, columns, types, owners, TTL, and timestamps")
+        print("     Usage    : secops runbook run data-table-inventory [--out <FILE>]")
+        print()
+        print("  4. yara-l-rules-audit (yara_l_rules_audit)")
+        print("     Category : Operations & Detection Engineering")
+        print("     Summary  : Audit all custom YARA-L detection rules: deployment status, authoring, compilation, and error cross-correlation")
+        print("     Usage    : secops runbook run yara-l-rules-audit [--out <FILE>]")
+        print()
+        print("  5. soar-playbook-inventory (soar_playbook_inventory / playbook-inventory)")
+        print("     Category : Operations & SOAR Automation")
+        print("     Summary  : Comprehensive audit of SOAR Playbooks & Blocks: types (REGULAR/NESTED), enabled status, priority, and environment mappings")
+        print("     Usage    : secops runbook run soar-playbook-inventory [--out <FILE>]")
+        print()
+        print("  6. curated-detections-health (curated_detections_health)")
+        print("     Category : Operations & Detection Engineering")
+        print("     Summary  : Health check & hygiene audit across Curated Rule Sets: misconfiguration risks (BROAD alerting), top firing rules, newest/oldest intelligence")
+        print("     Usage    : secops runbook run curated-detections-health [--days <N>] [--out <FILE>]")
+        print()
+        print("  7. soar-playbook-health (soar_playbook_health / playbook-health)")
+        print("     Category : Operations & SOAR Automation")
+        print("     Summary  : Comprehensive SOAR Playbook Health Check: failure rates, faulted connector actions, queue latency, and Playbook Dashboard (SOAR) telemetry")
+        print("     Usage    : secops runbook run soar-playbook-health [--lookback-days <N>] [--out <FILE>]")
+        print()
+    elif args.runbook_action == "run":
+        if args.name in ("case-ai-triage", "autonomous_case_ai_triage"):
+            from runbooks.incident_response.autonomous_case_ai_triage import run_autonomous_case_ai_triage
+            run_autonomous_case_ai_triage(
+                case_id=args.case_id,
+                hunt_lookback_days=args.lookback_days,
+                hunt_receive_limit=args.limit,
+                summary_timeout_sec=args.timeout,
+                dry_run=args.dry_run,
+            )
+        elif args.name in ("tenant-settings-audit", "tenant_settings_audit"):
+            import json
+            from runbooks.operations.tenant_settings_audit import generate_tenant_settings_report
+            report = generate_tenant_settings_report()
+            rendered = json.dumps(report, indent=2)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    f.write(rendered)
+                print(f"[+] Audit report written to {args.out}")
+            else:
+                print(rendered)
+        elif args.name in ("data-table-inventory", "data_table_inventory"):
+            import json
+            from runbooks.operations.data_table_inventory import (
+                generate_data_table_inventory_report,
+                print_data_table_inventory_console,
+            )
+            report = generate_data_table_inventory_report()
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] Data table inventory written to {args.out}")
+            else:
+                print_data_table_inventory_console(report)
+        elif args.name in ("yara-l-rules-audit", "yara_l_rules_audit"):
+            import json
+            from runbooks.operations.yara_l_rules_audit import (
+                generate_yara_l_rules_audit_report,
+                print_yara_l_rules_audit_console,
+            )
+            report = generate_yara_l_rules_audit_report()
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] YARA-L rules audit written to {args.out}")
+            else:
+                print_yara_l_rules_audit_console(report)
+        elif args.name in ("soar-playbook-inventory", "playbook-inventory", "soar_playbook_inventory"):
+            import json
+            from runbooks.operations.soar_playbook_inventory import (
+                generate_playbook_inventory_report,
+                print_playbook_inventory_console,
+            )
+            report = generate_playbook_inventory_report()
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] SOAR Playbook inventory written to {args.out}")
+            else:
+                print_playbook_inventory_console(report)
+        elif args.name in ("curated-detections-health", "curated_detections_health"):
+            import json
+            from runbooks.operations.curated_detections_health import (
+                generate_curated_detections_health_report,
+                print_curated_detections_health_console,
+            )
+            days = getattr(args, "lookback_days", 7) or 7
+            report = generate_curated_detections_health_report(days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] Curated Detections health audit written to {args.out}")
+            else:
+                print_curated_detections_health_console(report)
+        elif args.name in ("soar-playbook-health", "soar_playbook_health", "playbook-health"):
+            import json
+            from runbooks.operations.soar_playbook_health import (
+                generate_soar_playbook_health_report,
+                print_soar_playbook_health_console,
+            )
+            days = getattr(args, "lookback_days", 7) or 7
+            report = generate_soar_playbook_health_report(days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] SOAR Playbook health audit written to {args.out}")
+            else:
+                print_soar_playbook_health_console(report)
 
 
 def run_entity_search_cli(args):
@@ -1041,6 +1399,332 @@ def run_case_cli(args):
                 print(f"     Assignee: {c.user_assigned}")
             print()
 
+    elif args.case_action == "triage":
+        print(f"\n[CLI] Triaging Case #{args.case_id} (summary={args.summary}, precedents={args.precedents})...")
+        assessment = engine.triage_case(
+            case_id=args.case_id,
+            fetch_summary=args.summary,
+            search_precedents=args.precedents,
+            apply_stage_update=args.update_stage,
+            post_comment=args.comment,
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": assessment.case_id,
+                "title": assessment.title,
+                "priority": assessment.priority.value if hasattr(assessment.priority, "value") else str(assessment.priority),
+                "status": assessment.status.value if hasattr(assessment.status, "value") else str(assessment.status),
+                "stage": assessment.stage,
+                "is_closed": assessment.is_closed,
+                "is_novel": assessment.is_novel,
+                "is_repeat": assessment.is_repeat,
+                "prior_case_count": assessment.prior_case_count,
+                "suggested_stage_transition": assessment.suggested_stage_transition,
+                "alert_count": assessment.alert_count,
+                "highest_alert_priority": assessment.highest_alert_priority,
+                "suspicious_entities": assessment.suspicious_entities,
+                "comment_count": assessment.comment_count,
+                "latest_comment": assessment.latest_comment,
+                "triage_verdict": assessment.triage_verdict.value,
+                "triage_summary": assessment.triage_summary,
+                "recommended_actions": assessment.recommended_actions,
+                "suggested_agent_prompt": assessment.suggested_agent_prompt,
+                "gemini_summary": assessment.gemini_summary.summary if assessment.gemini_summary else None,
+                "precedent_notes": assessment.precedent_summary.precedent_notes if assessment.precedent_summary else [],
+                "playbooks": [
+                    {
+                        "alert_id": pb.alert_id,
+                        "alert_display_name": pb.alert_display_name,
+                        "attached_playbook_name": pb.attached_playbook_name,
+                        "status": pb.status,
+                        "run_count": pb.run_count,
+                    }
+                    for pb in assessment.alert_playbook_statuses
+                ],
+                "timeline_events": [
+                    {
+                        "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "description": ev.description,
+                        "severity": ev.severity,
+                    }
+                    for ev in (assessment.timeline.events if assessment.timeline else [])
+                ],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR SINGLE CASE TRIAGE ASSESSMENT: Case #{assessment.case_id}")
+        print(f"==========================================================================================")
+        verdict_badge = f"[{assessment.triage_verdict.value}]"
+        prio_badge = f"[{assessment.priority.value if hasattr(assessment.priority, 'value') else assessment.priority}]"
+        status_badge = "[CLOSED]" if assessment.is_closed else "[OPEN]"
+        print(f" Case ID     : #{assessment.case_id} | {status_badge} | Priority: {prio_badge} | Stage: {assessment.stage}")
+        print(f" Title       : {assessment.title}")
+        print(f" Verdict     : {verdict_badge} {assessment.triage_summary}")
+        if assessment.suggested_stage_transition and assessment.suggested_stage_transition != assessment.stage:
+            print(f" Stage Suggestion: Transition to '{assessment.suggested_stage_transition}'")
+
+        if assessment.gemini_summary and assessment.gemini_summary.summary:
+            print(f"\n Gemini AI Case Summary:")
+            print(f"   {assessment.gemini_summary.summary}")
+
+        if assessment.precedent_summary:
+            print(f"\n Precedent & Pattern Analysis:")
+            if assessment.precedent_summary.is_novel:
+                print(f"   - Novel Detection: 0 prior occurrences with this title or entities.")
+            else:
+                for pnote in assessment.precedent_summary.precedent_notes:
+                    print(f"   - {pnote}")
+
+        if assessment.alert_playbook_statuses:
+            print(f"\n Key Alerts & SOAR Playbook Status ({len(assessment.alert_playbook_statuses)}):")
+            for idx, pb in enumerate(assessment.alert_playbook_statuses, 1):
+                aname = pb.alert_display_name or pb.alert_id or "Alert"
+                if pb.attached_playbook_name:
+                    status_str = f"[{pb.status or 'PENDING'}]"
+                    runs_str = f"({pb.run_count} runs)"
+                    print(f"   {idx}. {aname} -> Playbook: '{pb.attached_playbook_name}' {status_str} {runs_str}")
+                else:
+                    print(f"   {idx}. {aname} -> Playbook: [NO PLAYBOOK ATTACHED]")
+
+        if assessment.timeline and assessment.timeline.events:
+            print(f"\n Incident & Case Timeline ({len(assessment.timeline.events)} events):")
+            for idx, ev in enumerate(assessment.timeline.events, 1):
+                t_str = ev.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if ev.timestamp else "N/A"
+                print(f"   [{t_str}] [{ev.event_type:<12s}] {ev.title} - {ev.description}")
+
+        if assessment.suspicious_entities:
+            print(f"\n Flagged Entities: {', '.join(assessment.suspicious_entities)}")
+
+        if assessment.recommended_actions:
+            print(f"\n Recommended Analyst Actions:")
+            for act in assessment.recommended_actions:
+                print(f"   - {act}")
+
+        if assessment.latest_comment:
+            clean_note = assessment.latest_comment.splitlines()[0] if assessment.latest_comment else ""
+            print(f"\n Latest Note : {clean_note}")
+
+        if getattr(args, "generate_prompts", False):
+            print(f"\n --- Suggested Antigravity Subagent Dispatch Prompt ---")
+            for pline in assessment.suggested_agent_prompt.splitlines():
+                print(f" | {pline}")
+            print(f" ------------------------------------------------------")
+        print()
+
+    elif args.case_action == "timeline":
+        print(f"\n[CLI] Generating Chronological Timeline for Case #{args.case_id}...")
+        timeline = engine.get_case_timeline(case_id=args.case_id)
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": timeline.case_id,
+                "event_count": len(timeline.events),
+                "earliest_time": timeline.earliest_time.isoformat() if timeline.earliest_time else None,
+                "latest_time": timeline.latest_time.isoformat() if timeline.latest_time else None,
+                "events": [
+                    {
+                        "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "description": ev.description,
+                        "source_id": ev.source_id,
+                        "severity": ev.severity,
+                        "metadata": ev.metadata,
+                    }
+                    for ev in timeline.events
+                ],
+                "provenance": timeline.provenance,
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" CHRONOLOGICAL TIMELINE: Case #{timeline.case_id} ({len(timeline.events)} events)")
+        print(f"==========================================================================================")
+        if not timeline.events:
+            print(" No timeline events recorded for this case.")
+        else:
+            for idx, ev in enumerate(timeline.events, 1):
+                t_str = ev.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if ev.timestamp else "N/A"
+                print(f" {idx:2d}. [{t_str}] [{ev.event_type:<12s}] {ev.title}")
+                print(f"     {ev.description}")
+                print()
+
+    elif args.case_action == "comments":
+        print(f"\n[CLI] Retrieving Case Comments for Case #{args.case_id}...")
+        comments = engine.list_case_comments(case_id=args.case_id)
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = [
+                {
+                    "name": c.name,
+                    "author": c.author,
+                    "author_name": c.author_name,
+                    "created_time": c.create_time.isoformat() if c.create_time else None,
+                    "comment": c.comment,
+                    "is_deleted": c.is_deleted,
+                }
+                for c in comments
+            ]
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" CASE COMMENTS: Case #{args.case_id} ({len(comments)} comments)")
+        print(f"==========================================================================================")
+        if not comments:
+            print(" No comments recorded on this case.")
+        else:
+            for idx, c in enumerate(comments, 1):
+                t_str = c.create_time.strftime("%Y-%m-%d %H:%M:%S UTC") if c.create_time else "N/A"
+                author_str = c.author_name or c.author or "Unknown"
+                print(f" {idx:2d}. [{t_str}] Author: {author_str}")
+                for line in c.comment.splitlines():
+                    print(f"     {line}")
+                print()
+
+    elif args.case_action == "wall":
+        print(f"\n[CLI] Retrieving SOAR Case Activity Wall for Case #{args.case_id} (limit={args.limit})...")
+        wall_res = engine.get_case_wall(
+            case_id=args.case_id,
+            limit=args.limit,
+            page_token=getattr(args, "page_token", None),
+            activity_type=getattr(args, "type", None),
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": wall_res.case_id,
+                "record_count": wall_res.count,
+                "total_size": wall_res.total_size,
+                "next_page_token": wall_res.next_page_token,
+                "records": [
+                    {
+                        "activity_id": r.activity_id,
+                        "activity_type": r.activity_type,
+                        "activity_kind": r.activity_kind,
+                        "creator": r.creator_user_id,
+                        "created_time": r.create_time.isoformat() if r.create_time else None,
+                        "description": r.description,
+                        "details": r.details,
+                    }
+                    for r in wall_res.records
+                ],
+                "provenance": wall_res.provenance,
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE ACTIVITY WALL: Case #{wall_res.case_id} (Showing {wall_res.count} of {wall_res.total_size} total records)")
+        print(f"==========================================================================================")
+        if not wall_res.records:
+            print(" No activity records found on the case wall.")
+        else:
+            for idx, r in enumerate(wall_res.records, 1):
+                t_str = r.create_time.strftime("%Y-%m-%d %H:%M:%S UTC") if r.create_time else "N/A"
+                user_str = f"by {r.creator_user_id}" if r.creator_user_id else ""
+                print(f" {idx:2d}. [{t_str}] [{r.activity_type:<18s}] {r.activity_kind} {user_str}")
+                print(f"     {r.description}")
+                print()
+        if wall_res.next_page_token:
+            print(f" Next Page Token: {wall_res.next_page_token}")
+
+    elif args.case_action in ("orchestrate-triage", "triage-batch"):
+        cids = getattr(args, "case_id", None) or None
+        print(f"\n[CLI] Orchestrating Case Triage (limit={args.limit}, open_only={not args.all_statuses}, explicit_cases={cids})...")
+        batch = engine.orchestrate_case_triage(
+            case_ids=cids,
+            limit=args.limit,
+            open_only=not args.all_statuses,
+            query_text=args.query,
+            priorities=args.priority,
+            stages=args.stage,
+            tags=args.tag,
+            environments=args.environment,
+            assigned_users=args.assignee,
+            search_precedents=getattr(args, "precedents", True),
+            fetch_summary=getattr(args, "summary", False),
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "total_cases_analyzed": batch.total_cases_analyzed,
+                "open_cases_count": batch.open_cases_count,
+                "closed_cases_count": batch.closed_cases_count,
+                "critical_high_count": batch.critical_high_count,
+                "provenance": batch.provenance,
+                "cases": [
+                    {
+                        "case_id": c.case_id,
+                        "title": c.title,
+                        "priority": c.priority.value if hasattr(c.priority, "value") else str(c.priority),
+                        "status": c.status.value if hasattr(c.status, "value") else str(c.status),
+                        "stage": c.stage,
+                        "is_closed": c.is_closed,
+                        "is_novel": c.is_novel,
+                        "is_repeat": c.is_repeat,
+                        "prior_case_count": c.prior_case_count,
+                        "suggested_stage_transition": c.suggested_stage_transition,
+                        "alert_count": c.alert_count,
+                        "highest_alert_priority": c.highest_alert_priority,
+                        "suspicious_entities": c.suspicious_entities,
+                        "comment_count": c.comment_count,
+                        "latest_comment": c.latest_comment,
+                        "triage_verdict": c.triage_verdict.value,
+                        "triage_summary": c.triage_summary,
+                        "recommended_actions": c.recommended_actions,
+                        "suggested_agent_prompt": c.suggested_agent_prompt,
+                    }
+                    for c in batch.results
+                ],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE ORCHESTRATED TRIAGE (Analyzed: {batch.total_cases_analyzed} | Open: {batch.open_cases_count} | High Risk / Critical: {batch.critical_high_count})")
+        print(f"==========================================================================================")
+        if not batch.results:
+            print(" No candidate cases found matching criteria.")
+            return
+
+        for idx, item in enumerate(batch.results, 1):
+            verdict_badge = f"[{item.triage_verdict.value}]"
+            prio_badge = f"[{item.priority.value}]"
+            status_badge = "[CLOSED]" if item.is_closed else "[OPEN]"
+            print(f" {idx:2d}. Case #{item.case_id} | {verdict_badge:28s} | {status_badge:8s} | Prio: {prio_badge:10s} | Alerts: {item.alert_count:2d}")
+            print(f"     Title   : {item.title}")
+            print(f"     Verdict : {item.triage_summary}")
+            if item.precedent_summary and item.precedent_summary.precedent_notes:
+                for pn in item.precedent_summary.precedent_notes[:2]:
+                    print(f"     Preced. : {pn}")
+            if item.suspicious_entities:
+                print(f"     Entities: {', '.join(item.suspicious_entities)}")
+            if item.recommended_actions:
+                print(f"     Actions :")
+                for act in item.recommended_actions:
+                    print(f"       - {act}")
+            if item.latest_comment:
+                clean_comm = item.latest_comment.splitlines()[0] if item.latest_comment else ""
+                print(f"     Note    : {clean_comm}")
+            if getattr(args, "generate_prompts", False):
+                print(f"\n     --- Suggested Antigravity Subagent Dispatch Prompt ---")
+                for pline in item.suggested_agent_prompt.splitlines():
+                    print(f"     | {pline}")
+                print(f"     ------------------------------------------------------")
+            print()
+
     elif args.case_action == "update":
         print(f"\n[CLI] Updating Case {args.case_id}...")
         res = engine.update_case(
@@ -1126,6 +1810,28 @@ def run_case_cli(args):
             print(f"     Status Message   : {rec.status_message}")
         if rec.marketplace_actions_triggered_manually:
             print(f"     Marketplace Actions Triggered: {', '.join(rec.marketplace_actions_triggered_manually)}")
+
+    elif args.case_action == "summary":
+        print(f"\n[CLI] Retrieving Gemini AI Summary for Case {args.case_id}...")
+        if args.wait:
+            summary = engine.get_case_summary(case_id=args.case_id, timeout_sec=args.timeout)
+        else:
+            summary = engine.get_or_create_case_summary(case_id=args.case_id)
+
+        print(f" [✓] Case summary status: {summary.state}")
+        if summary.update_time:
+            print(f"     Last Updated : {summary.update_time}")
+        if summary.summary:
+            print(f"\n--- CASE SUMMARY ---")
+            print(summary.summary)
+        if summary.reasons:
+            print(f"\n--- KEY REASONS ({len(summary.reasons)}) ---")
+            for idx, r in enumerate(summary.reasons, 1):
+                print(f" [{idx}] {r}")
+        if summary.next_steps:
+            print(f"\n--- RECOMMENDED NEXT STEPS ({len(summary.next_steps)}) ---")
+            for idx, s in enumerate(summary.next_steps, 1):
+                print(f" [{idx}] {s}")
 
 
 def run_alert_cli(args):
@@ -1228,6 +1934,77 @@ def run_playbook_cli(args):
             def_badge = " (DEFAULT)" if c.is_default else ""
             print(f" [{idx:2d}] ID: {c.id:<4s} | Name: {c.name}{def_badge} (Type: {c.category_type}, State: {c.category_state})")
         print()
+
+    elif args.playbook_action == "audit":
+        import json
+        from runbooks.operations.soar_playbook_inventory import (
+            generate_playbook_inventory_report,
+            print_playbook_inventory_console,
+        )
+
+        pt = PlaybookType(args.type) if getattr(args, "type", None) else None
+        is_enabled = None
+        if getattr(args, "enabled", False):
+            is_enabled = True
+        elif getattr(args, "disabled", False):
+            is_enabled = False
+
+        limit = getattr(args, "limit", 500)
+        category = getattr(args, "category", None)
+        environment = getattr(args, "environment", None)
+
+        print(f"\n[CLI] Running SOAR Playbook & Reusable Block Audit (limit={limit})...")
+        report = generate_playbook_inventory_report(
+            engine=engine,
+            category=category,
+            playbook_type=pt,
+            environment=environment,
+            is_enabled=is_enabled,
+            limit=limit,
+        )
+
+        if getattr(args, "json", False):
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print_playbook_inventory_console(report)
+
+        if getattr(args, "out", None):
+            with open(args.out, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"[+] Playbook audit report written to: {args.out}")
+
+    elif args.playbook_action == "audit-health":
+        import json
+        from runbooks.operations.soar_playbook_health import (
+            generate_soar_playbook_health_report,
+            print_soar_playbook_health_console,
+        )
+
+        days = getattr(args, "days", 7)
+        scan_deep = not getattr(args, "no_deep_scan", False)
+        fail_thresh = getattr(args, "fail_threshold", 15.0)
+        slow_thresh = getattr(args, "slow_threshold", 3.0)
+
+        if not getattr(args, "json", False):
+            print(f"\n[CLI] Running SOAR Playbook Health Check (lookback={days}d, deep_scan={scan_deep})...")
+
+        report = generate_soar_playbook_health_report(
+            engine=engine,
+            days=days,
+            scan_deep=scan_deep,
+            fail_threshold_pct=fail_thresh,
+            slow_threshold_minutes=slow_thresh,
+        )
+
+        if getattr(args, "json", False):
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print_soar_playbook_health_console(report)
+
+        if getattr(args, "out", None):
+            with open(args.out, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"[+] SOAR Playbook health report written to: {args.out}")
 
 
 def run_integration_cli(args):
@@ -1674,6 +2451,50 @@ def run_curated_cli(args):
         except Exception as e:
             print(f"Error fetching curated metrics: {e}", file=sys.stderr)
             sys.exit(1)
+
+    elif args.curated_action == "set-deployment":
+        if args.enabled is None and args.alerting is None:
+            print("Error: Must specify at least one state flag (--enabled/--disabled or --alerting/--no-alerting)", file=sys.stderr)
+            sys.exit(1)
+
+        prec = args.precision.upper()
+        print(f"\n[CLI] Updating Curated Rule Set '{args.identifier}' deployment ({prec})...")
+        try:
+            res = engine.set_curated_ruleset_deployment(
+                ruleset_id_or_title=args.identifier,
+                precision=prec,
+                enabled=args.enabled,
+                alerting=args.alerting,
+                sync_rules=args.sync_rules,
+            )
+            state_str = "ENABLED" if res.enabled else "DISABLED"
+            alert_str = "ALERTING ON" if res.alerting else "ALERTING OFF"
+            print(f"\n[Success] Curated Rule Set Deployment updated successfully:")
+            print(f"  Resource : {res.resource_name}")
+            print(f"  Precision: {res.precision}")
+            print(f"  Status   : {state_str}")
+            print(f"  Alerting : {alert_str}\n")
+        except Exception as e:
+            print(f"Error updating curated deployment: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.curated_action == "audit":
+        from runbooks.operations.curated_detections_health import (
+            generate_curated_detections_health_report,
+            print_curated_detections_health_console,
+        )
+        days = getattr(args, "days", 7) or 7
+        try:
+            report = generate_curated_detections_health_report(engine=engine, days=days)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[+] Curated Detections health report saved to {args.out}")
+            print_curated_detections_health_console(report, json_output=getattr(args, "json", False))
+        except Exception as e:
+            print(f"Error running curated detections health audit: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 
 def run_marketplace_cli(args):
@@ -3739,6 +4560,390 @@ def run_case_config_cli(args):
             sys.exit(1)
 
 
+def run_data_table_cli(args):
+    engine = SecOpsEngine()
+    action = args.dt_action
+
+    if action == "list":
+        print(f"\n[CLI] Listing Chronicle SIEM Data Tables (limit={args.limit})...")
+        try:
+            res = engine.list_data_tables(page_size=args.limit)
+            if getattr(args, "json", False):
+                print(json.dumps([t.__dict__ for t in res.data_tables], indent=2, default=str))
+                return
+            print(f"\n=== CHRONICLE SIEM DATA TABLES ({len(res.data_tables)} tables) ===")
+            if not res.data_tables:
+                print("  No Data Tables found in tenant.")
+            else:
+                print(f"  {'ID / NAME':45s} {'DISPLAY NAME':30s} {'COLUMNS':10s} {'TTL':10s}")
+                print("  " + "-" * 95)
+                for dt in res.data_tables:
+                    col_count = str(len(dt.column_info))
+                    ttl = dt.row_time_to_live or "-"
+                    print(f"  {dt.table_id:45s} {dt.display_name[:28]:30s} {col_count:10s} {ttl:10s}")
+            print()
+        except Exception as e:
+            print(f"Error listing data tables: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "get":
+        print(f"\n[CLI] Fetching Data Table: '{args.table}'...")
+        try:
+            dt = engine.get_data_table(args.table)
+            if getattr(args, "json", False):
+                print(json.dumps(dt.__dict__, indent=2, default=str))
+                return
+            print(f"\n=== DATA TABLE: {dt.display_name} ({dt.table_id}) ===")
+            print(f"  Name        : {dt.name}")
+            print(f"  Table ID    : {dt.table_id}")
+            print(f"  Display Name: {dt.display_name}")
+            print(f"  Description : {dt.description or '-'}")
+            print(f"  TTL         : {dt.row_time_to_live or '-'}")
+            print(f"  Created Time: {dt.create_time or '-'}")
+            print(f"  Updated Time: {dt.update_time or '-'}")
+            print("\n  Columns:")
+            for col in dt.column_info:
+                key_marker = " [KEY]" if col.is_key_column else ""
+                print(f"    - {col.column_name:25s} {col.data_type:15s}{key_marker}")
+            print()
+        except Exception as e:
+            print(f"Error fetching data table: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "create":
+        print(f"\n[CLI] Creating Data Table '{args.table_id}'...")
+        try:
+            cols = []
+            for col_spec in args.columns.split(","):
+                parts = col_spec.strip().split(":")
+                col_name = parts[0]
+                data_type = parts[1] if len(parts) > 1 else "STRING"
+                is_key = len(parts) > 2 and parts[2].lower() in ("key", "true", "1")
+                cols.append({
+                    "column_name": col_name,
+                    "data_type": data_type,
+                    "is_key_column": is_key,
+                })
+
+            dt = engine.create_data_table(
+                table_id=args.table_id,
+                display_name=args.display_name,
+                description=args.description,
+                column_info=cols,
+                row_time_to_live=args.ttl,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps(dt.__dict__, indent=2, default=str))
+                return
+            print(f"\n[+] Successfully created Data Table: {dt.table_id}")
+            print(f"  Display Name: {dt.display_name}")
+            print(f"  Columns     : {len(dt.column_info)}")
+            print()
+        except Exception as e:
+            print(f"Error creating data table: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "delete":
+        print(f"\n[CLI] Deleting Data Table '{args.table}'...")
+        try:
+            res = engine.delete_data_table(args.table)
+            print(f"[+] Successfully deleted Data Table '{args.table}'")
+            print()
+        except Exception as e:
+            print(f"Error deleting data table: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "rows":
+        print(f"\n[CLI] Querying rows in Data Table '{args.table}' (limit={args.limit})...")
+        try:
+            res = engine.list_data_table_rows(
+                table_name_or_id=args.table,
+                page_size=args.limit,
+                filter_expr=args.filter,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps([r.__dict__ for r in res.rows], indent=2, default=str))
+                return
+            print(f"\n=== ROWS IN TABLE '{args.table}' ({len(res.rows)} rows) ===")
+            if not res.rows:
+                print("  No rows found.")
+            else:
+                for idx, row in enumerate(res.rows, 1):
+                    print(f"  [{idx}] Row ID: {row.row_id} (Created: {row.create_time or '-'})")
+                    print(f"      Values: {row.values}")
+            print()
+        except Exception as e:
+            print(f"Error querying data table rows: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "add-row":
+        print(f"\n[CLI] Adding row to Data Table '{args.table}'...")
+        try:
+            val_list = [v.strip() for v in args.values.split(",")]
+            res = engine.add_data_table_rows(
+                table_name_or_id=args.table,
+                rows=[{"values": val_list}],
+            )
+            if getattr(args, "json", False):
+                print(json.dumps(res, indent=2, default=str))
+                return
+            print(f"[+] Successfully added row to '{args.table}'.")
+            print()
+        except Exception as e:
+            print(f"Error adding row to data table: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "delete-row":
+        print(f"\n[CLI] Deleting row '{args.row_id}' from Data Table '{args.table}'...")
+        try:
+            res = engine.delete_data_table_row(
+                table_name_or_id=args.table,
+                row_id=args.row_id,
+            )
+            print(f"[+] Successfully deleted row '{args.row_id}'.")
+            print()
+        except Exception as e:
+            print(f"Error deleting data table row: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def _read_rule_input(input_val: str) -> str:
+    """Reads rule text either from direct argument or file path."""
+    import os
+    if os.path.exists(input_val) and os.path.isfile(input_val):
+        with open(input_val, "r", encoding="utf-8") as f:
+            return f.read()
+    return input_val
+
+
+def run_rule_cli(args):
+    engine = SecOpsEngine()
+    action = args.rule_action
+
+    if action == "list":
+        print(f"\n[CLI] Listing Chronicle SIEM detection rules (limit={args.limit})...")
+        try:
+            res = engine.list_rules(
+                page_size=args.limit,
+                filter_expr=args.filter,
+                view=args.view,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps([r.__dict__ for r in res.rules], indent=2, default=str))
+                return
+            print(f"\n=== CHRONICLE DETECTION RULES ({len(res.rules)} rules) ===")
+            if not res.rules:
+                print("  No detection rules found.")
+            else:
+                print(f"  {'RULE ID':45s} {'DISPLAY NAME':35s} {'SEVERITY':10s} {'TYPE':15s} {'FREQ':10s}")
+                print("  " + "-" * 120)
+                for r in res.rules:
+                    freq = r.run_frequency or (r.allowed_run_frequencies[0] if r.allowed_run_frequencies else "-")
+                    print(f"  {r.rule_id:45s} {r.display_name[:33]:35s} {r.severity:10s} {r.rule_type:15s} {freq:10s}")
+            print()
+        except Exception as e:
+            print(f"Error listing detection rules: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "get":
+        print(f"\n[CLI] Fetching detection rule: '{args.rule}'...")
+        try:
+            r = engine.get_rule(args.rule, view=args.view)
+            if getattr(args, "json", False):
+                print(json.dumps(r.__dict__, indent=2, default=str))
+                return
+            print(f"\n=== DETECTION RULE: {r.display_name} ({r.rule_id}) ===")
+            print(f"  Name            : {r.name}")
+            print(f"  Rule ID         : {r.rule_id}")
+            print(f"  Revision ID     : {r.revision_id or '-'}")
+            print(f"  Author          : {r.author or '-'}")
+            print(f"  Severity        : {r.severity}")
+            print(f"  Compilation     : {r.compilation_state}")
+            print(f"  Type            : {r.rule_type}")
+            print(f"  Run Frequency   : {r.run_frequency or '-'}")
+            print(f"  Created Time    : {r.create_time or '-'}")
+            print(f"  Revision Time   : {r.revision_create_time or '-'}")
+            if r.metadata:
+                print(f"  Metadata        : {r.metadata}")
+            if r.text:
+                print("\n--- YARA-L 2.0 Code ---")
+                print(r.text)
+                print("-" * 23)
+            print()
+        except Exception as e:
+            print(f"Error fetching detection rule: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "verify":
+        print("\n[CLI] Verifying YARA-L rule text...")
+        try:
+            rule_text = _read_rule_input(args.rule_input)
+            res = engine.verify_rule(rule_text)
+            if getattr(args, "json", False):
+                print(json.dumps(res.__dict__, indent=2, default=str))
+                return
+            if res.success:
+                print("[+] YARA-L 2.0 Syntax Verification SUCCEEDED. Rule text is valid.")
+            else:
+                print("[-] YARA-L 2.0 Syntax Verification FAILED.")
+                for d in res.diagnostics:
+                    line_info = f"line {d.start_line}, col {d.start_column}" if d.start_line else "general"
+                    print(f"  * [{d.severity}] ({line_info}): {d.message}")
+            print()
+        except Exception as e:
+            print(f"Error verifying rule: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "create":
+        print("\n[CLI] Creating detection rule...")
+        try:
+            rule_text = _read_rule_input(args.rule_input)
+            r = engine.create_rule(rule_text)
+            if getattr(args, "json", False):
+                print(json.dumps(r.__dict__, indent=2, default=str))
+                return
+            print(f"[+] Detection rule created successfully: {r.display_name} ({r.rule_id})")
+            print(f"  Compilation State: {r.compilation_state}")
+            print(f"  Revision ID      : {r.revision_id}")
+            print()
+        except Exception as e:
+            print(f"Error creating rule: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "patch":
+        print(f"\n[CLI] Updating detection rule '{args.rule}'...")
+        try:
+            rule_text = _read_rule_input(args.rule_input)
+            r = engine.patch_rule(args.rule, rule_text)
+            if getattr(args, "json", False):
+                print(json.dumps(r.__dict__, indent=2, default=str))
+                return
+            print(f"[+] Detection rule updated successfully: {r.display_name} ({r.rule_id})")
+            print(f"  New Revision ID  : {r.revision_id}")
+            print(f"  Compilation State: {r.compilation_state}")
+            print()
+        except Exception as e:
+            print(f"Error updating rule: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "delete":
+        print(f"\n[CLI] Deleting detection rule '{args.rule}'...")
+        try:
+            res = engine.delete_rule(args.rule)
+            print(f"[+] Detection rule '{args.rule}' deleted successfully.")
+            print()
+        except Exception as e:
+            print(f"Error deleting rule: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "revisions":
+        print(f"\n[CLI] Listing revisions for rule '{args.rule}' (limit={args.limit})...")
+        try:
+            res = engine.list_rule_revisions(args.rule, page_size=args.limit)
+            if getattr(args, "json", False):
+                print(json.dumps([rev.__dict__ for rev in res.revisions], indent=2, default=str))
+                return
+            print(f"\n=== RULE REVISIONS: {args.rule} ({len(res.revisions)} revisions) ===")
+            if not res.revisions:
+                print("  No revisions found.")
+            else:
+                print(f"  {'REVISION ID':35s} {'COMPILATION':15s} {'REVISION TIME':30s} {'AUTHOR':20s}")
+                print("  " + "-" * 105)
+                for rev in res.revisions:
+                    print(f"  {rev.revision_id:35s} {rev.compilation_state:15s} {rev.revision_create_time[:28]:30s} {rev.author or '-':20s}")
+            print()
+        except Exception as e:
+            print(f"Error listing rule revisions: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "deployment":
+        print(f"\n[CLI] Fetching deployment status for rule '{args.rule}'...")
+        try:
+            dep = engine.get_rule_deployment(args.rule)
+            if getattr(args, "json", False):
+                print(json.dumps(dep.__dict__, indent=2, default=str))
+                return
+            print(f"\n=== RULE DEPLOYMENT: {args.rule} ===")
+            print(f"  Name            : {dep.name}")
+            print(f"  Run Frequency   : {dep.run_frequency}")
+            print(f"  Execution State : {dep.execution_state}")
+            print(f"  Enabled         : {dep.enabled}")
+            print(f"  Alerting        : {dep.alerting}")
+            print(f"  Last Alert Chg  : {dep.last_alert_status_change_time or '-'}")
+            print()
+        except Exception as e:
+            print(f"Error fetching rule deployment: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "set-deployment":
+        print(f"\n[CLI] Updating deployment settings for rule '{args.rule}'...")
+        try:
+            enabled = True if args.enabled else (False if args.disabled else None)
+            alerting = True if args.alerting else (False if args.no_alerting else None)
+            dep = engine.update_rule_deployment(
+                args.rule,
+                enabled=enabled,
+                alerting=alerting,
+                run_frequency=args.frequency,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps(dep.__dict__, indent=2, default=str))
+                return
+            print(f"[+] Rule deployment updated: {args.rule}")
+            print(f"  Run Frequency   : {dep.run_frequency}")
+            print(f"  Execution State : {dep.execution_state}")
+            print(f"  Enabled         : {dep.enabled}")
+            print(f"  Alerting        : {dep.alerting}")
+            print()
+        except Exception as e:
+            print(f"Error updating rule deployment: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "errors":
+        print(f"\n[CLI] Listing rule execution errors (limit={args.limit})...")
+        try:
+            res = engine.list_rule_errors(args.rule, page_size=args.limit)
+            if getattr(args, "json", False):
+                print(json.dumps([err.__dict__ for err in res.errors], indent=2, default=str))
+                return
+            print(f"\n=== RULE EXECUTION ERRORS ({len(res.errors)} errors) ===")
+            if not res.errors:
+                print("  No rule execution errors found.")
+            else:
+                print(f"  {'RULE ID':45s} {'ERROR CODE':12s} {'START TIME':25s} {'MESSAGE':40s}")
+                print("  " + "-" * 125)
+                for err in res.errors:
+                    print(f"  {err.rule_id:45s} {str(err.error_code):12s} {err.start_time[:24]:25s} {err.error_message[:38]:40s}")
+            print()
+        except Exception as e:
+            print(f"Error listing rule errors: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "audit":
+        from runbooks.operations.yara_l_rules_audit import (
+            generate_yara_l_rules_audit_report,
+            print_yara_l_rules_audit_console,
+        )
+        print(f"\n[CLI] Running YARA-L detection rules audit (limit={args.limit})...")
+        try:
+            report = generate_yara_l_rules_audit_report(
+                engine=engine,
+                page_size=args.limit,
+                filter_expr=args.filter,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps(report, indent=2, default=str))
+                return
+            print_yara_l_rules_audit_console(report)
+            if getattr(args, "out", None):
+                with open(args.out, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, default=str)
+                print(f"[+] Audit report written to {args.out}")
+        except Exception as e:
+            print(f"Error executing rules audit: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
 
 
 def run_investigate_cli(args):
@@ -3827,8 +5032,11 @@ def run_search_cli(args):
 
     last_state = None
 
-    def on_state_change(session: SearchSession):
+    def on_state_change(*args, **kwargs):
         nonlocal last_state
+        session = args[-1] if args else kwargs.get("session")
+        if not session or not hasattr(session, "lifecycle"):
+            return
         if session.lifecycle != last_state:
             last_state = session.lifecycle
             if session.lifecycle == LifecycleState.VALIDATING:
@@ -3849,7 +5057,9 @@ def run_search_cli(args):
     print(f"\n[bold green]Initiating Search Session...[/bold green]")
 
     def on_batch(batch: SearchBatchResult, session: SearchSession):
-        prov_info = f" [dim](Op: {batch.operation_id[-12:] if batch.operation_id else 'N/A'}, idx: {batch.start_index}-{batch.end_index})[/dim]"
+        s_idx = getattr(batch, "returned_start_index", getattr(batch, "requested_start_index", 1))
+        e_idx = getattr(batch, "returned_end_index", getattr(batch, "requested_end_index", 1))
+        prov_info = f" [dim](Op: {batch.operation_id[-12:] if batch.operation_id else 'N/A'}, idx: {s_idx}-{e_idx})[/dim]"
         print(
             f" [bold blue]➜ Batch received:[/bold blue] {batch.batch_count} events "
             f"(Total so far: {session.received_count}){prov_info}"

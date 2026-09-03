@@ -24,6 +24,8 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
             "case_alert.create_recommendation",
             "case_alert.fetch_recommendation",
             "case_alert.get_recommendation",
+            "case.get_or_create_summary",
+            "case.get_summary",
         ]
         for cap_id in expected_ids:
             self.assertIn(cap_id, capabilities, f"Missing registered capability: {cap_id}")
@@ -173,6 +175,24 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
         self.assertEqual(wf_rec.case_id, target_case_id)
         self.assertTrue(bool(wf_rec.recommendation_id))
         self.assertIn(wf_rec.state, ("SUCCEEDED", "RUNNING", "FAILED", "UNSPECIFIED"))
+
+    def test_live_case_ai_summary_lifecycle(self):
+        """Tests retrieving/generating a Gemini AI Case Summary against live endpoints."""
+        target_case_id = "104655"
+
+        # 1. Test get_or_create_case_summary
+        summary = self.engine.get_or_create_case_summary(case_id=target_case_id)
+        self.assertEqual(summary.case_id, target_case_id)
+        self.assertIn(summary.state, ("SUCCESSFUL", "IN_PROGRESS", "PENDING_START", "ERROR", "SUMMARY_STATE_UNSPECIFIED"))
+        if summary.state == "SUCCESSFUL":
+            self.assertTrue(bool(summary.summary))
+            self.assertIsInstance(summary.reasons, list)
+            self.assertIsInstance(summary.next_steps, list)
+
+        # 2. Test get_case_summary polled workflow
+        polled_summary = self.engine.get_case_summary(case_id=target_case_id, timeout_sec=15.0, poll_interval_sec=2.0)
+        self.assertEqual(polled_summary.case_id, target_case_id)
+        self.assertIn(polled_summary.state, ("SUCCESSFUL", "IN_PROGRESS", "PENDING_START", "ERROR", "SUMMARY_STATE_UNSPECIFIED"))
 
 
 if __name__ == "__main__":

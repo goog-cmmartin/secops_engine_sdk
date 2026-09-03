@@ -1,5 +1,3 @@
-"""Unit tests for SecOps TUI Components, Workspaces, Command Launcher, and Alert Rendering."""
-
 import unittest
 from datetime import datetime, timezone
 from engine.domain import (
@@ -18,12 +16,12 @@ try:
     from clients.tui.command_launcher import CommandItem, CommandLauncherModal, default_commands
     from clients.tui.app import SecOpsTUI
     from clients.tui.views.case_view import CaseWorkspaceView
-    _HAS_TUI_DEPS = True
+    HAS_TUI = True
 except (ImportError, ModuleNotFoundError):
-    _HAS_TUI_DEPS = False
+    HAS_TUI = False
 
 
-@unittest.skipUnless(_HAS_TUI_DEPS, "textual/rich dependencies not installed in test environment")
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestTUIRenderHelpers(unittest.TestCase):
     """Test pure rendering functions in render.py."""
 
@@ -112,7 +110,7 @@ class TestTUIRenderHelpers(unittest.TestCase):
         self.assertIsNotNone(card)
 
 
-@unittest.skipUnless(_HAS_TUI_DEPS, "textual/rich dependencies not installed in test environment")
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestCommandLauncher(unittest.TestCase):
     """Test command launcher items and filtering."""
 
@@ -130,7 +128,7 @@ class TestCommandLauncher(unittest.TestCase):
         self.assertEqual(len(modal._filtered_commands), len(default_commands()))
 
 
-@unittest.skipUnless(_HAS_TUI_DEPS, "textual/rich dependencies not installed in test environment")
+@unittest.skipUnless(HAS_TUI, "Textual and Rich packages not installed")
 class TestTUIAppInit(unittest.TestCase):
     """Test TUI application instantiation and workspace composition."""
 

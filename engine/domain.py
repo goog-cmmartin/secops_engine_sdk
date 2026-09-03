@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -636,6 +638,40 @@ class CaseCommentRecord:
 
 
 @dataclass
+class CaseWallRecord:
+    case_id: str
+    activity_id: str
+    activity_type: str
+    activity_kind: str
+    creator_user_id: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    alert_identifier: Optional[str] = None
+    description: str = ""
+    details: Dict[str, Any] = field(default_factory=dict)
+    favorite: bool = False
+    name: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def created_time(self) -> Optional[datetime]:
+        return self.create_time
+
+
+@dataclass
+class CaseWallResult:
+    case_id: str
+    records: List[CaseWallRecord] = field(default_factory=list)
+    total_size: int = 0
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+@dataclass
 class CaseInvestigation:
     case_id: str
     name: str
@@ -676,6 +712,14 @@ class CaseInvestigation:
     @property
     def description(self) -> str:
         return str(self.raw_case.get("description", ""))
+
+    @property
+    def is_incident(self) -> bool:
+        return bool(
+            self.raw_case.get("isIncident", False)
+            or self.raw_case.get("is_incident", False)
+            or str(self.stage).lower() == "incident"
+        )
 
 
 @dataclass
@@ -745,6 +789,125 @@ class CaseSearchBatch(UniversalBatchMixin):
     def items(self) -> List[CaseSearchResultItem]:
         """Uniform alias for batch results across all engine domains."""
         return self.results
+
+
+class TriageVerdict(str, Enum):
+    CRITICAL_ESCALATION = "CRITICAL_ESCALATION"
+    HIGH_PRIORITY_INVESTIGATION = "HIGH_PRIORITY_INVESTIGATION"
+    CONTAINMENT_REQUIRED = "CONTAINMENT_REQUIRED"
+    NOVEL_DETECTION = "NOVEL_DETECTION"
+    REPEAT_RESOLVED_DUPLICATE = "REPEAT_RESOLVED_DUPLICATE"
+    REPEAT_ACTIVE_CAMPAIGN = "REPEAT_ACTIVE_CAMPAIGN"
+    STANDARD_TRIAGE = "STANDARD_TRIAGE"
+    CLOSED_NO_ACTION = "CLOSED_NO_ACTION"
+    INFORMATIONAL = "INFORMATIONAL"
+
+
+@dataclass
+class EntityPrecedentItem:
+    """Historical case correlation for a single entity indicator."""
+    entity_identifier: str
+    entity_type: Optional[str] = None
+    prior_case_count: int = 0
+    recent_case_ids: List[str] = field(default_factory=list)
+    active_incident_count: int = 0
+    is_frequent: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CasePrecedentSummary:
+    """Historical case precedent correlation across title and involved entities."""
+    target_case_id: str
+    title_query: str = ""
+    title_prior_case_count: int = 0
+    title_prior_case_ids: List[str] = field(default_factory=list)
+    title_closed_count: int = 0
+    title_incident_count: int = 0
+    entity_precedents: List[EntityPrecedentItem] = field(default_factory=list)
+    total_entity_matches: int = 0
+    is_novel: bool = False
+    is_repeat: bool = False
+    repeat_case_ids: List[str] = field(default_factory=list)
+    precedent_notes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class CaseTimelineEvent:
+    """A chronological event or milestone within a case's investigation lifecycle."""
+    timestamp: Optional[datetime]
+    event_type: str  # "CASE_CREATED", "ALERT", "PLAYBOOK", "COMMENT", "CASE_UPDATED"
+    title: str
+    description: str
+    source_id: Optional[str] = None
+    severity: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseTimeline:
+    """A chronologically sorted sequence of events and milestones associated with a case."""
+    case_id: str
+    events: List[CaseTimelineEvent] = field(default_factory=list)
+    earliest_time: Optional[datetime] = None
+    latest_time: Optional[datetime] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def event_count(self) -> int:
+        return len(self.events)
+
+
+@dataclass
+class CaseTriageAssessment:
+    case_id: str
+    title: str
+    priority: CasePriority
+    status: CaseStatus
+    stage: str
+    is_closed: bool = False
+    is_incident: bool = False
+    alert_count: int = 0
+    highest_alert_priority: str = "UNKNOWN"
+    suspicious_entity_count: int = 0
+    suspicious_entities: List[str] = field(default_factory=list)
+    comment_count: int = 0
+    latest_comment: Optional[str] = None
+    triage_verdict: TriageVerdict = TriageVerdict.STANDARD_TRIAGE
+    triage_summary: str = ""
+    recommended_actions: List[str] = field(default_factory=list)
+    suggested_agent_prompt: str = ""
+    assigned_user: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    environment: str = ""
+    tags: List[str] = field(default_factory=list)
+    raw_case: Dict[str, Any] = field(default_factory=dict)
+    investigation: Optional[CaseInvestigation] = None
+    gemini_summary: Optional[CaseSummary] = None
+    precedent_summary: Optional[CasePrecedentSummary] = None
+    is_novel: bool = False
+    is_repeat: bool = False
+    prior_case_count: int = 0
+    suggested_stage_transition: Optional[str] = None
+    alert_playbook_statuses: List[AlertPlaybookStatus] = field(default_factory=list)
+    timeline: Optional[CaseTimeline] = None
+
+
+@dataclass
+class CaseTriageBatch(UniversalBatchMixin):
+    results: List[CaseTriageAssessment]
+    total_cases_analyzed: int = 0
+    open_cases_count: int = 0
+    closed_cases_count: int = 0
+    critical_high_count: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CaseTriageAssessment]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.results
+
 
 
 class PlaybookType(str, Enum):
@@ -1572,9 +1735,9 @@ class DashboardSummary:
     type: str  # CUSTOM, DEFAULT, etc.
     create_time: str
     update_time: str
-    create_user_id: str
-    update_user_id: str
-    access: str
+    create_user_id: str = ""
+    update_user_id: str = ""
+    access: str = ""
     charts_count: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -1610,11 +1773,11 @@ class DashboardChart:
     name: str
     display_name: str
     description: str
-    tile_type: str
-    chart_type: str
-    data_sources: List[str]
-    visualization: Dict[str, Any]
-    drill_down_config: Dict[str, Any]
+    chart_type: str = ""
+    tile_type: str = ""
+    data_sources: List[str] = field(default_factory=list)
+    visualization: Dict[str, Any] = field(default_factory=dict)
+    drill_down_config: Dict[str, Any] = field(default_factory=dict)
     layout: Optional[DashboardChartLayout] = None
     query: Optional[DashboardQuery] = None
     query_name: Optional[str] = None
@@ -1631,7 +1794,6 @@ class DashboardDetail:
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
 @dataclass
 class DashboardSearchQuery:
     """Query parameters for filtering dashboards."""
@@ -1704,6 +1866,170 @@ class FeedBatch(UniversalBatchMixin):
     feeds: List[FeedSummary]
     total_count: int
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FeedHealthStatus(str, Enum):
+    """Health classification status for an ingestion feed."""
+    HEALTHY = "HEALTHY"
+    IRREGULAR = "IRREGULAR"
+    FAILED = "FAILED"
+    HIGH_LATENCY = "HIGH_LATENCY"
+    SILENT_PUSH_STOP = "SILENT_PUSH_STOP"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class FeedHealthFinding:
+    """Actionable finding representing the operational health of a feed."""
+    feed_id: str
+    feed_name: str
+    source_type: str
+    log_type: str
+    status: FeedHealthStatus
+    state: str = "UNKNOWN"
+    collector_name: Optional[str] = None
+    latency_p95: Optional[str] = None
+    last_event_time: Optional[str] = None
+    event_count_recent: int = 0
+    volume_funnel: Dict[str, int] = field(default_factory=dict)
+    quota_rejected_volume_mb: float = 0.0
+    quota_limit_mb_per_sec: float = 0.0
+    anomaly_description: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class FeedHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all ingestion feeds."""
+    findings: List[FeedHealthFinding]
+    healthy_count: int = 0
+    irregular_count: int = 0
+    failed_count: int = 0
+    high_latency_count: int = 0
+    quota_rejections_detected: int = 0
+    total_feeds_audited: int = 0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[FeedHealthFinding]:
+        return self.findings
+
+
+class ParserHealthStatus(str, Enum):
+    """Health classification status for a SIEM parser / log type normalizer."""
+    HEALTHY = "HEALTHY"
+    IRREGULAR = "IRREGULAR"
+    FAILED = "FAILED"
+    VERSION_DRIFT = "VERSION_DRIFT"
+    EXTENSION_CONFLICT = "EXTENSION_CONFLICT"
+    INACTIVE_NO_PARSER = "INACTIVE_NO_PARSER"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class ParserHealthFinding:
+    """Actionable finding representing the operational health of a parser or normalizer."""
+    log_type: str
+    parser_id: str
+    status: ParserHealthStatus
+    state: str = "UNKNOWN"
+    creator_source: str = "UNKNOWN"
+    collector_name: Optional[str] = None
+    version: str = ""
+    latest_version: str = ""
+    rollback_available: bool = False
+    has_extension: bool = False
+    extension_id: Optional[str] = None
+    extension_state: Optional[str] = None
+    dynamic_parsing_enabled: bool = False
+    opted_fields_count: int = 0
+    drop_reason_code: Optional[str] = None
+    zscore_anomaly_detail: Optional[str] = None
+    anomalous_since: Optional[str] = None
+    last_normalization_time: Optional[str] = None
+    event_latency: Optional[str] = None
+    volume_funnel: Dict[str, int] = field(default_factory=dict)
+    quota_rejected_volume_mb: float = 0.0
+    quota_limit_mb_per_sec: float = 0.0
+    anomaly_description: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ParserHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all SIEM parsers and extensions."""
+    findings: List[ParserHealthFinding]
+    healthy_count: int = 0
+    irregular_count: int = 0
+    failed_count: int = 0
+    version_drift_count: int = 0
+    extension_conflict_count: int = 0
+    quota_rejections_detected: int = 0
+    total_parsers_audited: int = 0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[ParserHealthFinding]:
+        return self.findings
+
+
+class RuleHealthStatus(str, Enum):
+    """Operational health classification for a Chronicle YARA-L rule."""
+    HEALTHY = "HEALTHY"
+    EXECUTION_ERROR = "EXECUTION_ERROR"
+    COMPILATION_ERROR = "COMPILATION_ERROR"
+    HIGH_LATENCY = "HIGH_LATENCY"
+    SILENT_DECAY = "SILENT_DECAY"
+    MISCONFIGURED_ALERTING = "MISCONFIGURED_ALERTING"
+    DISABLED = "DISABLED"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class RuleHealthFinding:
+    """Actionable finding representing the operational health of a detection rule."""
+    rule_id: str
+    display_name: str
+    rule_owner: str = "CUSTOMER"  # CUSTOMER or GOOGLE
+    severity: str = "MEDIUM"
+    status: RuleHealthStatus = RuleHealthStatus.HEALTHY
+    enabled: bool = True
+    alerting: bool = True
+    run_frequency: str = "LIVE"
+    detection_count_recent: int = 0
+    execution_error_count: int = 0
+    last_error_message: Optional[str] = None
+    ingestion_to_detection_latency_min: Optional[float] = None
+    event_to_detection_latency_min: Optional[float] = None
+    mitre_tactics: List[str] = field(default_factory=list)
+    mitre_techniques: List[str] = field(default_factory=list)
+    details: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleHealthReport(UniversalBatchMixin):
+    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets."""
+    findings: List[RuleHealthFinding]
+    healthy_count: int = 0
+    failing_count: int = 0
+    decay_count: int = 0
+    latency_alert_count: int = 0
+    misconfigured_count: int = 0
+    disabled_count: int = 0
+    total_rules_audited: int = 0
+    total_detections_24h: int = 0
+    average_risk_score: float = 0.0
+    top_mitre_tactics: List[Dict[str, Any]] = field(default_factory=list)
+    top_threat_categories: List[Dict[str, Any]] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[RuleHealthFinding]:
+        return self.findings
 
 
 @dataclass
@@ -2981,6 +3307,373 @@ class CaseAlertRecommendation:
     status_message: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CaseSummary:
+    """Gemini AI Case Summary containing high-level overview, reasons, and recommended next steps."""
+    case_id: str
+    state: str = "SUMMARY_STATE_UNSPECIFIED"
+    summary: Optional[str] = None
+    reasons: List[str] = field(default_factory=list)
+    next_steps: List[str] = field(default_factory=list)
+    markdown_results: Optional[Dict[str, Any]] = None
+    update_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class DataTableColumnInfo:
+    """Column definition within a Google Chronicle SIEM Data Table."""
+    column_index: int
+    original_column: str
+    column_type: str = "STRING"
+    mapped_column_path: Optional[str] = None
+    key_column: bool = False
+    repeated_values: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def column_name(self) -> str:
+        """Alias for original_column."""
+        return self.original_column
+
+    @property
+    def data_type(self) -> str:
+        """Alias for column_type."""
+        return self.column_type
+
+    @property
+    def is_key_column(self) -> bool:
+        """Alias for key_column."""
+        return self.key_column
+
+
+@dataclass
+class DataTableRow:
+    """Single row of values inside a Google Chronicle SIEM Data Table."""
+    name: str
+    values: List[str] = field(default_factory=list)
+    id: str = ""
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    row_time_to_live: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.id and self.name:
+            self.id = self.name.split("/")[-1]
+
+    @property
+    def row_id(self) -> str:
+        """Alias for the row identifier."""
+        return self.id
+
+
+@dataclass
+class DataTable:
+    """Google Chronicle SIEM structured Data Table metadata and schema."""
+    name: str
+    id: str
+    display_name: str
+    description: Optional[str] = None
+    column_info: List[DataTableColumnInfo] = field(default_factory=list)
+    approximate_row_count: Optional[int] = None
+    rule_associations_count: Optional[int] = None
+    rules: List[str] = field(default_factory=list)
+    row_time_to_live: Optional[str] = None
+    scope_info: Optional[Dict[str, Any]] = None
+    data_table_uuid: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def table_id(self) -> str:
+        """Alias for the data table identifier."""
+        return self.id
+
+
+@dataclass
+class DataTableListResult:
+    """Result container for listed Chronicle SIEM Data Tables."""
+    tables: List[DataTable]
+    next_page_token: Optional[str] = None
+    total_size: Optional[int] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[DataTable]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.tables
+
+    @property
+    def data_tables(self) -> List[DataTable]:
+        """Convenience alias for listed tables."""
+        return self.tables
+
+
+@dataclass
+class DataTableRowListResult:
+    """Result container for listed rows within a Chronicle SIEM Data Table."""
+    table_name: str
+    rows: List[DataTableRow]
+    next_page_token: Optional[str] = None
+    total_size: Optional[int] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[DataTableRow]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.rows
+
+
+@dataclass
+class RuleSeverity:
+    """Severity classification for a detection rule."""
+    name: str = ""
+    display_name: str = ""
+
+
+@dataclass
+class RuleCompilationDiagnostic:
+    """Diagnostic message from YARA-L rule compilation / validation."""
+    message: str = ""
+    severity: str = ""
+    start_line: Optional[int] = None
+    start_column: Optional[int] = None
+    end_line: Optional[int] = None
+    end_column: Optional[int] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleValidationResult:
+    """Result of YARA-L rule verification / validation."""
+    success: bool = False
+    diagnostics: List[RuleCompilationDiagnostic] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleDeployment:
+    """Deployment configuration and status for a Chronicle SIEM rule."""
+    name: str = ""
+    run_frequency: str = "LIVE"
+    execution_state: str = "DEFAULT"
+    enabled: bool = False
+    alerting: bool = False
+    last_alert_status_change_time: str = ""
+    display_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleExecutionError:
+    """Execution / runtime error record for a detection rule."""
+    name: str = ""
+    error_code: int = 0
+    error_message: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    rule_resource_name: str = ""
+    curated_rule: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        target = self.rule_resource_name or self.curated_rule
+        return target.split("/")[-1] if target else ""
+
+
+@dataclass
+class RuleExecutionErrorListResult:
+    """Result container for rule execution errors."""
+    errors: List[RuleExecutionError] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleExecutionError]:
+        return self.errors
+
+
+@dataclass
+class RuleSummary:
+    """Summary representation of a Chronicle SIEM custom detection rule."""
+    name: str
+    display_name: str
+    author: str = ""
+    severity: str = "INFO"
+    rule_type: str = "SINGLE_EVENT"
+    allowed_run_frequencies: List[str] = field(default_factory=list)
+    near_real_time_live_rule_eligible: bool = False
+    etag: str = ""
+    rule_text_tags: List[str] = field(default_factory=list)
+    time_window_duration: str = ""
+    create_time: str = ""
+    revision_id: str = ""
+    run_frequency: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        return self.name.split("/")[-1].split("@")[0] if self.name else ""
+
+
+@dataclass
+class RuleDetail:
+    """Full detail of a Chronicle SIEM detection rule including YARA-L logic."""
+    name: str
+    display_name: str
+    text: str
+    revision_id: str = ""
+    author: str = ""
+    severity: str = "INFO"
+    metadata: Dict[str, str] = field(default_factory=dict)
+    create_time: str = ""
+    revision_create_time: str = ""
+    compilation_state: str = "SUCCEEDED"
+    rule_type: str = "SINGLE_EVENT"
+    allowed_run_frequencies: List[str] = field(default_factory=list)
+    etag: str = ""
+    near_real_time_live_rule_eligible: bool = False
+    inputs_used: Dict[str, Any] = field(default_factory=dict)
+    rule_owner: str = "CUSTOMER"
+    run_frequency: str = "LIVE"
+    rule_language: str = "YARA_L_2_0"
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        return self.name.split("/")[-1].split("@")[0] if self.name else ""
+
+    @property
+    def yara_l_code(self) -> str:
+        return self.text
+
+
+@dataclass
+class RuleListResult:
+    """Result container for listed Chronicle SIEM detection rules."""
+    rules: List[RuleSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleSummary]:
+        return self.rules
+
+
+@dataclass
+class RuleRevisionListResult:
+    """Result container for listed revisions of a detection rule."""
+    rule_id: str
+    revisions: List[RuleDetail] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleDetail]:
+        return self.revisions
+
+
+class DashboardHealthStatus(str, Enum):
+    """Classification states for Google SecOps Native Dashboards."""
+    HEALTHY = "HEALTHY"
+    RECENTLY_CREATED = "RECENTLY_CREATED"
+    RECENTLY_MODIFIED = "RECENTLY_MODIFIED"
+    BROKEN_QUERY = "BROKEN_QUERY"
+    EMPTY_DASHBOARD = "EMPTY_DASHBOARD"
+    ORPHAN_CHART = "ORPHAN_CHART"
+    STALE = "STALE"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class DashboardHealthFinding:
+    """Detailed health, recency, and syntax evaluation for a single dashboard."""
+    dashboard_id: str
+    display_name: str
+    dashboard_type: str  # CUSTOM, CURATED, DEFAULT
+    create_user_id: str
+    update_user_id: str
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    charts_count: int
+    broken_queries_count: int
+    status: DashboardHealthStatus
+    details: str
+    remediation_steps: List[str] = field(default_factory=list)
+    broken_query_details: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DashboardHealthReport:
+    """Comprehensive health and lifecycle audit report for Google SecOps dashboards."""
+    total_dashboards_audited: int
+    healthy_count: int
+    recently_created_count: int
+    recently_modified_count: int
+    broken_query_count: int
+    empty_dashboard_count: int
+    stale_count: int
+    custom_count: int
+    curated_count: int
+    findings: List[DashboardHealthFinding] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DataTableHealthStatus(str, Enum):
+    """Health classification and governance status for Data Tables."""
+    HEALTHY = "HEALTHY"
+    EMPTY_REFERENCED = "EMPTY_REFERENCED"
+    ORPHAN = "ORPHAN"
+    RECENTLY_CREATED = "RECENTLY_CREATED"
+    RECENTLY_MODIFIED = "RECENTLY_MODIFIED"
+    SCHEMA_ISSUE = "SCHEMA_ISSUE"
+    STALE = "STALE"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class DataTableHealthFinding:
+    """Actionable health and lineage finding for an individual Data Table."""
+    table_id: str
+    display_name: str
+    description: Optional[str]
+    approximate_row_count: Optional[int]
+    column_count: int
+    key_columns: List[str]
+    row_time_to_live: Optional[str]
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    associated_rules: List[str]
+    associated_dashboards: List[str]
+    rule_associations_count: int
+    status: DataTableHealthStatus
+    details: str
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DataTableHealthReport:
+    """Comprehensive health, lineage, and governance audit report for Data Tables."""
+    total_tables_audited: int
+    healthy_count: int
+    empty_referenced_count: int
+    orphan_count: int
+    recently_created_count: int
+    recently_modified_count: int
+    stale_count: int
+    schema_issue_count: int
+    findings: List[DataTableHealthFinding] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 
 
 

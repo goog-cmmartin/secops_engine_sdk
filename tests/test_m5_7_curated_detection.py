@@ -23,6 +23,7 @@ from engine.domain import (
     CuratedPrecision,
     CuratedRuleDetail,
     CuratedRuleSetBatch,
+    CuratedRuleSetDeployment,
     CuratedRuleSetDetail,
     CuratedRuleSetSummary,
     CuratedRuleSummary,
@@ -133,7 +134,28 @@ class TestCuratedDetectionsLive(unittest.TestCase):
             self.assertIn("count", first_hit)
             self.assertGreaterEqual(first_hit["count"], 0)
 
-    def test_06_capabilities_registered(self):
+    def test_06_set_curated_ruleset_deployment(self):
+        """Verify updating a curated rule set deployment state (enable/disable, alerting)."""
+        # Fetch current deployment state
+        detail = self.engine.get_curated_ruleset("Azure - Network")
+        precise_dep = next((d for d in detail.deployments if d.precision == "PRECISE"), None)
+        self.assertIsNotNone(precise_dep, "Expected PRECISE deployment for 'Azure - Network'")
+
+        # Re-apply current enabled and alerting settings to verify round-trip without changing tenant desired state
+        updated = self.engine.set_curated_ruleset_deployment(
+            ruleset_id_or_title="Azure - Network",
+            precision="PRECISE",
+            enabled=precise_dep.enabled,
+            alerting=precise_dep.alerting,
+            sync_rules=True,
+        )
+        self.assertIsInstance(updated, CuratedRuleSetDeployment)
+        self.assertEqual(updated.precision, "PRECISE")
+        self.assertEqual(updated.enabled, precise_dep.enabled)
+        self.assertEqual(updated.alerting, precise_dep.alerting)
+        self.assertTrue(updated.resource_name.endswith("/curatedRuleSetDeployments/precise"))
+
+    def test_07_capabilities_registered(self):
         """Verify engine capability registry exposes curated_detections.*."""
         caps = registry.list_capabilities(category="curated_detections")
         cap_ids = {c.capability_id for c in caps}
@@ -143,10 +165,11 @@ class TestCuratedDetectionsLive(unittest.TestCase):
             "curated_detections.get_ruleset",
             "curated_detections.get_rule",
             "curated_detections.metrics",
+            "curated_detections.set_deployment",
         }
         self.assertTrue(expected.issubset(cap_ids), f"Missing capabilities: {expected - cap_ids}")
 
-    def test_07_static_anti_mock_audit(self):
+    def test_08_static_anti_mock_audit(self):
         """Audit curated detections implementation for banned mock/synthetic patterns."""
         banned_terms = [
             "mock",

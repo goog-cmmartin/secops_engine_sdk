@@ -444,3 +444,76 @@ class GetCuratedDetectionMetricsWorkflow:
             time_interval={"startTime": start_iso, "endTime": end_iso},
             retrieved_at=now,
         )
+
+
+class SetCuratedRuleSetDeploymentWorkflow:
+    """Updates deployment state (enabled/alerting) for a Curated Rule Set precision profile."""
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def execute(
+        self,
+        ruleset_id_or_title: str,
+        precision: str = "PRECISE",
+        enabled: Optional[bool] = None,
+        alerting: Optional[bool] = None,
+        sync_rules: bool = True,
+    ) -> CuratedRuleSetDeployment:
+        if not ruleset_id_or_title or not ruleset_id_or_title.strip():
+            raise ValueError("Curated Rule Set identifier or title is required")
+
+        prec_normalized = precision.strip().upper()
+        if prec_normalized not in ["PRECISE", "BROAD"]:
+            raise ValueError(f"Invalid precision mode '{precision}'. Must be 'PRECISE' or 'BROAD'")
+
+        if enabled is None and alerting is None:
+            raise ValueError("At least one of 'enabled' or 'alerting' must be specified to update deployment")
+
+        identifier = ruleset_id_or_title.strip()
+
+        # If identifier is already a full deployment resource name:
+        if "/curatedRuleSetDeployments/" in identifier:
+            deployment_name = identifier
+        else:
+            # 1. Resolve ruleset resource name
+            if identifier.startswith("projects/") and "/curatedRuleSets/" in identifier:
+                ruleset_resource_name = identifier
+            else:
+                # Search all rulesets to match ID or title
+                raw_res = self.adapter.list_curated_rulesets(page_size=1000)
+                raw_rulesets = raw_res.get("curatedRuleSets", []) if isinstance(raw_res, dict) else []
+                target_raw: Optional[Dict[str, Any]] = None
+                for r in raw_rulesets:
+                    r_name = r.get("name", "")
+                    r_id = r_name.split("/")[-1] if r_name else ""
+                    r_title = r.get("displayName", "")
+                    if (
+                        identifier.lower() == r_id.lower()
+                        or identifier.lower() == r_name.lower()
+                        or identifier.lower() == r_title.lower()
+                        or identifier.lower() in r_title.lower()
+                    ):
+                        target_raw = r
+                        break
+
+                if not target_raw:
+                    raise ValueError(f"Curated Rule Set not found: '{ruleset_id_or_title}'")
+                ruleset_resource_name = target_raw.get("name", "")
+
+            # Construct deployment resource name
+            deployment_name = f"{ruleset_resource_name}/curatedRuleSetDeployments/{prec_normalized.lower()}"
+
+        # 2. Execute patch
+        updated_raw = self.adapter.update_curated_ruleset_deployment(
+            deployment_name=deployment_name,
+            enabled=enabled,
+            alerting=alerting,
+            sync_rules=sync_rules,
+        )
+
+        return _map_curated_deployment(updated_raw)
+

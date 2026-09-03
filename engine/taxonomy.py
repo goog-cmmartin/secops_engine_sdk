@@ -82,6 +82,8 @@ COLLECTION_RESULT_VERBS = frozenset({
     "list_log_types",
     "revisions",
     "errors",
+    "list_comments",
+    "get_wall",
 })
 
 # Verb suffixes (the final dotted segment of a capability_id) that denote a
@@ -113,6 +115,8 @@ READ_VERB_SUFFIXES = frozenset({
     "verify",
     "revisions",
     "errors",
+    "list_comments",
+    "get_wall",
 })
 
 

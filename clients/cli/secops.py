@@ -116,6 +116,64 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_search_cmd.add_argument("--limit", type=int, default=20, help="Results page size (default: 20)")
     case_search_cmd.add_argument("--page", type=int, default=0, help="Page number (default: 0)")
 
+    case_triage_single_cmd = case_sub.add_parser(
+        "triage",
+        help="End-to-end single case triage: investigation, Gemini AI summary, title/entity precedents, novelty, and updates",
+    )
+    case_triage_single_cmd.add_argument("case_id", help="Case ID to triage (e.g. 104839)")
+    case_triage_single_cmd.add_argument("--summary", action="store_true", default=True, help="Fetch and analyze Gemini AI summary (default: True)")
+    case_triage_single_cmd.add_argument("--no-summary", action="store_false", dest="summary", help="Skip Gemini AI summary")
+    case_triage_single_cmd.add_argument("--precedents", action="store_true", default=True, help="Search historical title and entity precedents (default: True)")
+    case_triage_single_cmd.add_argument("--no-precedents", action="store_false", dest="precedents", help="Skip precedent search")
+    case_triage_single_cmd.add_argument("--update-stage", action="store_true", default=False, help="Auto-apply suggested stage update in SecOps")
+    case_triage_single_cmd.add_argument("--comment", action="store_true", default=False, help="Post structured triage report as a case comment")
+    case_triage_single_cmd.add_argument("--generate-prompts", action="store_true", default=False, help="Output ready-to-use Antigravity subagent dispatch prompts")
+    case_triage_single_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_timeline_cmd = case_sub.add_parser(
+        "timeline",
+        help="Synthesize and display a chronological event timeline for a case",
+    )
+    case_timeline_cmd.add_argument("case_id", help="Case ID (e.g. 104839)")
+    case_timeline_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_comments_cmd = case_sub.add_parser(
+        "comments",
+        help="List analyst comments and AI assessment notes for a case",
+    )
+    case_comments_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_comments_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_wall_cmd = case_sub.add_parser(
+        "wall",
+        help="Retrieve the complete SOAR case activity wall records",
+    )
+    case_wall_cmd.add_argument("case_id", help="Case ID (e.g. 104839)")
+    case_wall_cmd.add_argument("--limit", "-n", type=int, default=50, help="Number of records to retrieve (default: 50)")
+    case_wall_cmd.add_argument("--type", choices=["CASE_STATUS_CHANGE", "CASE_ACTION", "CASE_COMMENT"], help="Filter by activity type")
+    case_wall_cmd.add_argument("--page-token", help="Pagination token for subsequent pages")
+    case_wall_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
+    case_triage_cmd = case_sub.add_parser(
+        "orchestrate-triage",
+        aliases=["triage-batch"],
+        help="Batch retrieve latest SOAR cases, perform deep investigation, and derive triage verdicts",
+    )
+    case_triage_cmd.add_argument("--case-id", "-c", action="append", default=[], help="Specific Case ID(s) to triage (can be specified multiple times)")
+    case_triage_cmd.add_argument("--limit", "-n", type=int, default=5, help="Number of cases to retrieve and triage (default: 5)")
+    case_triage_cmd.add_argument("--all-statuses", action="store_true", default=False, help="Include closed cases (default: open only)")
+    case_triage_cmd.add_argument("--query", "-q", default="", help="Optional search query filter")
+    case_triage_cmd.add_argument("--priority", "-p", action="append", default=[], help="Filter by priority (LOW, MEDIUM, HIGH, CRITICAL)")
+    case_triage_cmd.add_argument("--stage", "-s", action="append", default=[], help="Filter by stage")
+    case_triage_cmd.add_argument("--tag", "-t", action="append", default=[], help="Filter by tag")
+    case_triage_cmd.add_argument("--environment", "-env", action="append", default=[], help="Filter by environment")
+    case_triage_cmd.add_argument("--assignee", "-u", action="append", default=[], help="Filter by assignee")
+    case_triage_cmd.add_argument("--summary", action="store_true", default=False, help="Fetch Gemini AI case summaries for each candidate (default: False)")
+    case_triage_cmd.add_argument("--precedents", action="store_true", default=True, help="Search historical title and entity precedents (default: True)")
+    case_triage_cmd.add_argument("--no-precedents", action="store_false", dest="precedents", help="Skip precedent search")
+    case_triage_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+    case_triage_cmd.add_argument("--generate-prompts", action="store_true", default=False, help="Output ready-to-use Antigravity subagent dispatch prompts")
+
     case_update_cmd = case_sub.add_parser("update", help="Update case attributes (assignee, stage, incident, priority)")
     case_update_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
     case_update_cmd.add_argument("--assignee", "-a", help="Assign to SOC role (@Tier1) or user GUID")
@@ -1339,6 +1397,332 @@ def run_case_cli(args):
                 print(f"     Tags    : {', '.join(c.tags)}")
             if c.user_assigned:
                 print(f"     Assignee: {c.user_assigned}")
+            print()
+
+    elif args.case_action == "triage":
+        print(f"\n[CLI] Triaging Case #{args.case_id} (summary={args.summary}, precedents={args.precedents})...")
+        assessment = engine.triage_case(
+            case_id=args.case_id,
+            fetch_summary=args.summary,
+            search_precedents=args.precedents,
+            apply_stage_update=args.update_stage,
+            post_comment=args.comment,
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": assessment.case_id,
+                "title": assessment.title,
+                "priority": assessment.priority.value if hasattr(assessment.priority, "value") else str(assessment.priority),
+                "status": assessment.status.value if hasattr(assessment.status, "value") else str(assessment.status),
+                "stage": assessment.stage,
+                "is_closed": assessment.is_closed,
+                "is_novel": assessment.is_novel,
+                "is_repeat": assessment.is_repeat,
+                "prior_case_count": assessment.prior_case_count,
+                "suggested_stage_transition": assessment.suggested_stage_transition,
+                "alert_count": assessment.alert_count,
+                "highest_alert_priority": assessment.highest_alert_priority,
+                "suspicious_entities": assessment.suspicious_entities,
+                "comment_count": assessment.comment_count,
+                "latest_comment": assessment.latest_comment,
+                "triage_verdict": assessment.triage_verdict.value,
+                "triage_summary": assessment.triage_summary,
+                "recommended_actions": assessment.recommended_actions,
+                "suggested_agent_prompt": assessment.suggested_agent_prompt,
+                "gemini_summary": assessment.gemini_summary.summary if assessment.gemini_summary else None,
+                "precedent_notes": assessment.precedent_summary.precedent_notes if assessment.precedent_summary else [],
+                "playbooks": [
+                    {
+                        "alert_id": pb.alert_id,
+                        "alert_display_name": pb.alert_display_name,
+                        "attached_playbook_name": pb.attached_playbook_name,
+                        "status": pb.status,
+                        "run_count": pb.run_count,
+                    }
+                    for pb in assessment.alert_playbook_statuses
+                ],
+                "timeline_events": [
+                    {
+                        "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "description": ev.description,
+                        "severity": ev.severity,
+                    }
+                    for ev in (assessment.timeline.events if assessment.timeline else [])
+                ],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR SINGLE CASE TRIAGE ASSESSMENT: Case #{assessment.case_id}")
+        print(f"==========================================================================================")
+        verdict_badge = f"[{assessment.triage_verdict.value}]"
+        prio_badge = f"[{assessment.priority.value if hasattr(assessment.priority, 'value') else assessment.priority}]"
+        status_badge = "[CLOSED]" if assessment.is_closed else "[OPEN]"
+        print(f" Case ID     : #{assessment.case_id} | {status_badge} | Priority: {prio_badge} | Stage: {assessment.stage}")
+        print(f" Title       : {assessment.title}")
+        print(f" Verdict     : {verdict_badge} {assessment.triage_summary}")
+        if assessment.suggested_stage_transition and assessment.suggested_stage_transition != assessment.stage:
+            print(f" Stage Suggestion: Transition to '{assessment.suggested_stage_transition}'")
+
+        if assessment.gemini_summary and assessment.gemini_summary.summary:
+            print(f"\n Gemini AI Case Summary:")
+            print(f"   {assessment.gemini_summary.summary}")
+
+        if assessment.precedent_summary:
+            print(f"\n Precedent & Pattern Analysis:")
+            if assessment.precedent_summary.is_novel:
+                print(f"   - Novel Detection: 0 prior occurrences with this title or entities.")
+            else:
+                for pnote in assessment.precedent_summary.precedent_notes:
+                    print(f"   - {pnote}")
+
+        if assessment.alert_playbook_statuses:
+            print(f"\n Key Alerts & SOAR Playbook Status ({len(assessment.alert_playbook_statuses)}):")
+            for idx, pb in enumerate(assessment.alert_playbook_statuses, 1):
+                aname = pb.alert_display_name or pb.alert_id or "Alert"
+                if pb.attached_playbook_name:
+                    status_str = f"[{pb.status or 'PENDING'}]"
+                    runs_str = f"({pb.run_count} runs)"
+                    print(f"   {idx}. {aname} -> Playbook: '{pb.attached_playbook_name}' {status_str} {runs_str}")
+                else:
+                    print(f"   {idx}. {aname} -> Playbook: [NO PLAYBOOK ATTACHED]")
+
+        if assessment.timeline and assessment.timeline.events:
+            print(f"\n Incident & Case Timeline ({len(assessment.timeline.events)} events):")
+            for idx, ev in enumerate(assessment.timeline.events, 1):
+                t_str = ev.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if ev.timestamp else "N/A"
+                print(f"   [{t_str}] [{ev.event_type:<12s}] {ev.title} - {ev.description}")
+
+        if assessment.suspicious_entities:
+            print(f"\n Flagged Entities: {', '.join(assessment.suspicious_entities)}")
+
+        if assessment.recommended_actions:
+            print(f"\n Recommended Analyst Actions:")
+            for act in assessment.recommended_actions:
+                print(f"   - {act}")
+
+        if assessment.latest_comment:
+            clean_note = assessment.latest_comment.splitlines()[0] if assessment.latest_comment else ""
+            print(f"\n Latest Note : {clean_note}")
+
+        if getattr(args, "generate_prompts", False):
+            print(f"\n --- Suggested Antigravity Subagent Dispatch Prompt ---")
+            for pline in assessment.suggested_agent_prompt.splitlines():
+                print(f" | {pline}")
+            print(f" ------------------------------------------------------")
+        print()
+
+    elif args.case_action == "timeline":
+        print(f"\n[CLI] Generating Chronological Timeline for Case #{args.case_id}...")
+        timeline = engine.get_case_timeline(case_id=args.case_id)
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": timeline.case_id,
+                "event_count": len(timeline.events),
+                "earliest_time": timeline.earliest_time.isoformat() if timeline.earliest_time else None,
+                "latest_time": timeline.latest_time.isoformat() if timeline.latest_time else None,
+                "events": [
+                    {
+                        "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "description": ev.description,
+                        "source_id": ev.source_id,
+                        "severity": ev.severity,
+                        "metadata": ev.metadata,
+                    }
+                    for ev in timeline.events
+                ],
+                "provenance": timeline.provenance,
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" CHRONOLOGICAL TIMELINE: Case #{timeline.case_id} ({len(timeline.events)} events)")
+        print(f"==========================================================================================")
+        if not timeline.events:
+            print(" No timeline events recorded for this case.")
+        else:
+            for idx, ev in enumerate(timeline.events, 1):
+                t_str = ev.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if ev.timestamp else "N/A"
+                print(f" {idx:2d}. [{t_str}] [{ev.event_type:<12s}] {ev.title}")
+                print(f"     {ev.description}")
+                print()
+
+    elif args.case_action == "comments":
+        print(f"\n[CLI] Retrieving Case Comments for Case #{args.case_id}...")
+        comments = engine.list_case_comments(case_id=args.case_id)
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = [
+                {
+                    "name": c.name,
+                    "author": c.author,
+                    "author_name": c.author_name,
+                    "created_time": c.create_time.isoformat() if c.create_time else None,
+                    "comment": c.comment,
+                    "is_deleted": c.is_deleted,
+                }
+                for c in comments
+            ]
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" CASE COMMENTS: Case #{args.case_id} ({len(comments)} comments)")
+        print(f"==========================================================================================")
+        if not comments:
+            print(" No comments recorded on this case.")
+        else:
+            for idx, c in enumerate(comments, 1):
+                t_str = c.create_time.strftime("%Y-%m-%d %H:%M:%S UTC") if c.create_time else "N/A"
+                author_str = c.author_name or c.author or "Unknown"
+                print(f" {idx:2d}. [{t_str}] Author: {author_str}")
+                for line in c.comment.splitlines():
+                    print(f"     {line}")
+                print()
+
+    elif args.case_action == "wall":
+        print(f"\n[CLI] Retrieving SOAR Case Activity Wall for Case #{args.case_id} (limit={args.limit})...")
+        wall_res = engine.get_case_wall(
+            case_id=args.case_id,
+            limit=args.limit,
+            page_token=getattr(args, "page_token", None),
+            activity_type=getattr(args, "type", None),
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": wall_res.case_id,
+                "record_count": wall_res.count,
+                "total_size": wall_res.total_size,
+                "next_page_token": wall_res.next_page_token,
+                "records": [
+                    {
+                        "activity_id": r.activity_id,
+                        "activity_type": r.activity_type,
+                        "activity_kind": r.activity_kind,
+                        "creator": r.creator_user_id,
+                        "created_time": r.create_time.isoformat() if r.create_time else None,
+                        "description": r.description,
+                        "details": r.details,
+                    }
+                    for r in wall_res.records
+                ],
+                "provenance": wall_res.provenance,
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE ACTIVITY WALL: Case #{wall_res.case_id} (Showing {wall_res.count} of {wall_res.total_size} total records)")
+        print(f"==========================================================================================")
+        if not wall_res.records:
+            print(" No activity records found on the case wall.")
+        else:
+            for idx, r in enumerate(wall_res.records, 1):
+                t_str = r.create_time.strftime("%Y-%m-%d %H:%M:%S UTC") if r.create_time else "N/A"
+                user_str = f"by {r.creator_user_id}" if r.creator_user_id else ""
+                print(f" {idx:2d}. [{t_str}] [{r.activity_type:<18s}] {r.activity_kind} {user_str}")
+                print(f"     {r.description}")
+                print()
+        if wall_res.next_page_token:
+            print(f" Next Page Token: {wall_res.next_page_token}")
+
+    elif args.case_action in ("orchestrate-triage", "triage-batch"):
+        cids = getattr(args, "case_id", None) or None
+        print(f"\n[CLI] Orchestrating Case Triage (limit={args.limit}, open_only={not args.all_statuses}, explicit_cases={cids})...")
+        batch = engine.orchestrate_case_triage(
+            case_ids=cids,
+            limit=args.limit,
+            open_only=not args.all_statuses,
+            query_text=args.query,
+            priorities=args.priority,
+            stages=args.stage,
+            tags=args.tag,
+            environments=args.environment,
+            assigned_users=args.assignee,
+            search_precedents=getattr(args, "precedents", True),
+            fetch_summary=getattr(args, "summary", False),
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "total_cases_analyzed": batch.total_cases_analyzed,
+                "open_cases_count": batch.open_cases_count,
+                "closed_cases_count": batch.closed_cases_count,
+                "critical_high_count": batch.critical_high_count,
+                "provenance": batch.provenance,
+                "cases": [
+                    {
+                        "case_id": c.case_id,
+                        "title": c.title,
+                        "priority": c.priority.value if hasattr(c.priority, "value") else str(c.priority),
+                        "status": c.status.value if hasattr(c.status, "value") else str(c.status),
+                        "stage": c.stage,
+                        "is_closed": c.is_closed,
+                        "is_novel": c.is_novel,
+                        "is_repeat": c.is_repeat,
+                        "prior_case_count": c.prior_case_count,
+                        "suggested_stage_transition": c.suggested_stage_transition,
+                        "alert_count": c.alert_count,
+                        "highest_alert_priority": c.highest_alert_priority,
+                        "suspicious_entities": c.suspicious_entities,
+                        "comment_count": c.comment_count,
+                        "latest_comment": c.latest_comment,
+                        "triage_verdict": c.triage_verdict.value,
+                        "triage_summary": c.triage_summary,
+                        "recommended_actions": c.recommended_actions,
+                        "suggested_agent_prompt": c.suggested_agent_prompt,
+                    }
+                    for c in batch.results
+                ],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE ORCHESTRATED TRIAGE (Analyzed: {batch.total_cases_analyzed} | Open: {batch.open_cases_count} | High Risk / Critical: {batch.critical_high_count})")
+        print(f"==========================================================================================")
+        if not batch.results:
+            print(" No candidate cases found matching criteria.")
+            return
+
+        for idx, item in enumerate(batch.results, 1):
+            verdict_badge = f"[{item.triage_verdict.value}]"
+            prio_badge = f"[{item.priority.value}]"
+            status_badge = "[CLOSED]" if item.is_closed else "[OPEN]"
+            print(f" {idx:2d}. Case #{item.case_id} | {verdict_badge:28s} | {status_badge:8s} | Prio: {prio_badge:10s} | Alerts: {item.alert_count:2d}")
+            print(f"     Title   : {item.title}")
+            print(f"     Verdict : {item.triage_summary}")
+            if item.precedent_summary and item.precedent_summary.precedent_notes:
+                for pn in item.precedent_summary.precedent_notes[:2]:
+                    print(f"     Preced. : {pn}")
+            if item.suspicious_entities:
+                print(f"     Entities: {', '.join(item.suspicious_entities)}")
+            if item.recommended_actions:
+                print(f"     Actions :")
+                for act in item.recommended_actions:
+                    print(f"       - {act}")
+            if item.latest_comment:
+                clean_comm = item.latest_comment.splitlines()[0] if item.latest_comment else ""
+                print(f"     Note    : {clean_comm}")
+            if getattr(args, "generate_prompts", False):
+                print(f"\n     --- Suggested Antigravity Subagent Dispatch Prompt ---")
+                for pline in item.suggested_agent_prompt.splitlines():
+                    print(f"     | {pline}")
+                print(f"     ------------------------------------------------------")
             print()
 
     elif args.case_action == "update":
@@ -4648,8 +5032,11 @@ def run_search_cli(args):
 
     last_state = None
 
-    def on_state_change(session: SearchSession):
+    def on_state_change(*args, **kwargs):
         nonlocal last_state
+        session = args[-1] if args else kwargs.get("session")
+        if not session or not hasattr(session, "lifecycle"):
+            return
         if session.lifecycle != last_state:
             last_state = session.lifecycle
             if session.lifecycle == LifecycleState.VALIDATING:
@@ -4670,7 +5057,9 @@ def run_search_cli(args):
     print(f"\n[bold green]Initiating Search Session...[/bold green]")
 
     def on_batch(batch: SearchBatchResult, session: SearchSession):
-        prov_info = f" [dim](Op: {batch.operation_id[-12:] if batch.operation_id else 'N/A'}, idx: {batch.start_index}-{batch.end_index})[/dim]"
+        s_idx = getattr(batch, "returned_start_index", getattr(batch, "requested_start_index", 1))
+        e_idx = getattr(batch, "returned_end_index", getattr(batch, "requested_end_index", 1))
+        prov_info = f" [dim](Op: {batch.operation_id[-12:] if batch.operation_id else 'N/A'}, idx: {s_idx}-{e_idx})[/dim]"
         print(
             f" [bold blue]➜ Batch received:[/bold blue] {batch.batch_count} events "
             f"(Total so far: {session.received_count}){prov_info}"

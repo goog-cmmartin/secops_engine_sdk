@@ -1,0 +1,29 @@
+capability_id: case.orchestrate_triage
+version: 1.0.0
+name: SOAR Case Orchestrated Triage & Subagent Dispatch
+description: >
+  Orchestrates batch retrieval, parallel multi-resource deep investigation,
+  deterministic triage scoring, and Antigravity subagent prompt synthesis for SOAR cases.
+
+provider_mapping:
+  engine: GoogleSecOpsAdapter
+  composed_workflows:
+    - case.search
+    - case.investigate
+
+execution:
+  mode: PARALLEL_EAGER
+  composition:
+    - step: candidate_search
+      workflow: case.search
+      description: Retrieves top candidate cases matching facet filters and open/closed state.
+    - step: deep_investigation_fanout
+      workflow: case.investigate
+      description: Concurrently investigates alerts, entities, and comments across all candidates.
+    - step: triage_scoring_and_prompt_synthesis
+      description: Derives TriageVerdict, recommendations, and Antigravity subagent dispatch prompts.
+
+invariants:
+  - zero_mock_data: true
+  - strict_error_visibility: true
+  - provenance_tracking: true

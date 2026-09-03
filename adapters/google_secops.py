@@ -698,6 +698,35 @@ class GoogleSecOpsAdapter:
             raise RuntimeError(f"Failed to post comment to case {case_id}: invalid provider response.")
         return res
 
+    def list_case_wall_records(
+        self,
+        case_id: str,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        filter_str: Optional[str] = None,
+        order_by: str = "createTime desc",
+    ) -> Dict[str, Any]:
+        """Lists activity records from the case activity wall."""
+        case_id_clean = case_id.split("/")[-1]
+        query_params = {
+            "pageSize": str(page_size),
+            "orderBy": order_by,
+        }
+        if filter_str:
+            query_params["filter"] = filter_str
+        else:
+            query_params["filter"] = f"caseId = {case_id_clean}"
+
+        if page_token:
+            query_params["pageToken"] = page_token
+
+        encoded_params = urllib.parse.urlencode(query_params)
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseWallRecords?{encoded_params}"
+        res = self._request("GET", path)
+        if isinstance(res, dict):
+            return res
+        return {"caseWallRecords": []}
+
     def search_cases(
         self,
         query_text: str = "",

@@ -13,6 +13,15 @@ from engine.domain import (
     CaseSearchQuery,
     CaseSearchResultItem,
     CaseStatus,
+    CaseTimeline,
+    CaseTimelineEvent,
+    CaseTriageAssessment,
+    CaseTriageBatch,
+    CaseWallRecord,
+    CaseWallResult,
+    TriageVerdict,
+    CasePrecedentSummary,
+    EntityPrecedentItem,
     CaseUpdateResult,
     CaseAlertUpdateResult,
     CaseAlertRecommendationJob,
@@ -245,6 +254,11 @@ from engine.workflows.case_investigation import (
     InvestigateCaseWorkflow,
 )
 from engine.workflows.case_search import SearchCasesWorkflow
+from engine.workflows.case_triage import OrchestrateCaseTriageWorkflow
+from engine.workflows.case_wall import (
+    GetCaseWallWorkflow,
+    ListCaseCommentsWorkflow,
+)
 from engine.workflows.content_pack import (
     GetContentPackDetailWorkflow,
     ListContentPackCategoriesWorkflow,
@@ -447,6 +461,8 @@ class SecOpsEngine:
         "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
         "_investigate_case_wf": lambda e: InvestigateCaseWorkflow(e.adapter),
         "_add_case_comment_wf": lambda e: AddCaseCommentWorkflow(e.adapter),
+        "_list_case_comments_wf": lambda e: ListCaseCommentsWorkflow(e.adapter),
+        "_get_case_wall_wf": lambda e: GetCaseWallWorkflow(e.adapter),
         "_update_case_wf": lambda e: UpdateCaseWorkflow(e.adapter),
         "_assign_case_wf": lambda e: AssignCaseWorkflow(e.adapter),
         "_set_case_stage_wf": lambda e: SetCaseStageWorkflow(e.adapter),
@@ -460,6 +476,7 @@ class SecOpsEngine:
         "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
+        "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter),
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
         "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
@@ -743,6 +760,30 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.list_comments",
+                name="List SOAR Case Comments",
+                description="Lists all analyst comments and AI assessment notes for a SOAR case.",
+                category="case",
+                handler=self.list_case_comments,
+                mcp_tool_name="list_case_comments",
+                composed=False,
+                evidence_path="evidence/case/comments",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.get_wall",
+                name="Get SOAR Case Activity Wall",
+                description="Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps.",
+                category="case",
+                handler=self.get_case_wall,
+                mcp_tool_name="get_case_wall",
+                composed=False,
+                evidence_path="evidence/case/wall",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="case.update",
                 name="Update SOAR Case Properties",
                 description="Mutates case attributes such as assignee, stage, incident flag, or priority.",
@@ -897,6 +938,45 @@ class SecOpsEngine:
                 mcp_tool_name="search_cases",
                 composed=False,
                 evidence_path="evidence/case/search",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.orchestrate_triage",
+                name="Orchestrate Case Triage",
+                description="Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases.",
+                category="case",
+                handler=self.orchestrate_case_triage,
+                mcp_tool_name="orchestrate_case_triage",
+                composed=True,
+                uses=("case.search", "case.investigate", "case.get_summary"),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.triage",
+                name="Triage Single Case",
+                description="End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions.",
+                category="case",
+                handler=self.triage_case,
+                mcp_tool_name="triage_case",
+                composed=True,
+                uses=("case.investigate", "case.get_summary", "case.search"),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.timeline",
+                name="Get Case Chronological Timeline",
+                description="Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates.",
+                category="case",
+                handler=self.get_case_timeline,
+                mcp_tool_name="get_case_timeline",
+                composed=True,
+                uses=("case.investigate",),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
             )
         )
         self.registry.register(
@@ -2662,6 +2742,25 @@ class SecOpsEngine:
         """Executes the Add Case Comment workflow."""
         return self._add_case_comment_wf.execute(case_id=case_id, comment=comment)
 
+    def list_case_comments(self, case_id: str) -> List[CaseCommentRecord]:
+        """Lists all analyst comments and AI assessment notes for a SOAR case (`case.list_comments`)."""
+        return self._list_case_comments_wf.execute(case_id=case_id)
+
+    def get_case_wall(
+        self,
+        case_id: str,
+        limit: int = 50,
+        page_token: Optional[str] = None,
+        activity_type: Optional[str] = None,
+    ) -> CaseWallResult:
+        """Retrieves and parses the complete SOAR Case Activity Wall (`case.get_wall`)."""
+        return self._get_case_wall_wf.execute(
+            case_id=case_id,
+            limit=limit,
+            page_token=page_token,
+            activity_type=activity_type,
+        )
+
     def update_case(
         self,
         case_id: str,
@@ -2830,6 +2929,72 @@ class SecOpsEngine:
             environments=environments,
             page_size=page_size,
             page_number=page_number,
+        )
+
+    def triage_case(
+        self,
+        case_id: str,
+        fetch_summary: bool = True,
+        search_precedents: bool = True,
+        summary_timeout_sec: float = 15.0,
+        apply_stage_update: bool = False,
+        post_comment: bool = False,
+    ) -> CaseTriageAssessment:
+        """Executes full analyst triage workflow for a single specific case (`case.triage`).
+
+        Runs deep case investigation (alerts, entities, comments), retrieves Gemini AI
+        summary, performs historical title and entity precedent correlation, evaluates
+        novelty vs repeat pattern, and optionally updates stage or posts triage audit comments.
+        """
+        return self._orchestrate_case_triage_wf.triage_single_case(
+            case_id=case_id,
+            fetch_summary=fetch_summary,
+            search_precedents=search_precedents,
+            summary_timeout_sec=summary_timeout_sec,
+            apply_stage_update=apply_stage_update,
+            post_comment=post_comment,
+        )
+
+    def get_case_timeline(self, case_id: str) -> CaseTimeline:
+        """Constructs a unified, chronologically sorted timeline of events and milestones in a case (`case.timeline`)."""
+        from engine.workflows.case_triage import GetCaseTimelineWorkflow
+        return GetCaseTimelineWorkflow(self.adapter).execute(case_id=case_id)
+
+    def orchestrate_case_triage(
+        self,
+        case_ids: Optional[List[str]] = None,
+        limit: int = 5,
+        open_only: bool = True,
+        query_text: str = "",
+        priorities: Optional[List[str]] = None,
+        stages: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        environments: Optional[List[str]] = None,
+        assigned_users: Optional[List[str]] = None,
+        is_important: Optional[bool] = None,
+        page_number: int = 0,
+        search_precedents: bool = True,
+        fetch_summary: bool = False,
+    ) -> CaseTriageBatch:
+        """Executes the Case Orchestrate Triage workflow (`case.orchestrate_triage`).
+
+        Batched retrieval, parallel deep multi-resource investigation, precedent correlation,
+        and automated triage scoring & subagent prompt synthesis for SOAR cases.
+        """
+        return self._orchestrate_case_triage_wf.execute(
+            case_ids=case_ids,
+            limit=limit,
+            open_only=open_only,
+            query_text=query_text,
+            priorities=priorities,
+            stages=stages,
+            tags=tags,
+            environments=environments,
+            assigned_users=assigned_users,
+            is_important=is_important,
+            page_number=page_number,
+            search_precedents=search_precedents,
+            fetch_summary=fetch_summary,
         )
 
     def get_case_filter_values(

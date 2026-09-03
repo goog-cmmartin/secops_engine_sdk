@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -636,6 +638,40 @@ class CaseCommentRecord:
 
 
 @dataclass
+class CaseWallRecord:
+    case_id: str
+    activity_id: str
+    activity_type: str
+    activity_kind: str
+    creator_user_id: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    alert_identifier: Optional[str] = None
+    description: str = ""
+    details: Dict[str, Any] = field(default_factory=dict)
+    favorite: bool = False
+    name: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def created_time(self) -> Optional[datetime]:
+        return self.create_time
+
+
+@dataclass
+class CaseWallResult:
+    case_id: str
+    records: List[CaseWallRecord] = field(default_factory=list)
+    total_size: int = 0
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def count(self) -> int:
+        return len(self.records)
+
+
+@dataclass
 class CaseInvestigation:
     case_id: str
     name: str
@@ -676,6 +712,14 @@ class CaseInvestigation:
     @property
     def description(self) -> str:
         return str(self.raw_case.get("description", ""))
+
+    @property
+    def is_incident(self) -> bool:
+        return bool(
+            self.raw_case.get("isIncident", False)
+            or self.raw_case.get("is_incident", False)
+            or str(self.stage).lower() == "incident"
+        )
 
 
 @dataclass
@@ -745,6 +789,125 @@ class CaseSearchBatch(UniversalBatchMixin):
     def items(self) -> List[CaseSearchResultItem]:
         """Uniform alias for batch results across all engine domains."""
         return self.results
+
+
+class TriageVerdict(str, Enum):
+    CRITICAL_ESCALATION = "CRITICAL_ESCALATION"
+    HIGH_PRIORITY_INVESTIGATION = "HIGH_PRIORITY_INVESTIGATION"
+    CONTAINMENT_REQUIRED = "CONTAINMENT_REQUIRED"
+    NOVEL_DETECTION = "NOVEL_DETECTION"
+    REPEAT_RESOLVED_DUPLICATE = "REPEAT_RESOLVED_DUPLICATE"
+    REPEAT_ACTIVE_CAMPAIGN = "REPEAT_ACTIVE_CAMPAIGN"
+    STANDARD_TRIAGE = "STANDARD_TRIAGE"
+    CLOSED_NO_ACTION = "CLOSED_NO_ACTION"
+    INFORMATIONAL = "INFORMATIONAL"
+
+
+@dataclass
+class EntityPrecedentItem:
+    """Historical case correlation for a single entity indicator."""
+    entity_identifier: str
+    entity_type: Optional[str] = None
+    prior_case_count: int = 0
+    recent_case_ids: List[str] = field(default_factory=list)
+    active_incident_count: int = 0
+    is_frequent: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CasePrecedentSummary:
+    """Historical case precedent correlation across title and involved entities."""
+    target_case_id: str
+    title_query: str = ""
+    title_prior_case_count: int = 0
+    title_prior_case_ids: List[str] = field(default_factory=list)
+    title_closed_count: int = 0
+    title_incident_count: int = 0
+    entity_precedents: List[EntityPrecedentItem] = field(default_factory=list)
+    total_entity_matches: int = 0
+    is_novel: bool = False
+    is_repeat: bool = False
+    repeat_case_ids: List[str] = field(default_factory=list)
+    precedent_notes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class CaseTimelineEvent:
+    """A chronological event or milestone within a case's investigation lifecycle."""
+    timestamp: Optional[datetime]
+    event_type: str  # "CASE_CREATED", "ALERT", "PLAYBOOK", "COMMENT", "CASE_UPDATED"
+    title: str
+    description: str
+    source_id: Optional[str] = None
+    severity: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseTimeline:
+    """A chronologically sorted sequence of events and milestones associated with a case."""
+    case_id: str
+    events: List[CaseTimelineEvent] = field(default_factory=list)
+    earliest_time: Optional[datetime] = None
+    latest_time: Optional[datetime] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def event_count(self) -> int:
+        return len(self.events)
+
+
+@dataclass
+class CaseTriageAssessment:
+    case_id: str
+    title: str
+    priority: CasePriority
+    status: CaseStatus
+    stage: str
+    is_closed: bool = False
+    is_incident: bool = False
+    alert_count: int = 0
+    highest_alert_priority: str = "UNKNOWN"
+    suspicious_entity_count: int = 0
+    suspicious_entities: List[str] = field(default_factory=list)
+    comment_count: int = 0
+    latest_comment: Optional[str] = None
+    triage_verdict: TriageVerdict = TriageVerdict.STANDARD_TRIAGE
+    triage_summary: str = ""
+    recommended_actions: List[str] = field(default_factory=list)
+    suggested_agent_prompt: str = ""
+    assigned_user: Optional[str] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    environment: str = ""
+    tags: List[str] = field(default_factory=list)
+    raw_case: Dict[str, Any] = field(default_factory=dict)
+    investigation: Optional[CaseInvestigation] = None
+    gemini_summary: Optional[CaseSummary] = None
+    precedent_summary: Optional[CasePrecedentSummary] = None
+    is_novel: bool = False
+    is_repeat: bool = False
+    prior_case_count: int = 0
+    suggested_stage_transition: Optional[str] = None
+    alert_playbook_statuses: List[AlertPlaybookStatus] = field(default_factory=list)
+    timeline: Optional[CaseTimeline] = None
+
+
+@dataclass
+class CaseTriageBatch(UniversalBatchMixin):
+    results: List[CaseTriageAssessment]
+    total_cases_analyzed: int = 0
+    open_cases_count: int = 0
+    closed_cases_count: int = 0
+    critical_high_count: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CaseTriageAssessment]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.results
+
 
 
 class PlaybookType(str, Enum):

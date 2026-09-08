@@ -1,0 +1,33 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-run-001
+  capability_id: "parser.run"
+  name: Google SecOps Ingestion Parser Execution
+  category: parsers
+  status: VERIFIED
+  description: Executes a Logstash CBN parser configuration against a raw log string via the :runParser API.
+parameters:
+  log_type:
+    type: string
+    required: true
+    description: Target log type identifier (e.g. PAN_FIREWALL, CS_EDR).
+  raw_log_text:
+    type: string
+    required: true
+    description: Raw log text string to parse.
+  parser_cbn:
+    type: string
+    required: false
+    description: Optional Base64 or plain text Logstash CBN code. If omitted, uses active parser.
+outputs:
+  result:
+    type: ParserRunResult
+    description: Container with parsed UDM events, execution status, and diagnostic error message if any.
+api_mapping:
+  - step: run_parser
+    endpoint: POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}:runParser
+    body:
+      parser:
+        cbn: "<base64_encoded_cbn>"
+      log: "<base64_encoded_raw_log>"

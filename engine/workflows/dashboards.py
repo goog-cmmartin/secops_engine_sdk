@@ -21,6 +21,7 @@ from engine.domain import (
     DashboardChart,
     DashboardChartLayout,
     DashboardDetail,
+    DashboardHealthCheckResult,
     DashboardQuery,
     DashboardQueryResult,
     DashboardSearchQuery,
@@ -241,18 +242,26 @@ class ExecuteDashboardQueryWorkflow:
 
     def execute(
         self,
-        query_name_or_id: str,
+        query_name_or_id: Optional[str] = None,
+        query_text: Optional[str] = None,
         filters: Optional[List[Dict[str, Any]]] = None,
         use_previous_time_range: bool = False,
         query_source: str = "DASHBOARD",
+        time_unit: str = "DAY",
+        time_value: str = "1",
+        dialect: str = "YL2",
     ) -> DashboardQueryResult:
         """Executes query and returns result."""
         # Adapter already returns normalized DashboardQueryResult
         return self.adapter.execute_dashboard_query(
             query_name=query_name_or_id,
+            query_text=query_text,
             filters=filters,
             use_previous_time_range=use_previous_time_range,
             query_source=query_source,
+            time_unit=time_unit,
+            time_value=time_value,
+            dialect=dialect,
         )
 
 
@@ -273,7 +282,7 @@ def run_dashboard_health_check(
     project_id: Optional[str] = None,
     customer_id: Optional[str] = None,
     region: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> DashboardHealthCheckResult:
     """Execute comprehensive health check for a named dashboard.
     
     Workflow orchestration:
@@ -383,12 +392,13 @@ def run_dashboard_health_check(
         
         summary = "\n".join(summary_lines)
         
-        return {
+        res_dict = {
             "dashboard_id": dashboard_id,
             "query_results": query_results,
             "summary": summary,
             "errors": errors,
         }
+        return DashboardHealthCheckResult(**res_dict, raw=res_dict)
     
     finally:
         # Restore original tenant config

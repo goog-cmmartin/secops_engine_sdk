@@ -1,0 +1,39 @@
+version: "1.0"
+kind: WorkflowSpecification
+metadata:
+  id: parser-diagnose-unparsed-001
+  capability_id: "parser.diagnose_unparsed"
+  name: Google SecOps Unparsed Log Ingestion Diagnostics
+  category: parsers
+  status: VERIFIED
+  description: Finds unparsed raw logs for a log type and runs them against the active parser to diagnose ingestion errors.
+parameters:
+  log_type:
+    type: string
+    required: true
+    description: Target log type identifier (e.g. PAN_FIREWALL, GCP_IDS).
+  lookback_hours:
+    type: integer
+    required: false
+    default: 168
+    description: Lookback window in hours for unparsed logs search.
+  limit:
+    type: integer
+    required: false
+    default: 5
+    description: Maximum sample of unparsed logs to diagnose.
+outputs:
+  batch:
+    type: UnparsedLogsDiagnosticBatch
+    description: Diagnostic report containing root cause parsing errors for unparsed logs.
+api_mapping:
+  - step: list_log_types
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes
+  - step: get_active_parser
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}/parsers
+  - step: search_raw_logs
+    endpoint: POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}:searchRawLogs
+  - step: get_raw_log
+    endpoint: GET /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/legacy:legacyFindRawLogs
+  - step: run_parser
+    endpoint: POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/logTypes/{log_type}:runParser

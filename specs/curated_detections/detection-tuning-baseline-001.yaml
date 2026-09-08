@@ -1,0 +1,43 @@
+version: "1.0.0"
+name: "detection-tuning-baseline-001"
+capability_id: "curated_detections.tuning.top_noisy_rules"
+description: "Declarative workflow contract for ranking top noisy detection rules, aggregating volume, alert state, and classifying rule origin."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  lookback_days:
+    type: integer
+    default: 7
+    description: "Lookback window in days."
+  alert_state:
+    type: string
+    default: "ALL"
+    description: "Filter by alert state ('ALL', 'ALERTING', 'NOT_ALERTING')."
+  limit:
+    type: integer
+    default: 20
+    description: "Maximum number of noisy rules to return."
+
+outputs:
+  rules:
+    type: array
+    items:
+      type: object
+      properties:
+        rule_name: string
+        rule_id: string
+        alert_state: string
+        detection_count: integer
+        first_seen_seconds: integer
+        last_seen_seconds: integer
+        rule_type: string
+        is_curated: boolean
+
+api_mappings:
+  dashboard_query:
+    endpoint: "POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}:runLegacyDashboardQuery"

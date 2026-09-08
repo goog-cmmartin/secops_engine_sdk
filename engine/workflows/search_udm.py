@@ -7,6 +7,7 @@ from engine.domain import (
     SearchBatchResult,
     SearchRequest,
     SearchSession,
+    UDMEvent,
 )
 
 
@@ -144,7 +145,11 @@ class SearchUDMWorkflow:
 
             # Strict enforcement of receive_limit
             remaining_quota = request.receive_limit - session.received_count
-            events_to_add = batch_res.events[:remaining_quota]
+            raw_slice = batch_res.events[:remaining_quota]
+            events_to_add = [
+                UDMEvent(e) if isinstance(e, dict) and not isinstance(e, UDMEvent) else e
+                for e in raw_slice
+            ]
             session.events.extend(events_to_add)
             session.received_count += len(events_to_add)
             session.next_index += len(events_to_add)

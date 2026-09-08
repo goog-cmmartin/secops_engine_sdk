@@ -1,0 +1,47 @@
+version: "1.0.0"
+name: "detection-tuning-workflow-001"
+capability_id: "curated_detections.tuning.diagnose"
+description: "Declarative workflow contract for autonomous detection tuning: noise profiling, multi-dimensional cardinality analysis, SOAR case cross-referencing, exclusion formulation, and dry-run validation."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  rule_id:
+    type: string
+    required: true
+    description: "Target detection rule identifier."
+  lookback_days:
+    type: integer
+    default: 7
+    description: "Lookback window in days."
+
+outputs:
+  report:
+    type: object
+    properties:
+      rule_id: string
+      rule_name: string
+      rule_type: string
+      is_curated: boolean
+      validation_status: string
+      entity_analysis: object
+      linked_cases: object
+      proposed_refinement_query: string
+      dry_run_impact: object
+
+composition:
+  steps:
+    - step: inspect_rule
+      capability: "curated_detections.get_rule | rule.get"
+    - step: profile_cardinality
+      capability: "curated_detections.tuning.entity_cardinality"
+    - step: query_cases
+      capability: "curated_detections.tuning.case_history"
+    - step: formulate_refinement
+      logic: "Deterministic entity extraction and UDM query synthesis"
+    - step: dry_run_test
+      capability: "curated_detections.refinements.test"

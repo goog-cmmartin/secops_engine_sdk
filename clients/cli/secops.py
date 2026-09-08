@@ -137,6 +137,21 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_timeline_cmd.add_argument("case_id", help="Case ID (e.g. 104839)")
     case_timeline_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
 
+    case_ai_cmd = case_sub.add_parser(
+        "ai-investigate",
+        aliases=["ai_investigate"],
+        help="Deep autonomous AI case investigation: Gemini summary, IOC extraction, Chronicle UDM threat hunt, and escalation",
+    )
+    case_ai_cmd.add_argument("case_id", help="Case ID to investigate (e.g. 104655)")
+    case_ai_cmd.add_argument("--lookback-days", type=int, default=14, help="Threat hunt telemetry lookback days (default: 14)")
+    case_ai_cmd.add_argument("--limit", type=int, default=50, help="Per-indicator hunt event cap (default: 50)")
+    case_ai_cmd.add_argument("--timeout", type=float, default=90.0, help="Gemini summary timeout in seconds (default: 90.0)")
+    case_ai_cmd.add_argument("--escalate-incident", action="store_true", default=False, help="Escalate case incident flag")
+    case_ai_cmd.add_argument("--escalate-priority", choices=["PRIORITY_LOW", "PRIORITY_MEDIUM", "PRIORITY_HIGH", "PRIORITY_CRITICAL"], help="Escalate primary alert priority")
+    case_ai_cmd.add_argument("--comment", action="store_true", default=False, help="Post structured investigation report as a case comment")
+    case_ai_cmd.add_argument("--dry-run", action="store_true", default=False, help="Perform read-only investigation without mutations")
+    case_ai_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
     case_comments_cmd = case_sub.add_parser(
         "comments",
         help="List analyst comments and AI assessment notes for a case",
@@ -375,6 +390,53 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     cur_audit.add_argument("--out", help="Optional output filepath to save JSON report")
     cur_audit.add_argument("--json", action="store_true", help="Output raw JSON instead of text tables")
 
+    # Detection Tuning & Findings Refinements command
+    detection_parser = subparsers.add_parser("detection", help="Analyze detection noise, profile entity cardinality, and deploy findings refinements")
+    detection_sub = detection_parser.add_subparsers(dest="detection_action", required=True)
+
+    det_top = detection_sub.add_parser("baseline", help="Rank top noisy detection rules across tenant")
+    det_top.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
+    det_top.add_argument("--alert-state", default="ALL", choices=["ALL", "ALERTING", "NOT_ALERTING"], help="Filter by alert state (default: ALL)")
+    det_top.add_argument("--limit", type=int, default=20, help="Max rules to return (default: 20)")
+    det_top.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_card = detection_sub.add_parser("cardinality", help="Profile entity subfield distributions for a detection rule")
+    det_card.add_argument("rule_id", help="Rule ID (e.g. ur_... or ru_...)")
+    det_card.add_argument("--dimension", "-d", choices=["all", "ips", "hostnames", "users", "processes", "dns"], default="all", help="Target entity dimension (default: all)")
+    det_card.add_argument("--days", type=int, default=14, help="Lookback window in days (default: 14)")
+    det_card.add_argument("--limit", type=int, default=10, help="Max values per dimension (default: 10)")
+    det_card.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_cases = detection_sub.add_parser("cases", help="Cross-reference historical SOAR cases linked to a detection rule")
+    det_cases.add_argument("rule_id", help="Rule ID (e.g. ur_... or ru_...)")
+    det_cases.add_argument("--days", type=int, default=90, help="Lookback window in days (default: 90)")
+    det_cases.add_argument("--limit", type=int, default=20, help="Max cases to return (default: 20)")
+    det_cases.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_test = detection_sub.add_parser("test-refinement", help="Dry-run simulate exclusion query against historical detections")
+    det_test.add_argument("rule_id", help="Curated Rule ID (ur_...)")
+    det_test.add_argument("--query", "-q", required=True, help="UDM exclusion query (e.g. '(principal.ip = /213.209.159.175/)')")
+    det_test.add_argument("--days", type=int, default=14, help="Lookback window in days (default: 14)")
+    det_test.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_list = detection_sub.add_parser("list-refinements", help="List active UDM findings refinements and exclusions")
+    det_list.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    det_list.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_create = detection_sub.add_parser("create-refinement", help="Create a new UDM findings refinement exclusion")
+    det_create.add_argument("--name", required=True, help="Display name for the refinement")
+    det_create.add_argument("--query", "-q", required=True, help="UDM exclusion query")
+    det_create.add_argument("--rule-id", help="Optional curated rule ID to scope the refinement")
+    det_create.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_del = detection_sub.add_parser("delete-refinement", help="Delete an active UDM findings refinement exclusion")
+    det_del.add_argument("refinement_id", help="Refinement UUID or resource name")
+
+    det_tune = detection_sub.add_parser("tune", help="Autonomous end-to-end detection diagnosis and tuning")
+    det_tune.add_argument("rule_id", help="Rule ID (e.g. ur_... or ru_...)")
+    det_tune.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
+    det_tune.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # Marketplace Response Integrations command
     mp_parser = subparsers.add_parser("marketplace", help="Search Content Hub Marketplace Response Integrations, compare version diffs, and inspect affected playbooks")
     mp_sub = mp_parser.add_subparsers(dest="mp_action", required=True)
@@ -501,6 +563,19 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     parser_setting = parser_sub.add_parser("setting", help="Get autonomous parsing settings for a log type")
     parser_setting.add_argument("log_type", help="Target log type (e.g. POWERSHELL)")
 
+    parser_run = parser_sub.add_parser("run", help="Run a parser configuration against a raw log string or file")
+    parser_run.add_argument("log_type", help="Target log type (e.g. PAN_FIREWALL, CS_EDR)")
+    parser_run.add_argument("--log-text", "-t", help="Raw log string to parse")
+    parser_run.add_argument("--log-file", "-f", help="Path to file containing raw log string")
+    parser_run.add_argument("--cbn-file", help="Optional path to custom Logstash CBN filter file (defaults to active parser)")
+    parser_run.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
+
+    parser_diag = parser_sub.add_parser("diagnose-unparsed", help="Find unparsed raw logs and test them against active parser to diagnose ingestion errors")
+    parser_diag.add_argument("log_type", help="Target log type (e.g. PAN_FIREWALL, GCP_IDS)")
+    parser_diag.add_argument("--lookback-hours", type=int, default=168, help="Lookback window in hours (default: 168)")
+    parser_diag.add_argument("--limit", type=int, default=5, help="Max unparsed logs to diagnose (default: 5)")
+    parser_diag.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
+
     # Preview Features command
     preview_cmd = subparsers.add_parser("preview", help="Discover customer preview features and enablement states")
     preview_sub = preview_cmd.add_subparsers(dest="preview_action", required=True)
@@ -559,6 +634,27 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     siem_agent = siem_sub.add_parser("agent-settings", help="Get Gemini Triage & Investigation Agent settings")
     siem_risk = siem_sub.add_parser("risk-config", help="Get UEBA Entity Risk Scoring configuration")
     siem_tenant = siem_sub.add_parser("tenant", help="Get root tenant instance details and configuration")
+
+    # Raw Logs command
+    logs_cmd = subparsers.add_parser("logs", help="Raw log search, source discovery, and query syntax validation")
+    logs_sub = logs_cmd.add_subparsers(dest="logs_action", required=True)
+
+    logs_sources = logs_sub.add_parser("sources", help="Query available product log sources and ingested data volumes")
+    logs_sources.add_argument("--hours", type=int, default=24, help="Evaluation window lookback in hours (default: 24)")
+    logs_sources.add_argument("--start", help="Start timestamp ISO8601")
+    logs_sources.add_argument("--end", help="End timestamp ISO8601")
+    logs_sources.add_argument("--limit", type=int, default=50, help="Display limit (default: 50)")
+
+    logs_val = logs_sub.add_parser("validate", help="Validate raw log query syntax")
+    logs_val.add_argument("query", help="Raw log query expression")
+
+    logs_search = logs_sub.add_parser("search", help="Search unparsed or unnormalized raw logs")
+    logs_search.add_argument("query", help="Raw log query expression (e.g. 'raw = /.*/ parsed = false')")
+    logs_search.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
+    logs_search.add_argument("--start", help="Start timestamp ISO8601")
+    logs_search.add_argument("--end", help="End timestamp ISO8601")
+    logs_search.add_argument("--sources", "-s", nargs="*", default=None, help="Optional log types / sources filter")
+    logs_search.add_argument("--limit", type=int, default=50, help="Max results to display (default: 50)")
 
     # SOAR Users command
     soar_users_cmd = subparsers.add_parser("soar-users", help="Discover and filter SOAR users and external identity profiles")
@@ -971,6 +1067,8 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_enrichment_cli(args)
     elif args.command == "siem":
         run_siem_cli(args)
+    elif args.command == "logs":
+        run_logs_cli(args)
     elif args.command == "soar-users":
         run_soar_users_cli(args)
     elif args.command == "soar-user-get":
@@ -1035,6 +1133,8 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_case_config_cli(args)
     elif args.command == "data-table":
         run_data_table_cli(args)
+    elif args.command == "detection":
+        run_detection_cli(args)
     elif args.command == "rule":
         run_rule_cli(args)
     elif args.command == "runbook":
@@ -1556,6 +1656,58 @@ def run_case_cli(args):
                 print(f" {idx:2d}. [{t_str}] [{ev.event_type:<12s}] {ev.title}")
                 print(f"     {ev.description}")
                 print()
+
+    elif args.case_action in ("ai-investigate", "ai_investigate"):
+        print(f"\n[CLI] Investigating Case #{args.case_id} with AI (dry_run={args.dry_run})...")
+        res = engine.ai_investigate_case(
+            case_id=args.case_id,
+            hunt_lookback_days=args.lookback_days,
+            hunt_receive_limit=args.limit,
+            summary_timeout_sec=args.timeout,
+            escalate_incident=args.escalate_incident,
+            escalate_alert_priority=args.escalate_priority,
+            post_comment=args.comment,
+            dry_run=args.dry_run,
+        )
+
+        if getattr(args, "format", "table") == "json":
+            import json
+            out = {
+                "case_id": res.case_id,
+                "summary_state": res.summary_state,
+                "summary_text": res.summary_text,
+                "extracted_ips": res.extracted_ips,
+                "extracted_users": res.extracted_users,
+                "extracted_hashes": res.extracted_hashes,
+                "hunt_results": res.hunt_results,
+                "primary_alert_id": res.primary_alert_id,
+                "incident_marked": res.incident_marked,
+                "alert_escalated": res.alert_escalated,
+                "comment_posted": res.comment_posted,
+                "audit_comment": res.audit_comment,
+                "dry_run": res.dry_run,
+                "provenance": res.provenance,
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n==========================================================================================")
+        print(f" AUTONOMOUS AI INVESTIGATION REPORT: Case #{res.case_id}")
+        print(f"==========================================================================================")
+        print(f" Gemini Summary State: {res.summary_state}")
+        if res.summary_text:
+            print(f" Threat Context      : {res.summary_text[:140]}...")
+        print(f" Extracted IPs       : {', '.join(res.extracted_ips) or 'None'}")
+        print(f" Extracted Users     : {', '.join(res.extracted_users) or 'None'}")
+        print(f" Extracted Hashes    : {', '.join(res.extracted_hashes) or 'None'}")
+        print(f" UDM Threat Hunt     : {len(res.hunt_results)} indicator(s) queried")
+        for ioc, count in res.hunt_results.items():
+            print(f"   - {ioc:<35s}: {count if count >= 0 else 'Error/No Access'} events")
+        print(f" Escalations:")
+        print(f"   - Incident Flag   : {res.incident_marked}")
+        print(f"   - Alert Escalated : {res.alert_escalated}")
+        print(f"   - Comment Posted  : {res.comment_posted}")
+        print()
 
     elif args.case_action == "comments":
         print(f"\n[CLI] Retrieving Case Comments for Case #{args.case_id}...")
@@ -2496,6 +2648,215 @@ def run_curated_cli(args):
             sys.exit(1)
 
 
+def run_detection_cli(args):
+    """Handler for Detection Telemetry Analytics, Cardinality Profiling, and Refinements Tuning."""
+    engine = SecOpsEngine()
+
+    if args.detection_action == "baseline":
+        days = getattr(args, "days", 7)
+        alert_state = getattr(args, "alert_state", "ALL")
+        limit = getattr(args, "limit", 20)
+        as_json = getattr(args, "json", False)
+
+        try:
+            batch = engine.find_top_noisy_rules(lookback_days=days, alert_state=alert_state, limit=limit)
+            if as_json:
+                print(json.dumps([r.raw for r in batch.rules], indent=2))
+                return
+
+            print(f"\n=== TOP NOISY DETECTION RULES (Window: {days}d | Alert State: {alert_state} | Showing {len(batch.rules)} rules) ===")
+            print(f"{'#':<3s} {'RULE ID':<38s} {'TYPE':<15s} {'ALERT STATE':<14s} {'HITS':<10s} {'RULE NAME'}")
+            print("-" * 120)
+            for idx, r in enumerate(batch.rules, 1):
+                print(f"{idx:<3d} {r.rule_id:<38s} {r.rule_type:<15s} {r.alert_state:<14s} {r.detection_count:<10d} {r.rule_name[:45]}")
+        except Exception as e:
+            print(f"Error executing baseline noise query: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "cardinality":
+        rule_id = args.rule_id
+        dimension = getattr(args, "dimension", "all")
+        days = getattr(args, "days", 14)
+        limit = getattr(args, "limit", 10)
+        as_json = getattr(args, "json", False)
+
+        try:
+            report = engine.analyze_entity_cardinality(
+                rule_id=rule_id,
+                dimensions=[dimension],
+                lookback_days=days,
+                limit_per_dimension=limit,
+            )
+            if as_json:
+                out = {
+                    "rule_id": report.rule_id,
+                    "time_window": report.time_window,
+                    "dimensions": [
+                        {
+                            "dimension": d.dimension,
+                            "subfield_path": d.subfield_path,
+                            "records": [r.raw for r in d.records],
+                        }
+                        for d in report.dimensions
+                    ],
+                }
+                print(json.dumps(out, indent=2))
+                return
+
+            print(f"\n=== ENTITY CARDINALITY DISTRIBUTION for {report.rule_id} (Window: {days}d) ===")
+            for dim in report.dimensions:
+                print(f"\nDimension: {dim.dimension} ({dim.subfield_path})")
+                if not dim.records:
+                    print("  No telemetry data recorded for this dimension.")
+                    continue
+                print(f"  {'#':<3s} {'COUNT':<10s} {'VALUE'}")
+                print("  " + "-" * 75)
+                for idx, rec in enumerate(dim.records, 1):
+                    print(f"  {idx:<3d} {rec.count:<10d} {rec.value}")
+        except Exception as e:
+            print(f"Error analyzing entity cardinality: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "cases":
+        rule_id = args.rule_id
+        days = getattr(args, "days", 90)
+        limit = getattr(args, "limit", 20)
+        as_json = getattr(args, "json", False)
+
+        try:
+            batch = engine.cross_reference_rule_cases(rule_id=rule_id, lookback_days=days, limit=limit)
+            if as_json:
+                print(json.dumps([c.raw for c in batch.cases], indent=2))
+                return
+
+            print(f"\n=== SOAR CASES LINKED TO {rule_id} (Window: {days}d | Showing {len(batch.cases)} cases) ===")
+            print(f"{'#':<3s} {'STATUS':<10s} {'CLOSE REASON':<18s} {'ROOT CAUSE':<20s} {'CASE DISPLAY NAME'}")
+            print("-" * 105)
+            for idx, c in enumerate(batch.cases, 1):
+                reason = c.close_reason or "-"
+                root = c.root_cause or "-"
+                print(f"{idx:<3d} {c.status:<10s} {reason:<18s} {root:<20s} {c.display_name[:45]}")
+        except Exception as e:
+            print(f"Error querying case history: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "test-refinement":
+        rule_id = args.rule_id
+        query = args.query
+        days = getattr(args, "days", 14)
+        as_json = getattr(args, "json", False)
+
+        try:
+            res = engine.test_findings_refinement(curated_rule_ids=[rule_id], query=query, lookback_days=days)
+            if as_json:
+                print(json.dumps({
+                    "curated_rule_id": res.curated_rule_id,
+                    "query": res.query,
+                    "total_detections": res.total_detections,
+                    "excluded_detections": res.excluded_detections,
+                    "suppression_ratio": res.suppression_ratio,
+                    "raw": res.raw,
+                }, indent=2))
+                return
+
+            pct = res.suppression_ratio * 100.0
+            print(f"\n=== FINDINGS REFINEMENT DRY-RUN SIMULATION ===")
+            print(f"Curated Rule       : {res.curated_rule_id}")
+            print(f"Exclusion Query    : {res.query}")
+            print(f"Evaluation Window  : {days} days")
+            print(f"Total Detections   : {res.total_detections:,}")
+            print(f"Excluded Detections: {res.excluded_detections:,}")
+            print(f"Noise Reduction    : {pct:.2f}%")
+        except Exception as e:
+            print(f"Error testing findings refinement: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "list-refinements":
+        limit = getattr(args, "limit", 100)
+        as_json = getattr(args, "json", False)
+
+        try:
+            batch = engine.list_findings_refinements(page_size=limit)
+            if as_json:
+                print(json.dumps([r.raw for r in batch.refinements], indent=2))
+                return
+
+            print(f"\n=== TENANT UDM FINDINGS REFINEMENTS ({len(batch.refinements)} active exclusions) ===")
+            print(f"{'#':<3s} {'ID':<38s} {'DISPLAY NAME':<28s} {'QUERY'}")
+            print("-" * 110)
+            for idx, r in enumerate(batch.refinements, 1):
+                print(f"{idx:<3d} {r.id:<38s} {r.display_name:<28s} {r.query}")
+        except Exception as e:
+            print(f"Error listing findings refinements: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "create-refinement":
+        name = args.name
+        query = args.query
+        rule_id = getattr(args, "rule_id", None)
+        as_json = getattr(args, "json", False)
+
+        try:
+            rules = [rule_id] if rule_id else None
+            summary = engine.create_findings_refinement(display_name=name, query=query, curated_rule_ids=rules)
+            if as_json:
+                print(json.dumps(summary.raw, indent=2))
+                return
+
+            print(f"\n[+] Created Findings Refinement:")
+            print(f"  ID          : {summary.id}")
+            print(f"  Display Name: {summary.display_name}")
+            print(f"  Query       : {summary.query}")
+            print(f"  Resource    : {summary.name}")
+        except Exception as e:
+            print(f"Error creating findings refinement: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "delete-refinement":
+        ref_id = args.refinement_id
+        try:
+            res = engine.delete_findings_refinement(ref_id)
+            print(f"[+] Successfully deleted findings refinement: {ref_id}")
+        except Exception as e:
+            print(f"Error deleting findings refinement: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "tune":
+        rule_id = args.rule_id
+        days = getattr(args, "days", 7)
+        as_json = getattr(args, "json", False)
+
+        try:
+            report = engine.tune_detection(rule_id=rule_id, lookback_days=days)
+            if as_json:
+                print(json.dumps({
+                    "rule_id": report.rule_id,
+                    "rule_name": report.rule_name,
+                    "rule_type": report.rule_type,
+                    "validation_status": report.validation_status,
+                    "proposed_refinement_query": report.proposed_refinement_query,
+                    "dry_run_impact": {
+                        "total_detections": report.dry_run_impact.total_detections if report.dry_run_impact else None,
+                        "excluded_detections": report.dry_run_impact.excluded_detections if report.dry_run_impact else None,
+                        "suppression_ratio": report.dry_run_impact.suppression_ratio if report.dry_run_impact else None,
+                    } if report.dry_run_impact else None,
+                }, indent=2))
+                return
+
+            print(f"\n=== DETECTION TUNING DIAGNOSTIC REPORT for {report.rule_id} ===")
+            print(f"Rule Name         : {report.rule_name}")
+            print(f"Rule Origin       : {report.rule_type}")
+            print(f"Validation Status : {report.validation_status}")
+            print(f"Proposed Exclusion: {report.proposed_refinement_query or 'None'}")
+            if report.dry_run_impact:
+                pct = report.dry_run_impact.suppression_ratio * 100.0
+                print(f"Dry-Run Impact    : Scanned {report.dry_run_impact.total_detections:,} detections | Excluded {report.dry_run_impact.excluded_detections:,} ({pct:.2f}% reduction)")
+            if report.linked_cases.cases:
+                print(f"Historical Cases  : {len(report.linked_cases.cases)} case(s) found in SOAR")
+        except Exception as e:
+            print(f"Error tuning detection: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 def run_marketplace_cli(args):
     """Handler for Content Hub Marketplace Response Integrations commands."""
@@ -3161,6 +3522,102 @@ def run_parser_cli(args):
             print(f"Error retrieving parser setting: {e}", file=sys.stderr)
             sys.exit(1)
 
+    elif args.parser_action == "run":
+        log_type = args.log_type
+        raw_log = args.log_text
+        if not raw_log and args.log_file:
+            with open(args.log_file, "r", encoding="utf-8") as f:
+                raw_log = f.read()
+        if not raw_log:
+            print("Error: Must provide --log-text or --log-file.", file=sys.stderr)
+            sys.exit(1)
+
+        custom_cbn = None
+        if args.cbn_file:
+            with open(args.cbn_file, "r", encoding="utf-8") as f:
+                custom_cbn = f.read()
+
+        print(f"\n[CLI] Running parser for log type: '{log_type}'...")
+        try:
+            res = engine.run_parser(log_type=log_type, raw_log_text=raw_log, parser_cbn=custom_cbn)
+            if args.format == "json":
+                import json
+                print(json.dumps(res.raw, indent=2))
+            else:
+                print(f"\n=== PARSER RUN RESULTS ({res.log_type}) ===")
+                print(f"  Total Runs  : {res.total_runs}")
+                print(f"  Successes   : {res.success_count}")
+                print(f"  Errors      : {res.error_count}")
+                for idx, entry in enumerate(res.entries, 1):
+                    status_str = "SUCCESS" if entry.is_success else "FAILED"
+                    print(f"\n  [Run #{idx}] Status: {status_str}")
+                    if entry.error_message:
+                        print(f"  Error Message : {entry.error_message}")
+                    if entry.parsed_events:
+                        print(f"  Parsed Events : {len(entry.parsed_events)} event(s) generated")
+                        for e_idx, ev in enumerate(entry.parsed_events[:3], 1):
+                            meta = ev.get("metadata", {})
+                            print(f"    Event {e_idx}: event_type={meta.get('eventType')} product_name={meta.get('productName')}")
+                print()
+        except Exception as e:
+            print(f"Error running parser: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.parser_action == "diagnose-unparsed":
+        log_type = args.log_type
+        lookback = args.lookback_hours
+        limit = args.limit
+
+        print(f"\n[CLI] Diagnosing Unparsed Logs for Log Type: '{log_type}' (lookback={lookback}h, limit={limit})...")
+        try:
+            batch = engine.diagnose_unparsed_logs(log_type=log_type, lookback_hours=lookback, limit=limit)
+            if args.format == "json":
+                import json
+                out = {
+                    "log_type": batch.log_type,
+                    "display_name": batch.display_name,
+                    "total_unparsed_found": batch.total_unparsed_found,
+                    "total_diagnosed": batch.total_diagnosed,
+                    "diagnostics": [
+                        {
+                            "log_id": d.log_id,
+                            "error_category": d.error_category,
+                            "error_message": d.error_message,
+                            "raw_log_preview": d.raw_log_preview,
+                            "parser_id": d.parser_id,
+                            "parser_version": d.parser_version,
+                            "parser_creator": d.parser_creator,
+                        }
+                        for d in batch.diagnostics
+                    ],
+                }
+                print(json.dumps(out, indent=2))
+            else:
+                p_info = f"{batch.active_parser_summary.id} ({batch.active_parser_summary.creator_source})" if batch.active_parser_summary else "N/A"
+                print(f"\n=== UNPARSED LOGS DIAGNOSTIC REPORT: {batch.log_type} ===")
+                print(f"  Catalog Name         : {batch.display_name}")
+                print(f"  Active Parser        : {p_info}")
+                print(f"  Total Unparsed Found : {batch.total_unparsed_found}")
+                print(f"  Sample Diagnosed     : {batch.total_diagnosed}")
+
+                if not batch.diagnostics:
+                    print("\n  [✓] No unparsed logs found in specified lookback window.")
+                else:
+                    print("\n" + "=" * 90)
+                    for idx, diag in enumerate(batch.diagnostics, 1):
+                        print(f"  [Diagnostic #{idx}]")
+                        print(f"  Log ID         : {diag.log_id}")
+                        print(f"  Error Category : {diag.error_category}")
+                        print(f"  Parser Used    : {diag.parser_id} (version: {diag.parser_version}, creator: {diag.parser_creator})")
+                        print(f"  Error Message  : {diag.error_message}")
+                        print(f"  Raw Log Snippet: {diag.raw_log_preview[:150]}...")
+                        print("  " + "-" * 88)
+                print()
+        except Exception as e:
+            print(f"Error diagnosing unparsed logs: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
 
 def run_preview_cli(args):
     engine = SecOpsEngine()
@@ -3469,6 +3926,80 @@ def run_siem_cli(args):
             print()
         except Exception as e:
             print(f"Error retrieving tenant details: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def run_logs_cli(args):
+    engine = SecOpsEngine()
+    if args.logs_action == "sources":
+        hours = getattr(args, "hours", 24)
+        start = getattr(args, "start", None)
+        end = getattr(args, "end", None)
+        limit = getattr(args, "limit", 50)
+        print(f"\n[CLI] Querying Available Product Log Sources (lookback={hours}h)...")
+        try:
+            batch = engine.query_product_source_stats(start_time=start, end_time=end, lookback_hours=hours)
+            print(f"\n=== PRODUCT LOG SOURCES ({len(batch.stats)} discovered between {batch.start_time} and {batch.end_time}) ===")
+            if not batch.stats:
+                print("  No product log sources found.")
+            else:
+                print(f"  {'PRODUCT LOG SOURCE':45s} {'DATA VOLUME (BYTES)':20s} {'VOLUME (MB)'}")
+                print("  " + "-" * 75)
+                for s in batch.stats[:limit]:
+                    mb = s.data_size_bytes / (1024 * 1024)
+                    print(f"  {s.product_source:45s} {s.data_size_bytes:<20d} {mb:10.2f} MB")
+                if len(batch.stats) > limit:
+                    print(f"  ... and {len(batch.stats) - limit} more sources. Use --limit to display more.")
+            print()
+        except Exception as e:
+            print(f"Error querying product log sources: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.logs_action == "validate":
+        query = args.query
+        print(f"\n[CLI] Validating Raw Log Query: '{query}'...")
+        try:
+            res = engine.validate_raw_log_query(query)
+            if res.is_valid:
+                print(f"  [VALID] Query syntax is valid! Query type: {res.query_type}")
+            else:
+                print(f"  [INVALID] Query syntax error: {res.error_message}")
+            print()
+        except Exception as e:
+            print(f"Error validating query: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.logs_action == "search":
+        query = args.query
+        hours = getattr(args, "hours", 24)
+        start = getattr(args, "start", None)
+        end = getattr(args, "end", None)
+        sources = getattr(args, "sources", None)
+        limit = getattr(args, "limit", 50)
+        sources_str = f", sources={sources}" if sources else ""
+        print(f"\n[CLI] Searching Raw Logs (query='{query}', lookback={hours}h{sources_str})...")
+        try:
+            result = engine.search_raw_logs(
+                query=query,
+                start_time=start,
+                end_time=end,
+                lookback_hours=hours,
+                log_types=sources,
+                page_size=limit,
+            )
+            print(f"\n=== RAW LOG SEARCH RESULTS ({len(result.matches)} matches, progress={result.progress}%) ===")
+            if not result.matches:
+                print("  No raw logs matched query criteria.")
+            else:
+                for idx, m in enumerate(result.matches[:limit], 1):
+                    print(f"[{idx}] ID: {m.id} | Log Type: {m.log_type or 'Unknown'} | Ingestion: {m.ingestion_time or 'N/A'}")
+                    print(f"    Snippet: {m.snippet[:200]}")
+                    print()
+                if len(result.matches) > limit:
+                    print(f"  ... showing top {limit} matches.")
+            print()
+        except Exception as e:
+            print(f"Error searching raw logs: {e}", file=sys.stderr)
             sys.exit(1)
 
 

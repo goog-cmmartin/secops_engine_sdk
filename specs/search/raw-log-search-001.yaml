@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../schemas/workflow-spec.json
+schema_version: "1.0.0"
+capability_id: "log.raw_logs.search"
+name: "Raw Log Search"
+description: "Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges."
+category: "log"
+
+status_taxonomy:
+  - capability: "Query Product Source Statistics"
+    status: VERIFIED
+    endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{customer}:queryProductSourceStats"
+  - capability: "Validate Raw Log Query Syntax"
+    status: VERIFIED
+    endpoint: "GET /v1alpha/projects/{project}/locations/{location}/instances/{customer}:validateQuery"
+  - capability: "Search Raw Logs"
+    status: VERIFIED
+    endpoint: "POST /v1alpha/projects/{project}/locations/{location}/instances/{customer}:searchRawLogs"
+
+capabilities:
+  - id: "log.product_sources.stats"
+    name: "Query Product Source Statistics"
+  - id: "log.query.validate_query"
+    name: "Validate Raw Log Query Syntax"
+  - id: "log.raw_logs.search"
+    name: "Search Raw Logs"

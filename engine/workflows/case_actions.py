@@ -8,9 +8,11 @@ from engine.domain import (
     CaseAlertRecommendation,
     CaseAlertRecommendationJob,
     CaseAlertUpdateResult,
+    CaseCommentRecord,
     CaseSummary,
     CaseUpdateResult,
 )
+from engine.parsing import parse_timestamp
 
 
 def _clean_id(raw_id: str) -> str:
@@ -184,6 +186,29 @@ class SetCaseIncidentWorkflow:
             incident=incident,
             update_mask="incident",
         )
+
+
+class AddCaseCommentWorkflow:
+    """Orchestrates posting comments to a SecOps case with strict error visibility."""
+
+    def __init__(self, adapter: Optional["GoogleSecOpsAdapter"] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def execute(self, case_id: str, comment: str) -> CaseCommentRecord:
+        if not case_id or not str(case_id).strip():
+            raise ValueError("case_id must be a non-empty string.")
+        if not comment or not comment.strip():
+            raise ValueError("comment cannot be empty or whitespace.")
+
+        clean_case_id = _clean_id(case_id)
+        raw_res = self.adapter.create_case_comment(case_id=clean_case_id, comment=comment.strip())
+        from engine.workflows.case_wall import parse_case_comment_record
+
+        return parse_case_comment_record(raw_res)
 
 
 class UpdateCaseAlertWorkflow:

@@ -1,0 +1,38 @@
+capability_id: case.ai_investigate
+version: 1.0.0
+name: Autonomous AI Case Investigation & Telemetry Threat Hunt
+description: >
+  Deep AI-driven case investigation: fetches Gemini narrative, extracts network and user
+  indicators, executes Chronicle UDM threat hunts across historical telemetry, and
+  optionally escalates incident lifecycle status and records audit comments.
+
+provider_mapping:
+  engine: GoogleSecOpsAdapter
+  composed_workflows:
+    - case.investigate
+    - case.get_summary
+    - search.udm
+    - case.comment
+
+execution:
+  mode: COMPOSED_SEQUENTIAL
+  composition:
+    - step: case_workspace_investigation
+      workflow: case.investigate
+      description: Retrieves case metadata, alerts, and observed entity indicators.
+    - step: gemini_summary_polling
+      workflow: case.get_summary
+      description: Polls asynchronous Gemini AI summary generation until ready or timeout.
+    - step: indicator_extraction
+      description: Parses IP addresses, user identities, and file hashes from narrative and entities.
+    - step: udm_threat_hunting
+      workflow: search.udm
+      description: Queries Chronicle event store for retrospective indicator activity.
+    - step: escalation_and_audit
+      workflow: case.comment
+      description: Optionally marks case as incident, escalates alert priority, and writes investigation report.
+
+invariants:
+  - zero_mock_data: true
+  - strict_error_visibility: true
+  - provenance_tracking: true

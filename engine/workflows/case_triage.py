@@ -538,19 +538,25 @@ class GetCaseTimelineWorkflow:
         return build_case_timeline(inv, wall_records=wall_records)
 
 
-class OrchestrateCaseTriageWorkflow:
-    """Orchestrates single-case or batched case retrieval, parallel multi-resource deep investigation, and triage."""
+class CaseTriageWorkflow:
+    """Executes full analyst triage workflow for a single specific case (`case.triage`)."""
 
-    def __init__(self, adapter: Optional[Any] = None):
+    def __init__(
+        self,
+        adapter: Optional[Any] = None,
+        search_workflow: Optional[SearchCasesWorkflow] = None,
+        investigate_workflow: Optional[InvestigateCaseWorkflow] = None,
+        case_summary_workflow: Optional[GetCaseSummaryWorkflow] = None,
+    ):
         if adapter is None:
             from adapters.google_secops import GoogleSecOpsAdapter
             adapter = GoogleSecOpsAdapter()
         self.adapter = adapter
-        self.search_workflow = SearchCasesWorkflow(self.adapter)
-        self.investigate_workflow = InvestigateCaseWorkflow(self.adapter)
-        self.case_summary_workflow = GetCaseSummaryWorkflow(self.adapter)
+        self.search_workflow = search_workflow or SearchCasesWorkflow(self.adapter)
+        self.investigate_workflow = investigate_workflow or InvestigateCaseWorkflow(self.adapter)
+        self.case_summary_workflow = case_summary_workflow or GetCaseSummaryWorkflow(self.adapter)
 
-    def triage_single_case(
+    def execute(
         self,
         case_id: str,
         fetch_summary: bool = True,
@@ -748,6 +754,44 @@ class OrchestrateCaseTriageWorkflow:
             timeline=case_timeline,
         )
 
+
+class OrchestrateCaseTriageWorkflow:
+    """Orchestrates batched case retrieval, parallel multi-resource deep investigation, and triage (`case.orchestrate_triage`)."""
+
+    def __init__(
+        self,
+        adapter: Optional[Any] = None,
+        triage_workflow: Optional[CaseTriageWorkflow] = None,
+        search_workflow: Optional[SearchCasesWorkflow] = None,
+    ):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+        self.triage_workflow = triage_workflow or CaseTriageWorkflow(self.adapter)
+        self.search_workflow = search_workflow or self.triage_workflow.search_workflow
+        self.investigate_workflow = self.triage_workflow.investigate_workflow
+        self.case_summary_workflow = self.triage_workflow.case_summary_workflow
+
+    def triage_single_case(
+        self,
+        case_id: str,
+        fetch_summary: bool = True,
+        search_precedents: bool = True,
+        summary_timeout_sec: float = 15.0,
+        apply_stage_update: bool = False,
+        post_comment: bool = False,
+    ) -> CaseTriageAssessment:
+        """Delegates single-case triage to CaseTriageWorkflow."""
+        return self.triage_workflow.execute(
+            case_id=case_id,
+            fetch_summary=fetch_summary,
+            search_precedents=search_precedents,
+            summary_timeout_sec=summary_timeout_sec,
+            apply_stage_update=apply_stage_update,
+            post_comment=post_comment,
+        )
+
     def execute(
         self,
         case_ids: Optional[List[str]] = None,
@@ -771,7 +815,7 @@ class OrchestrateCaseTriageWorkflow:
             with ThreadPoolExecutor(max_workers=min(8, len(clean_ids))) as executor:
                 future_map = {
                     executor.submit(
-                        self.triage_single_case,
+                        self.triage_workflow.execute,
                         case_id=cid,
                         fetch_summary=fetch_summary,
                         search_precedents=search_precedents,
@@ -848,7 +892,7 @@ class OrchestrateCaseTriageWorkflow:
             with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as executor:
                 future_map = {
                     executor.submit(
-                        self.triage_single_case,
+                        self.triage_workflow.execute,
                         case_id=c.case_id,
                         fetch_summary=fetch_summary,
                         search_precedents=search_precedents,

@@ -7,6 +7,8 @@ Table of contents for project documentation and governance.
 - [README.md](README.md) — Project overview, quickstart, SDK/CLI usage, repository structure.
 - [AGENTS.md](AGENTS.md) — Non-negotiable invariants, classification taxonomy (status + kind/domain/cardinality axes), agent role profiles, the discovery→verification loop, and the capability Definition-of-Done checklist.
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — Generated capability reference (all registered capabilities by kind/domain/cardinality). Regenerate with `python scripts/generate_capabilities_doc.py`.
+- [docs/SDK_INTERFACE_STANDARD.md](docs/SDK_INTERFACE_STANDARD.md) — SDK interface standards, polymorphic arguments, and design principles.
+- [docs/WORKFLOW_EXECUTION_GUIDE.md](docs/WORKFLOW_EXECUTION_GUIDE.md) — Comprehensive execution guide for all 21 composed workflows with real live outputs using Case 104982.
 - [docs/UDM_STATS_SYNTAX.md](docs/UDM_STATS_SYNTAX.md) — Query language reference and canonical examples for UDM Stats Search (aggregations, match/outcome clauses, entity graph, detections).
 
 ## Reports & Artifacts
@@ -14,4 +16,5 @@ Table of contents for project documentation and governance.
 - [reports/M1_CAPABILITY_REPORT.md](reports/M1_CAPABILITY_REPORT.md) — Milestone 1.1 capability & robustness report (UDM Search slice). Point-in-time record.
 - [discovery/observations/01_udm_search_discovery.md](discovery/observations/01_udm_search_discovery.md) — Live UDM search behavior/API observations.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.
+- [discovery/observations/detection_tuning_observations.md](discovery/observations/detection_tuning_observations.md) — Live Detection Tuning and UDM Findings Refinements observations.
 - [tests/UDM_SEARCH_TEST_INVENTORY.md](tests/UDM_SEARCH_TEST_INVENTORY.md) — UDM search test inventory.

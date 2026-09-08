@@ -21,7 +21,11 @@ from engine.domain import (
     ParserExtensionBatch,
     ParserExtensionDetail,
     ParserExtensionSummary,
+    ParserRunResult,
+    ParserRunResultEntry,
     ParserSummary,
+    UnparsedLogDiagnostic,
+    UnparsedLogsDiagnosticBatch,
 )
 
 
@@ -373,4 +377,190 @@ class GetLogTypeSettingWorkflow:
             log_type=clean_lt,
             autonomous_parsing_extraction_type=opt_type,
             raw_settings=raw_res,
+        )
+
+
+class RunParserWorkflow:
+    """Executes a Logstash CBN parser configuration against raw log text."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        log_type: str,
+        raw_log_text: str,
+        parser_cbn: Optional[str] = None,
+    ) -> ParserRunResult:
+        clean_lt = log_type.split("/")[-1]
+
+        # If parser_cbn not provided, resolve active parser
+        if not parser_cbn:
+            get_wf = GetParserDetailWorkflow(self.adapter)
+            detail = get_wf.execute(log_type=clean_lt)
+            if not detail.cbn_raw:
+                raise ValueError(f"Active parser for '{clean_lt}' does not contain CBN configuration code.")
+            cbn_b64 = detail.cbn_raw
+        else:
+            # Check if parser_cbn is already base64, otherwise base64 encode it
+            try:
+                decoded = base64.b64decode(parser_cbn.encode("utf-8")).decode("utf-8", errors="ignore")
+                if "filter" in decoded:
+                    cbn_b64 = parser_cbn
+                else:
+                    cbn_b64 = base64.b64encode(parser_cbn.encode("utf-8")).decode("utf-8")
+            except Exception:
+                cbn_b64 = base64.b64encode(parser_cbn.encode("utf-8")).decode("utf-8")
+
+        raw_res = self.adapter.run_parser(
+            log_type=clean_lt,
+            parser_cbn_b64=cbn_b64,
+            raw_log_text=raw_log_text,
+        )
+
+        entries: List[ParserRunResultEntry] = []
+        raw_results = raw_res.get("runParserResults", [])
+
+        error_count = 0
+        success_count = 0
+
+        for r in raw_results:
+            log_b64 = r.get("log", "")
+            try:
+                log_text = base64.b64decode(log_b64).decode("utf-8", errors="replace") if log_b64 else raw_log_text
+            except Exception:
+                log_text = raw_log_text
+
+            err_info = r.get("error")
+            err_msg = err_info.get("message") if err_info else None
+            is_success = err_msg is None
+
+            if is_success:
+                success_count += 1
+            else:
+                error_count += 1
+
+            parsed_events = r.get("parsedEvents", {})
+            events_list = []
+            if isinstance(parsed_events, dict):
+                events_list = parsed_events.get("event", [parsed_events] if parsed_events else [])
+            elif isinstance(parsed_events, list):
+                events_list = parsed_events
+
+            entries.append(
+                ParserRunResultEntry(
+                    log_text=log_text,
+                    log_b64=log_b64,
+                    is_success=is_success,
+                    error_message=err_msg,
+                    parsed_events=events_list,
+                    raw=r,
+                )
+            )
+
+        return ParserRunResult(
+            log_type=clean_lt,
+            entries=entries,
+            total_runs=len(entries),
+            error_count=error_count,
+            success_count=success_count,
+            raw=raw_res,
+        )
+
+
+class FindUnparsedLogsAndDiagnoseWorkflow:
+    """Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        log_type: str,
+        lookback_hours: int = 168,
+        limit: int = 5,
+    ) -> UnparsedLogsDiagnosticBatch:
+        clean_lt = log_type.split("/")[-1]
+
+        # 1. Resolve deterministic display name via ListLogTypesWorkflow
+        lt_wf = ListLogTypesWorkflow(self.adapter)
+        lt_batch = lt_wf.execute(query=clean_lt, limit=100)
+        display_name = clean_lt
+        for lt_summary in lt_batch.log_types:
+            if lt_summary.id.upper() == clean_lt.upper():
+                display_name = lt_summary.display_name
+                break
+
+        # 2. Get active parser via GetParserDetailWorkflow
+        parser_wf = GetParserDetailWorkflow(self.adapter)
+        parser_detail = parser_wf.execute(log_type=clean_lt)
+        if not parser_detail.cbn_raw:
+            raise ValueError(f"No active CBN parser found for log type '{clean_lt}'")
+
+        # 3. Search unparsed raw logs via SearchRawLogsWorkflow
+        from engine.workflows.raw_log_search import SearchRawLogsWorkflow
+        search_wf = SearchRawLogsWorkflow(self.adapter)
+        query = f'raw = /.*/ log_source IN ["{display_name}"] parsed = false'
+        search_batch = search_wf.execute(
+            query=query,
+            lookback_hours=lookback_hours,
+            page_size=min(limit, 100),
+        )
+
+        diagnostics: List[UnparsedLogDiagnostic] = []
+        run_wf = RunParserWorkflow(self.adapter)
+
+        # 4. For each unparsed log match, fetch payload and run parser
+        for match in search_batch.matches[:limit]:
+            log_payload = self.adapter.get_raw_log(match.id)
+            raw_text = log_payload.raw_text
+
+            # Execute parser
+            run_res = run_wf.execute(
+                log_type=clean_lt,
+                raw_log_text=raw_text,
+                parser_cbn=parser_detail.cbn_raw,
+            )
+
+            error_msg = "Unknown parsing error"
+            err_category = "UNKNOWN"
+
+            if run_res.entries and run_res.entries[0].error_message:
+                error_msg = run_res.entries[0].error_message
+                if "non-signed-integral" in error_msg or "type given" in error_msg:
+                    err_category = "TYPE_MISMATCH"
+                elif "LOG_PARSING_CBN_ERROR" in error_msg:
+                    err_category = "CBN_NORMALIZATION_ERROR"
+                elif "empty parse tree" in error_msg:
+                    err_category = "EMPTY_PARSE_TREE"
+                elif "syntax" in error_msg.lower():
+                    err_category = "SYNTAX_ERROR"
+                else:
+                    err_category = "PARSER_FAILURE"
+            elif run_res.success_count > 0:
+                error_msg = "Parser succeeded in test run (possible ingestion time / pipeline difference)"
+                err_category = "NO_REPRO_IN_TEST"
+
+            diagnostics.append(
+                UnparsedLogDiagnostic(
+                    log_id=match.id,
+                    log_type=clean_lt,
+                    display_name=display_name,
+                    raw_log_preview=raw_text[:300].strip(),
+                    error_message=error_msg,
+                    error_category=err_category,
+                    parser_id=parser_detail.summary.id,
+                    parser_version=parser_detail.summary.version or "custom",
+                    parser_creator=parser_detail.summary.creator_source,
+                    raw=run_res.raw,
+                )
+            )
+
+        return UnparsedLogsDiagnosticBatch(
+            log_type=clean_lt,
+            display_name=display_name,
+            total_unparsed_found=len(search_batch.matches),
+            total_diagnosed=len(diagnostics),
+            diagnostics=diagnostics,
+            active_parser_summary=parser_detail.summary,
         )

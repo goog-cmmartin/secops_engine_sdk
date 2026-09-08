@@ -104,20 +104,9 @@ class InvestigateCaseWorkflow:
                                 )
                             )
 
-        # Parse case comments
-        comments: List[CaseCommentRecord] = []
-        for c in comments_raw:
-            comments.append(
-                CaseCommentRecord(
-                    name=c.get("name", ""),
-                    comment=c.get("comment", ""),
-                    author=c.get("user") or c.get("creator"),
-                    author_name=c.get("userOwnerFullName") or c.get("lastEditorFullName"),
-                    create_time=_parse_timestamp(c.get("createTime")),
-                    is_deleted=bool(c.get("isDeleted", False)),
-                    raw=c,
-                )
-            )
+        # Parse case comments using shared canonical parser
+        from engine.workflows.case_wall import parse_case_comment_record
+        comments: List[CaseCommentRecord] = [parse_case_comment_record(c) for c in comments_raw]
 
         # Build composite CaseInvestigation
         provenance = {
@@ -148,30 +137,5 @@ class InvestigateCaseWorkflow:
         )
 
 
-class AddCaseCommentWorkflow:
-    """Orchestrates posting comments to a SecOps case with strict error visibility."""
-
-    def __init__(self, adapter: Optional[Any] = None):
-        if adapter is None:
-            from adapters.google_secops import GoogleSecOpsAdapter
-            adapter = GoogleSecOpsAdapter()
-        self.adapter = adapter
-
-    def execute(self, case_id: str, comment: str) -> CaseCommentRecord:
-        if not case_id or not str(case_id).strip():
-            raise ValueError("case_id must be a non-empty string.")
-        if not comment or not comment.strip():
-            raise ValueError("comment cannot be empty or whitespace.")
-
-        clean_case_id = str(case_id).strip().split("/")[-1]
-        raw_res = self.adapter.create_case_comment(case_id=clean_case_id, comment=comment.strip())
-
-        return CaseCommentRecord(
-            name=raw_res.get("name", ""),
-            comment=raw_res.get("comment", comment.strip()),
-            author=raw_res.get("user") or raw_res.get("creator"),
-            author_name=raw_res.get("userOwnerFullName") or raw_res.get("lastEditorFullName"),
-            create_time=_parse_timestamp(raw_res.get("createTime")),
-            is_deleted=bool(raw_res.get("isDeleted", False)),
-            raw=raw_res,
-        )
+# Backward-compatible re-export: AddCaseCommentWorkflow has moved to case_actions.py
+from engine.workflows.case_actions import AddCaseCommentWorkflow  # noqa: E402

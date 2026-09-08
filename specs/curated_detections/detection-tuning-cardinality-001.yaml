@@ -1,0 +1,53 @@
+version: "1.0.0"
+name: "detection-tuning-cardinality-001"
+capability_id: "curated_detections.tuning.entity_cardinality"
+description: "Declarative workflow contract for profiling multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule."
+category: "curated_detections"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+inputs:
+  rule_id:
+    type: string
+    required: true
+    description: "Target detection rule identifier."
+  dimensions:
+    type: array
+    default: ["ips", "hostnames", "users", "processes", "dns"]
+    description: "Entity dimensions to profile."
+  lookback_days:
+    type: integer
+    default: 14
+    description: "Lookback window in days."
+  limit_per_dimension:
+    type: integer
+    default: 10
+    description: "Maximum values to return per entity dimension."
+
+outputs:
+  report:
+    type: object
+    properties:
+      rule_id: string
+      time_window: string
+      dimensions:
+        type: array
+        items:
+          type: object
+          properties:
+            dimension: string
+            subfield_path: string
+            records:
+              type: array
+              items:
+                type: object
+                properties:
+                  value: string
+                  count: integer
+
+api_mappings:
+  dashboard_query:
+    endpoint: "POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}:runLegacyDashboardQuery"

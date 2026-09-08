@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-01 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-09-08 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**153 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**167 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-09-01 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 21 |
-| primitive | 21 |
-| query | 111 |
-| **total** | **153** |
+| workflow | 25 |
+| primitive | 27 |
+| query | 115 |
+| **total** | **167** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 48 |
-| bounded | 4 |
-| unbounded | 59 |
-| (n/a — workflows/primitive) | 42 |
+| bounded | 5 |
+| unbounded | 62 |
+| (n/a — workflows/primitive) | 52 |
 
 ## Workflows
 
@@ -35,6 +35,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | capability_id | domain | description |
 | :--- | :--- | :--- |
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
+| `case.ai_investigate` | case | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
 | `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | case | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
@@ -42,6 +43,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case.triage` | case | End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions. |
 | `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `curated_detections.audit_health` | curated_detections | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
+| `curated_detections.tuning.diagnose` | curated_detections | End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression. |
 | `dashboard.audit_health` | dashboard | Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.health_check` | dashboard | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
@@ -51,6 +53,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `event.investigate` | event | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 | `feed.audit_health` | feed | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
 | `parser.audit_health` | parser | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
+| `parser.diagnose_unparsed` | parser | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
+| `playbook.audit_health` | playbook | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `rule.audit_health` | rule | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
 | `search.from_entity` | search | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | search | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
@@ -64,10 +68,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (19: workflow=6, primitive=10, query=3)
+### case  (20: workflow=7, primitive=10, query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `case.ai_investigate` | workflow | — | `ai_investigate_case` | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
 | `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | workflow | — | `orchestrate_case_triage` | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
@@ -115,15 +120,23 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
 | `content_pack.search` | query | `unbounded` | `search_content_packs` | Searches, lists, and filters Content Hub Marketplace Content Packs across categories and pack types. |
 
-### curated_detections  (6: workflow=1, primitive=1, query=4)
+### curated_detections  (14: workflow=2, primitive=7, query=5)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `curated_detections.audit_health` | workflow | — | `audit_curated_detections_health` | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
+| `curated_detections.tuning.diagnose` | workflow | — | `tune_detection` | End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression. |
+| `curated_detections.refinements.create` | primitive | — | `create_findings_refinement` | Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections. |
+| `curated_detections.refinements.delete` | primitive | — | `delete_findings_refinement` | Removes an active UDM findings refinement exclusion. |
+| `curated_detections.refinements.test` | primitive | — | `test_findings_refinement` | Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio. |
 | `curated_detections.set_deployment` | primitive | — | `set_curated_ruleset_deployment` | Updates enabled and alerting states for a Curated Rule Set precision deployment. |
+| `curated_detections.tuning.case_history` | primitive | — | `cross_reference_rule_cases` | Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes. |
+| `curated_detections.tuning.entity_cardinality` | primitive | — | `analyze_entity_cardinality` | Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule. |
+| `curated_detections.tuning.top_noisy_rules` | primitive | — | `find_top_noisy_rules` | Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification. |
 | `curated_detections.get_rule` | query | `single` | `get_curated_rule` | Retrieves an individual Curated Rule, its MITRE techniques, false positives, and raw YARA-L logic. |
 | `curated_detections.get_ruleset` | query | `single` | `get_curated_ruleset` | Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry. |
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
+| `curated_detections.refinements.list` | query | `unbounded` | `list_findings_refinements` | Lists active UDM findings refinements and detection exclusions across the tenant. |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
 
 ### dashboard  (6: workflow=3, query=3)
@@ -217,6 +230,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `job.logs` | query | `unbounded` | `get_job_instance_logs` | Retrieves execution run records and output logs for a job instance. |
 | `job.search` | query | `unbounded` | `search_jobs` | Searches, lists, and filters SOAR scheduled jobs across integrations and execution schedules. |
 
+### log  (3: query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `log.product_sources.stats` | query | `unbounded` | `query_product_source_stats` | Queries product log sources, data ingestion volumes, and active sources in the tenant. |
+| `log.query.validate_query` | query | `bounded` | `validate_raw_log_query` | Validates raw log search query syntax against Chronicle query compiler. |
+| `log.raw_logs.search` | query | `unbounded` | `search_raw_logs` | Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges. |
+
 ### marketplace_integration  (4: query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
@@ -226,11 +247,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `marketplace_integration.get` | query | `single` | `get_marketplace_integration` | Retrieves complete integration composite, actions, connectors, jobs, managers, and release notes. |
 | `marketplace_integration.search` | query | `unbounded` | `search_marketplace_integrations` | Discovers, searches, and filters Marketplace Response Integrations across categories and update states. |
 
-### parser  (7: workflow=1, query=6)
+### parser  (9: workflow=2, primitive=1, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `parser.audit_health` | workflow | — | `audit_parser_health` | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
+| `parser.diagnose_unparsed` | workflow | — | `diagnose_unparsed_logs` | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
+| `parser.run` | primitive | — | `run_parser` | Executes a Logstash CBN parser configuration against a raw log string. |
 | `parser.extensions.get` | query | `single` | `get_parser_extension` | Retrieves full parser extension configuration, decoded snippet, and test log. |
 | `parser.extensions.search` | query | `unbounded` | `search_parser_extensions` | Discovers parser extensions and dynamic parsing configurations across log types. |
 | `parser.get` | query | `single` | `get_parser` | Retrieves complete parser metadata and decoded Logstash CBN filter code. |
@@ -238,11 +261,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.log_types.list` | query | `unbounded` | `list_log_types` | Discovers and filters supported ingestion log types cataloged in Google SecOps. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (5: primitive=1, query=4)
+### playbook  (5: workflow=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
-| `playbook.audit_health` | primitive | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
+| `playbook.audit_health` | workflow | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
 | `playbook.instances` | query | `unbounded` | `get_alert_playbook_instances` | Retrieves authoritative per-alert playbook run instances and the executed step DAG. |

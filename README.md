@@ -13,6 +13,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 * **Detection & Content Hub:**
   * Rule management, YARA-L compiler validation, detection queries, and live rule errors.
   * Curated Detections catalog (MITRE ATT&CK filtering, broad/precise deployment profiles, metric counts).
+  * Detection Tuning & Findings Refinements (noise analytics, multi-dimensional entity cardinality profiling, SOAR case history cross-referencing, exclusion formulation, and dry-run simulation).
   * Content Packs & Marketplace Integrations (catalog search, installation state, update management).
 * **SOAR & Case Workspace:**
   * Case search, deep composite workspace loading, alert grouping, dynamic parameters, tags, stages, and SLA tracking.
@@ -20,10 +21,10 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
   * Scheduled Ingestion Connectors & HTTPS Event Ingestion Webhooks with JSON schema mapping.
   * Multi-tenancy Environments, Remote Agent execution workers, and Email/Support settings.
 * **Client Interfaces & Integration:**
-  * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking.
+  * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking (including `secops detection baseline|cardinality|cases|test-refinement|tune`).
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
   * **TUI (`clients/tui/`, `run_tui.py`)**: Textual-based two-pane terminal UI for case triage with responsive threading, offline demo mode, and clean domain/presentation separation (proof-of-concept).
-  * **Universal Capability Registry (`engine.facade`)**: 100+ modular registered capabilities for direct Python SDK and AI agent integration.
+  * **Universal Capability Registry (`engine.facade`)**: 160+ modular registered capabilities across 38 workflow modules for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---
@@ -67,7 +68,8 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   └── threat_hunting/       # Retrospective UDM hunt templates
 ├── docs/                     # Documentation & specifications
 │   ├── CAPABILITIES.md       # Full registered SDK capability reference
-│   └── CLI_REFERENCE.md      # Exhaustive SecOps CLI commands and argument manual
+│   ├── CLI_REFERENCE.md      # Exhaustive SecOps CLI commands and argument manual
+│   └── WORKFLOW_EXECUTION_GUIDE.md # Live execution guide & real outputs (Case 104982)
 ├── specs/                    # Declarative YAML workflow contracts
 ├── schemas/                  # API & domain JSON schemas
 ├── benchmarks/               # Performance, memory & stress benchmarks

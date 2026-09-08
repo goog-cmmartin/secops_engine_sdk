@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class LifecycleState(str, Enum):
@@ -45,6 +45,62 @@ class EntityType(str, Enum):
     WINDOWS_SID = "WINDOWS_SID"
     RESOURCE = "RESOURCE"
     FILE = "FILE"
+
+
+_ENTITY_TYPE_ALIASES: Dict[str, EntityType] = {
+    "ip": EntityType.IP,
+    "ipv4": EntityType.IP,
+    "ipv6": EntityType.IP,
+    "ip_address": EntityType.IP,
+    "ipaddress": EntityType.IP,
+    "host": EntityType.HOSTNAME,
+    "hostname": EntityType.HOSTNAME,
+    "user": EntityType.USER,
+    "username": EntityType.USER,
+    "user_name": EntityType.USER,
+    "userid": EntityType.USER,
+    "user_id": EntityType.USER,
+    "sha256": EntityType.SHA256,
+    "hash": EntityType.SHA256,
+    "md5": EntityType.MD5,
+    "sha1": EntityType.SHA1,
+    "domain": EntityType.DOMAIN,
+    "domain_name": EntityType.DOMAIN,
+    "email": EntityType.EMAIL,
+    "email_address": EntityType.EMAIL,
+    "mac": EntityType.MAC,
+    "mac_address": EntityType.MAC,
+    "url": EntityType.URL,
+    "windows_sid": EntityType.WINDOWS_SID,
+    "sid": EntityType.WINDOWS_SID,
+    "resource": EntityType.RESOURCE,
+    "file": EntityType.FILE,
+    "filename": EntityType.FILE,
+}
+
+
+def coerce_entity_type(val: Union[EntityType, str]) -> EntityType:
+    """Coerces a string or EntityType into a canonical EntityType enum member.
+    
+    Supports case-insensitive lookups, aliases (e.g. 'ip_address', 'host', 'hash'),
+    and hyphen/space/underscore variations.
+    """
+    if isinstance(val, EntityType):
+        return val
+    if not isinstance(val, str):
+        raise TypeError(f"Expected EntityType or str, got {type(val).__name__}")
+    key = val.strip().lower().replace("-", "_").replace(" ", "_")
+    if key in _ENTITY_TYPE_ALIASES:
+        return _ENTITY_TYPE_ALIASES[key]
+    upper = val.strip().upper().replace("-", "_").replace(" ", "_")
+    try:
+        return EntityType[upper]
+    except KeyError:
+        try:
+            return EntityType(upper)
+        except ValueError:
+            valid = ", ".join(e.value for e in EntityType)
+            raise ValueError(f"Unknown entity type '{val}'. Valid types: {valid}")
 
 
 class CaseSearchPrefix(str, Enum):
@@ -107,11 +163,55 @@ class UniversalBatchMixin:
         return bool(self.items)
 
 
+class UniversalDictMixin(dict):
+    """Universal dataclass mixin providing backward-compatible dict inheritance and field access."""
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        from dataclasses import fields as dc_fields
+        orig_post_init = getattr(cls, "__post_init__", None)
+
+        def __post_init__(self, *args, **post_kwargs):
+            try:
+                dict.__init__(self, {f.name: getattr(self, f.name) for f in dc_fields(self)})
+            except Exception:
+                pass
+            if orig_post_init:
+                orig_post_init(self, *args, **post_kwargs)
+
+        cls.__post_init__ = __post_init__
+
+    def __getitem__(self, key: str) -> Any:
+        if hasattr(self, key):
+            return getattr(self, key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, super().get(key, default))
+
+    def __contains__(self, key: Any) -> bool:
+        return hasattr(self, key) or super().__contains__(key)
+
+    def to_dict(self) -> Dict[str, Any]:
+        from dataclasses import asdict
+        try:
+            return asdict(self)
+        except Exception:
+            return dict(self)
+
+
 @dataclass
 class FieldFilter:
-    field_path: str
-    operator: FilterOperator
-    value: Any
+    field_path: str = ""
+    operator: FilterOperator = FilterOperator.EQUALS
+    value: Any = None
+    field: Optional[str] = None
+
+    def __post_init__(self):
+        if not self.field_path and self.field:
+            self.field_path = self.field
+        elif self.field_path and not self.field:
+            self.field = self.field_path
 
     def to_udm_clause(self) -> str:
         """Renders filter into valid Google SecOps UDM query syntax."""
@@ -132,6 +232,91 @@ class FieldFilter:
             return f'{canonical_path} = "{val_str}"'
 
 
+_OPERATOR_ALIASES: Dict[str, FilterOperator] = {
+    "=": FilterOperator.EQUALS,
+    "==": FilterOperator.EQUALS,
+    "eq": FilterOperator.EQUALS,
+    "equals": FilterOperator.EQUALS,
+    "!=": FilterOperator.NOT_EQUALS,
+    "ne": FilterOperator.NOT_EQUALS,
+    "not_equals": FilterOperator.NOT_EQUALS,
+    "=~": FilterOperator.REGEX_MATCH,
+    "regex": FilterOperator.REGEX_MATCH,
+    "regex_match": FilterOperator.REGEX_MATCH,
+    "contains": FilterOperator.CONTAINS,
+    "nocase": FilterOperator.NOCASE_EQUALS,
+    "nocase_equals": FilterOperator.NOCASE_EQUALS,
+    "= ... nocase": FilterOperator.NOCASE_EQUALS,
+}
+
+
+def coerce_filter_operator(op: Union[FilterOperator, str]) -> FilterOperator:
+    """Coerces an operator string or FilterOperator into a canonical FilterOperator."""
+    if isinstance(op, FilterOperator):
+        return op
+    key = str(op).strip().lower()
+    if key in _OPERATOR_ALIASES:
+        return _OPERATOR_ALIASES[key]
+    upper = str(op).strip().upper()
+    try:
+        return FilterOperator[upper]
+    except KeyError:
+        try:
+            return FilterOperator(str(op).strip())
+        except ValueError:
+            return FilterOperator.EQUALS
+
+
+def coerce_field_filters(filters: Union[List[Any], Any]) -> List[FieldFilter]:
+    """Normalizes single filters, dicts, or tuples into a canonical List[FieldFilter].
+    
+    Accepts:
+    - Single FieldFilter or List[FieldFilter]
+    - Single dict or list of dicts: {"field": "principal.ip", "operator": "=", "value": "1.2.3.4"}
+    - Single tuple or list of tuples: ("principal.ip", "=", "1.2.3.4") or ("principal.ip", "1.2.3.4")
+    """
+    if filters is None:
+        return []
+    if isinstance(filters, FieldFilter):
+        return [filters]
+    if isinstance(filters, dict):
+        path = filters.get("field_path") or filters.get("field") or filters.get("path")
+        op = coerce_filter_operator(filters.get("operator", "="))
+        val = filters.get("value")
+        if not path:
+            raise ValueError("Dictionary filter must contain 'field' or 'field_path'")
+        return [FieldFilter(field_path=path, operator=op, value=val)]
+    if isinstance(filters, (tuple, list)) and len(filters) in (2, 3) and isinstance(filters[0], str):
+        path = filters[0]
+        if len(filters) == 3:
+            op = coerce_filter_operator(filters[1])
+            val = filters[2]
+        else:
+            op = FilterOperator.EQUALS
+            val = filters[1]
+        return [FieldFilter(field_path=path, operator=op, value=val)]
+
+    result: List[FieldFilter] = []
+    if isinstance(filters, (list, tuple)):
+        for f in filters:
+            if isinstance(f, FieldFilter):
+                result.append(f)
+            elif isinstance(f, dict):
+                path = f.get("field_path") or f.get("field") or f.get("path")
+                op = coerce_filter_operator(f.get("operator", "="))
+                val = f.get("value")
+                if path:
+                    result.append(FieldFilter(field_path=path, operator=op, value=val))
+            elif isinstance(f, (tuple, list)) and len(f) in (2, 3) and isinstance(f[0], str):
+                path = f[0]
+                op = coerce_filter_operator(f[1]) if len(f) == 3 else FilterOperator.EQUALS
+                val = f[2] if len(f) == 3 else f[1]
+                result.append(FieldFilter(field_path=path, operator=op, value=val))
+            else:
+                raise TypeError(f"Cannot coerce {type(f).__name__} into FieldFilter")
+    return result
+
+
 @dataclass
 
 class RefinementProvenance:
@@ -150,11 +335,146 @@ class ValidationResult:
     error_message: Optional[str] = None
 
 
+def _to_camel_case(s: str) -> str:
+    components = s.split("_")
+    return components[0] + "".join(x.title() for x in components[1:])
+
+
+class UDMEvent(dict):
+    """Smart dictionary wrapper for UDM events supporting both dict indexing and attribute dot-notation.
+
+    Subclasses standard `dict` to maintain 100% backward compatibility with code expecting a dictionary,
+    while providing:
+    - Transparent unwrapping of Chronicle's nested 'event' field: `ev['metadata']` works even if stored in `ev['event']['metadata']`.
+    - Chained dot-notation attribute access: `ev.metadata.event_timestamp`, `ev.principal.ip`, `ev.principal.user.userid`.
+    - Automatic camelCase <-> snake_case tolerance on attributes and keys.
+    - Path navigation via `ev.get_field("metadata.eventTimestamp")`.
+    - Convenience properties: `.timestamp`, `.event_type`, `.log_type`, `.product_name`, `.raw`.
+    """
+
+    def __getitem__(self, key: Any) -> Any:
+        has_inner_event = super().__contains__("event") and isinstance(super().__getitem__("event"), dict)
+        if super().__contains__(key):
+            val = super().__getitem__(key)
+        elif has_inner_event and key in super().__getitem__("event"):
+            val = super().__getitem__("event")[key]
+        elif isinstance(key, str):
+            camel = _to_camel_case(key)
+            if super().__contains__(camel):
+                val = super().__getitem__(camel)
+            elif has_inner_event and camel in super().__getitem__("event"):
+                val = super().__getitem__("event")[camel]
+            else:
+                raise KeyError(key)
+        else:
+            raise KeyError(key)
+
+        if isinstance(val, dict) and not isinstance(val, UDMEvent):
+            return UDMEvent(val)
+        return val
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: Any) -> bool:
+        if super().__contains__(key):
+            return True
+        has_inner_event = super().__contains__("event") and isinstance(super().__getitem__("event"), dict)
+        if has_inner_event and key in super().__getitem__("event"):
+            return True
+        if isinstance(key, str):
+            camel = _to_camel_case(key)
+            if super().__contains__(camel):
+                return True
+            if has_inner_event and camel in super().__getitem__("event"):
+                return True
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"'UDMEvent' object has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+        else:
+            self[name] = value
+
+    @property
+    def raw(self) -> Dict[str, Any]:
+        """Returns the raw underlying dictionary."""
+        return dict(self)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Recursively converts UDMEvent back into standard Python dictionaries."""
+        res: Dict[str, Any] = {}
+        for k, v in self.items():
+            if isinstance(v, UDMEvent):
+                res[k] = v.to_dict()
+            elif isinstance(v, dict):
+                res[k] = dict(v)
+            elif isinstance(v, list):
+                res[k] = [item.to_dict() if isinstance(item, UDMEvent) else item for item in v]
+            else:
+                res[k] = v
+        return res
+
+    def get_field(self, path: str, default: Any = None) -> Any:
+        """Retrieves a nested field from the UDM event using dot notation (e.g. 'principal.ip' or 'metadata.event_timestamp')."""
+        if path.startswith("udm."):
+            path = path[4:]
+        elif path.startswith("event."):
+            path = path[6:]
+
+        curr: Any = self
+        for part in path.split("."):
+            if isinstance(curr, dict):
+                curr = curr.get(part)
+            elif isinstance(curr, list) and part.isdigit() and int(part) < len(curr):
+                curr = curr[int(part)]
+            else:
+                return default
+            if curr is None:
+                return default
+        return curr
+
+    @property
+    def timestamp(self) -> Optional[str]:
+        """Convenience property for event timestamp."""
+        ts = self.get("eventTimestamp") or self.get("event_timestamp") or self.get_field("metadata.eventTimestamp") or self.get_field("metadata.event_timestamp")
+        return str(ts) if ts is not None else None
+
+    @property
+    def event_type(self) -> Optional[str]:
+        """Convenience property for event type."""
+        et = self.get("eventType") or self.get("event_type") or self.get_field("metadata.eventType") or self.get_field("metadata.event_type")
+        return str(et) if et is not None else None
+
+    @property
+    def log_type(self) -> Optional[str]:
+        """Convenience property for log type."""
+        lt = self.get("logType") or self.get("log_type") or self.get_field("metadata.logType") or self.get_field("metadata.log_type")
+        return str(lt) if lt is not None else None
+
+    @property
+    def product_name(self) -> Optional[str]:
+        """Convenience property for product name."""
+        pn = self.get("productName") or self.get("product_name") or self.get_field("metadata.productName") or self.get_field("metadata.product_name")
+        return str(pn) if pn is not None else None
+
+
 @dataclass
 class SearchBatchResult(UniversalBatchMixin):
     """A single batch of events received from the provider."""
 
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    events: List[Union[UDMEvent, Dict[str, Any]]] = field(default_factory=list)
     provider_event_count: int = 0
     emitted_event_count: int = 0
     more_data_available: bool = False
@@ -193,8 +513,14 @@ class SearchRequest:
     # yield zero events for a query that otherwise has matches. When None, the search
     # workflow derives a floored budget (see MATERIALIZE_BUDGET_FLOOR in
     # search_udm.py). The client-side loop still trims to `receive_limit`, so raising
-    # this never over-delivers.
     materialize_budget: Optional[int] = None
+    limit: Optional[int] = None
+
+    def __post_init__(self):
+        if self.limit is not None:
+            self.receive_limit = self.limit
+        else:
+            self.limit = self.receive_limit
 
 
 @dataclass
@@ -206,10 +532,20 @@ class SearchSession:
     received_count: int = 0
     next_index: int = 1
     more_data_available: bool = True
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    events: List[Union[UDMEvent, Dict[str, Any]]] = field(default_factory=list)
     error: Optional[str] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
+
+    @property
+    def results(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
+        """Alias for events."""
+        return self.events
+
+    @property
+    def rows(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
+        """Alias for events."""
+        return self.events
 
 
 @dataclass
@@ -412,12 +748,77 @@ class RawLogPayload:
 
 
 @dataclass
+class ProductSourceStat:
+    """Represents data volume statistics for an ingested product log source."""
+    product_source: str
+    data_size_bytes: int = 0
+
+
+@dataclass
+class ProductSourceStatsBatch:
+    """Represents a collection of product source statistics over an evaluation time window."""
+    stats: List[ProductSourceStat] = field(default_factory=list)
+    start_time: str = ""
+    end_time: str = ""
+    total_sources: int = 0
+
+    @property
+    def items(self) -> List[ProductSourceStat]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.stats
+
+
+@dataclass
+class RawLogValidationResult:
+    """Represents the syntax validation status and query classification of a raw log query."""
+    query_type: str = ""
+    is_valid: bool = True
+    error_message: Optional[str] = None
+
+
+@dataclass
+class RawLogSnippet:
+    """Represents a matched snippet from a raw log search."""
+    id: str
+    summary: str = ""
+    snippet: str = ""
+    log_type: str = ""
+    ingestion_time: Optional[str] = None
+
+
+@dataclass
+class RawLogSearchResult:
+    """Represents the paginated results of an enterprise raw log search."""
+    matches: List[RawLogSnippet] = field(default_factory=list)
+    total_matches: int = 0
+    progress: int = 100
+    has_more: bool = False
+    next_page_token: Optional[Union[str, bool]] = None
+    aggregations: Dict[str, Any] = field(default_factory=dict)
+    timeline: Dict[str, Any] = field(default_factory=dict)
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[RawLogSnippet]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.matches
+
+
+@dataclass
 class EventReference:
     """Stable pointer to a SecOps event for investigation or pivot."""
 
-    event_id: str
+    event_id: str = ""
     log_token: Optional[str] = None
     structured_event: Optional[Dict[str, Any]] = None
+    timestamp: Optional[Union[str, datetime]] = None
+    id: Optional[str] = None
+
+    def __post_init__(self):
+        if not self.event_id and self.id:
+            self.event_id = self.id
+        elif self.event_id and not self.id:
+            self.id = self.event_id
 
 
 @dataclass
@@ -453,6 +854,11 @@ class EventInvestigation:
     def udm(self) -> Dict[str, Any]:
         """Convenience alias for structured event payload."""
         return self.event
+
+    @property
+    def id(self) -> str:
+        """Alias for event_id."""
+        return self.event_id
 
     @property
     def event_type(self) -> str:
@@ -544,6 +950,34 @@ class CasePriority(str, Enum):
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
     UNKNOWN = "UNKNOWN"
+
+
+def coerce_case_status(val: Union[CaseStatus, str, None]) -> Optional[CaseStatus]:
+    """Coerces a string or CaseStatus into a canonical CaseStatus enum member."""
+    if val is None or isinstance(val, CaseStatus):
+        return val
+    upper = str(val).strip().upper()
+    try:
+        return CaseStatus[upper]
+    except KeyError:
+        try:
+            return CaseStatus(upper)
+        except ValueError:
+            return CaseStatus.UNKNOWN
+
+
+def coerce_case_priority(val: Union[CasePriority, str, None]) -> Optional[CasePriority]:
+    """Coerces a string or CasePriority into a canonical CasePriority enum member."""
+    if val is None or isinstance(val, CasePriority):
+        return val
+    upper = str(val).strip().upper()
+    try:
+        return CasePriority[upper]
+    except KeyError:
+        try:
+            return CasePriority(upper)
+        except ValueError:
+            return CasePriority.UNKNOWN
 
 
 @dataclass
@@ -690,6 +1124,10 @@ class CaseInvestigation:
     raw_case: Dict[str, Any] = field(default_factory=dict)
 
     @property
+    def id(self) -> str:
+        return self.case_id
+
+    @property
     def title(self) -> str:
         return self.display_name or self.name
 
@@ -740,6 +1178,16 @@ class AlertInvestigation:
     associated_events: List[Dict[str, Any]] = field(default_factory=list)
     provenance: Dict[str, Any] = field(default_factory=dict)
     raw_alert: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def alert_id(self) -> str:
+        """Alias for alert_name / resource identifier."""
+        return self.alert_name
+
+    @property
+    def id(self) -> str:
+        """Alias for alert_name / resource identifier."""
+        return self.alert_name
 
 
 @dataclass
@@ -893,6 +1341,21 @@ class CaseTriageAssessment:
     alert_playbook_statuses: List[AlertPlaybookStatus] = field(default_factory=list)
     timeline: Optional[CaseTimeline] = None
 
+    @property
+    def verdict(self) -> TriageVerdict:
+        """Alias for triage_verdict."""
+        return self.triage_verdict
+
+    @property
+    def summary(self) -> str:
+        """Alias for triage_summary."""
+        return self.triage_summary
+
+    @property
+    def id(self) -> str:
+        """Alias for case_id."""
+        return self.case_id
+
 
 @dataclass
 class CaseTriageBatch(UniversalBatchMixin):
@@ -909,11 +1372,47 @@ class CaseTriageBatch(UniversalBatchMixin):
         return self.results
 
 
+@dataclass
+class CaseAiInvestigationResult:
+    """Represents the findings and escalation state of an autonomous AI case investigation."""
+    case_id: str
+    summary_state: str
+    summary_text: Optional[str] = None
+    extracted_ips: List[str] = field(default_factory=list)
+    extracted_users: List[str] = field(default_factory=list)
+    extracted_hashes: List[str] = field(default_factory=list)
+    hunt_results: Dict[str, int] = field(default_factory=dict)
+    primary_alert_id: Optional[str] = None
+    incident_marked: bool = False
+    alert_escalated: bool = False
+    comment_posted: bool = False
+    audit_comment: Optional[str] = None
+    dry_run: bool = False
+    investigation: Optional[CaseInvestigation] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+
 
 class PlaybookType(str, Enum):
     REGULAR = "REGULAR"
     NESTED = "NESTED"
     UNKNOWN = "UNKNOWN"
+
+
+def coerce_playbook_type(val: Union[PlaybookType, str, None]) -> Optional[PlaybookType]:
+    """Coerces a string or PlaybookType into a canonical PlaybookType enum member."""
+    if val is None or isinstance(val, PlaybookType):
+        return val
+    upper = str(val).strip().upper()
+    if upper in ("STANDARD", "NORMAL"):
+        return PlaybookType.REGULAR
+    try:
+        return PlaybookType[upper]
+    except KeyError:
+        try:
+            return PlaybookType(upper)
+        except ValueError:
+            return PlaybookType.UNKNOWN
 
 
 @dataclass
@@ -1618,6 +2117,32 @@ class CuratedDetectionMetrics:
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass
+class CuratedDetectionHealthReport(UniversalDictMixin):
+    """Complete health, deployment, and hygiene audit report for Google SecOps Curated Detections."""
+    evaluation_period: Dict[str, Any]
+    summary: Dict[str, Any]
+    tenant_quotas: Dict[str, Any]
+    health_findings: List[Dict[str, Any]]
+    top_firing_rulesets: List[Dict[str, Any]]
+    newest_rules: List[Dict[str, Any]]
+    oldest_rules: List[Dict[str, Any]]
+    category_coverage: List[Dict[str, Any]]
+    log_source_coverage: List[Dict[str, Any]]
+    ruleset_audits: List[Dict[str, Any]]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def findings(self) -> List[Dict[str, Any]]:
+        """Alias for health_findings."""
+        return self.health_findings
+
+    @property
+    def rulesets(self) -> List[Dict[str, Any]]:
+        """Alias for ruleset_audits."""
+        return self.ruleset_audits
+
+
 # --- Milestone 5.8: Content Hub Marketplace Response Integrations Domain Models ---
 
 
@@ -1793,8 +2318,27 @@ class DashboardDetail:
     filters: List[Dict[str, Any]] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def display_name(self) -> str:
+        """Alias for summary.display_name."""
+        return self.summary.display_name if self.summary else ""
 
-@dataclass
+    @property
+    def id(self) -> str:
+        """Alias for summary.id."""
+        return self.summary.id if self.summary else ""
+
+    @property
+    def dashboard_id(self) -> str:
+        """Alias for summary.id."""
+        return self.summary.id if self.summary else ""
+
+    @property
+    def dashboard_type(self) -> str:
+        """Alias for summary.dashboard_type."""
+        return self.summary.dashboard_type if self.summary else ""
+
+
 @dataclass
 class DashboardSearchQuery:
     """Query parameters for filtering dashboards."""
@@ -1809,6 +2353,32 @@ class DashboardBatch(UniversalBatchMixin):
     dashboards: List[DashboardSummary]
     total_count: int
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class DashboardHealthCheckResult(UniversalDictMixin):
+    """Result of a native dashboard operational health check."""
+    dashboard_id: str
+    query_results: List[Dict[str, Any]]
+    summary: str
+    errors: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        return self.dashboard_id
+
+    @property
+    def total_queries(self) -> int:
+        return len(self.query_results)
+
+    @property
+    def successful_queries(self) -> int:
+        return sum(1 for r in self.query_results if r.get("success"))
+
+    @property
+    def failed_queries(self) -> int:
+        return self.total_queries - self.successful_queries
 
 
 # =============================================================================
@@ -2160,6 +2730,57 @@ class ParserBatch(UniversalBatchMixin):
     parsers: List[ParserSummary]
     total_count: int
     next_page_token: Optional[str] = None
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class ParserRunResultEntry:
+    """Individual execution result for a single log passed to run_parser."""
+    log_text: str
+    log_b64: str
+    is_success: bool
+    error_message: Optional[str] = None
+    parsed_events: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ParserRunResult(UniversalBatchMixin):
+    """Container for parser run execution results."""
+    log_type: str
+    entries: List[ParserRunResultEntry]
+    total_runs: int
+    error_count: int
+    success_count: int
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UnparsedLogDiagnostic:
+    """Diagnostic analysis of an unparsed raw log."""
+    log_id: str
+    log_type: str
+    display_name: str
+    raw_log_preview: str
+    error_message: str
+    error_category: str
+    parser_id: str
+    parser_version: str
+    parser_creator: str
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UnparsedLogsDiagnosticBatch(UniversalBatchMixin):
+    """Batch of diagnostics for unparsed raw logs of a specific log type."""
+    log_type: str
+    display_name: str
+    total_unparsed_found: int
+    total_diagnosed: int
+    diagnostics: List[UnparsedLogDiagnostic]
+    active_parser_summary: Optional[ParserSummary] = None
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -3309,6 +3930,16 @@ class CaseAlertRecommendation:
     raw: Dict[str, Any] = field(default_factory=dict)
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    @property
+    def status(self) -> str:
+        """Alias for state."""
+        return self.state
+
+    @property
+    def id(self) -> str:
+        """Alias for recommendation_id."""
+        return self.recommendation_id
+
 
 @dataclass
 class CaseSummary:
@@ -3322,6 +3953,11 @@ class CaseSummary:
     update_time: Optional[datetime] = None
     raw: Dict[str, Any] = field(default_factory=dict)
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def status(self) -> str:
+        """Alias for state."""
+        return self.state
 
 
 @dataclass
@@ -3673,6 +4309,162 @@ class DataTableHealthReport:
     schema_issue_count: int
     findings: List[DataTableHealthFinding] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# --- Detection Tuning & UDM Findings Refinements Models ---
+
+@dataclass
+class NoisyRuleRecord:
+    """Individual rule noise profile aggregated from live detection telemetry."""
+    rule_id: str
+    rule_name: str
+    rule_type: str  # "GOOGLE_MANAGED", "CUSTOMER", or "OTHER"
+    alert_state: str  # "ALERTING", "NOT_ALERTING", etc.
+    detection_count: int
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_curated(self) -> bool:
+        return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
+
+
+
+@dataclass
+class NoisyRulesBatch(UniversalBatchMixin):
+    """Ranked leaderboard of noisy detection rules."""
+    rules: List[NoisyRuleRecord] = field(default_factory=list)
+    total_detections: int = 0
+    time_window: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __iter__(self):
+        return iter(self.rules)
+
+    def __len__(self):
+        return len(self.rules)
+
+
+@dataclass
+class EntityCardinalityRecord:
+    """Distinct entity value and its detection frequency count."""
+    value: str
+    count: int
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DimensionCardinality:
+    """Distribution for a specific UDM entity subfield dimension."""
+    dimension: str  # e.g. "principal_ip", "target_hostname", "user_id"
+    subfield_path: str
+    records: List[EntityCardinalityRecord] = field(default_factory=list)
+    total_distinct_values: int = 0
+
+
+@dataclass
+class EntityCardinalityReport(UniversalBatchMixin):
+    """Multi-dimensional entity cardinality distribution for a detection rule."""
+    rule_id: str
+    rule_name: str = ""
+    dimensions: List[DimensionCardinality] = field(default_factory=list)
+    time_window: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __iter__(self):
+        return iter(self.dimensions)
+
+    def __len__(self):
+        return len(self.dimensions)
+
+
+@dataclass
+class RuleCaseHistoryRecord:
+    """SOAR case record associated with a detection rule."""
+    case_name: str
+    display_name: str
+    status: str
+    close_reason: str
+    root_cause: str
+    rule_id: str
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleCaseHistoryBatch(UniversalBatchMixin):
+    """Batch of SOAR cases associated with a detection rule."""
+    cases: List[RuleCaseHistoryRecord] = field(default_factory=list)
+    rule_id: str = ""
+    total_cases: int = 0
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __iter__(self):
+        return iter(self.cases)
+
+    def __len__(self):
+        return len(self.cases)
+
+
+@dataclass
+class FindingsRefinementSummary:
+    """Summary of a Google SecOps UDM Findings Refinement exclusion."""
+    id: str
+    name: str
+    display_name: str
+    type: str  # "DETECTION_EXCLUSION"
+    query: str
+    curated_rule_ids: List[str] = field(default_factory=list)
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class FindingsRefinementBatch(UniversalBatchMixin):
+    """Batch of tenant UDM findings refinements."""
+    refinements: List[FindingsRefinementSummary] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __iter__(self):
+        return iter(self.refinements)
+
+    def __len__(self):
+        return len(self.refinements)
+
+
+@dataclass
+class FindingsRefinementTestResult:
+    """Dry-run impact simulation metrics for a findings refinement exclusion."""
+    curated_rule_id: str
+    query: str
+    total_detections: int
+    excluded_detections: int
+    suppression_ratio: float  # e.g. 0.3137 for 31.37%
+    raw: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class DetectionTuningReport:
+    """Comprehensive diagnostic and tuning report for a noisy detection rule."""
+    rule_id: str
+    rule_name: str
+    rule_type: str  # "GOOGLE_MANAGED" or "CUSTOMER"
+    rule_text: str
+    total_detections_baseline: int
+    entity_cardinality: EntityCardinalityReport
+    linked_cases: RuleCaseHistoryBatch
+    proposed_refinement_query: str
+    dry_run_impact: Optional[FindingsRefinementTestResult] = None
+    validation_status: str = "PENDING"
+    validation_errors: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_curated(self) -> bool:
+        return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
+
+
 
 
 

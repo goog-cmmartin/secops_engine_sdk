@@ -25,6 +25,7 @@ from engine.domain import (
     StatsFieldAggregation,
     StatsSearchResult,
     StatsValueCount,
+    UDMEvent,
     ValidationResult,
 )
 
@@ -58,6 +59,7 @@ class GoogleSecOpsAdapter:
         self.customer_id = self.config.customer_id
         self.location = self.config.location
         self.api_base = self.config.api_base
+        self.default_timeout = 35.0
         self._credential_provider = credential_provider or CredentialProvider()
 
     def _get_auth_token(self) -> str:
@@ -76,6 +78,7 @@ class GoogleSecOpsAdapter:
         path: str,
         params: Optional[Dict[str, Any]] = None,
         body: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
         token = self._get_auth_token()
@@ -91,18 +94,19 @@ class GoogleSecOpsAdapter:
         }
 
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        max_retries = 3
+        effective_timeout = timeout if timeout is not None else getattr(self, "default_timeout", 35.0)
+        max_retries = 5
         for attempt in range(1, max_retries + 1):
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=35) as resp:
+                with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
                     resp_data = resp.read().decode("utf-8")
                     if not resp_data.strip():
                         return {}
                     return json.loads(resp_data)
             except urllib.error.HTTPError as e:
                 if e.code in [429, 502, 503, 504] and attempt < max_retries:
-                    time.sleep(1.0 * attempt)
+                    time.sleep(2.5 * attempt)
                     continue
                 error_body = e.read().decode("utf-8")
                 try:
@@ -272,8 +276,10 @@ class GoogleSecOpsAdapter:
 
             more_data = more_data or resp_obj.get("moreDataAvailable", False) or not op_obj.get("done", True)
 
+        wrapped_events = [UDMEvent(e) if isinstance(e, dict) and not isinstance(e, UDMEvent) else e for e in all_events]
+
         return SearchBatchResult(
-            events=all_events,
+            events=wrapped_events,
             provider_event_count=len(all_events),
             emitted_event_count=len(all_events),
             more_data_available=more_data,
@@ -537,6 +543,63 @@ class GoogleSecOpsAdapter:
             raw_bytes_size=len(decoded_text.encode("utf-8")),
             retrieved_at=datetime.now(timezone.utc),
         )
+
+    def query_product_source_stats(
+        self,
+        start_time: str,
+        end_time: str,
+    ) -> Dict[str, Any]:
+        """Queries product source statistics and ingested data sizes across the evaluation window."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:queryProductSourceStats"
+        params = {
+            "timeRange.startTime": start_time,
+            "timeRange.endTime": end_time,
+        }
+        res = self._request("GET", path, params=params)
+        return res if isinstance(res, dict) else {}
+
+    def validate_raw_log_query(
+        self,
+        raw_query: str,
+        allow_unreplaced_placeholders: bool = False,
+    ) -> Dict[str, Any]:
+        """Validates raw log query syntax against Chronicle query engine."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:validateQuery"
+        params = {
+            "allowUnreplacedPlaceholders": "true" if allow_unreplaced_placeholders else "false",
+            "dialect": "DIALECT_UDM_SEARCH",
+            "rawQuery": raw_query,
+        }
+        res = self._request("GET", path, params=params)
+        return res if isinstance(res, dict) else {}
+
+    def search_raw_logs(
+        self,
+        query: str,
+        start_time: str,
+        end_time: str,
+        log_types: Optional[List[str]] = None,
+        case_sensitive: bool = False,
+        max_aggregations: int = 60,
+        page_size: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Executes raw log search across ingested unparsed or unnormalized logs."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:searchRawLogs"
+        body = {
+            "baselineQuery": query,
+            "baselineTimeRange": {"startTime": start_time, "endTime": end_time},
+            "snapshotQuery": "",
+            "caseSensitive": case_sensitive,
+            "logTypes": log_types or [],
+            "maxAggregationsPerField": max_aggregations,
+            "pageSize": page_size,
+        }
+        res = self._request("POST", path, body=body)
+        if isinstance(res, list):
+            return [x for x in res if isinstance(x, dict)]
+        elif isinstance(res, dict):
+            return [res]
+        return []
 
     def get_case(self, case_id: str) -> Dict[str, Any]:
         """Fetches raw case metadata by case ID."""
@@ -1214,6 +1277,7 @@ class GoogleSecOpsAdapter:
         self,
         start_time: str,
         end_time: str,
+        timeout: Optional[float] = 120.0,
     ) -> Dict[str, Any]:
         """Aggregates detection firing counts for each curated rule set over a time window."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:countAllCuratedRuleSetDetections"
@@ -1223,7 +1287,7 @@ class GoogleSecOpsAdapter:
                 "endTime": end_time,
             }
         }
-        res = self._request("POST", path, body=body)
+        res = self._request("POST", path, body=body, timeout=timeout)
         if isinstance(res, dict):
             return res
         return {"curatedRuleSetCounts": []}
@@ -1235,6 +1299,100 @@ class GoogleSecOpsAdapter:
         if isinstance(res, dict):
             return res
         return {}
+
+    # --- Findings Refinements & Detection Tuning ---
+
+    def list_findings_refinements(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists tenant UDM findings refinements and detection exclusions."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        res = self._request("GET", path, params=params)
+        if isinstance(res, dict):
+            return res
+        return {"findingsRefinements": []}
+
+    def get_findings_refinement(self, refinement_id: str) -> Dict[str, Any]:
+        """Retrieves details of a specific UDM findings refinement exclusion."""
+        clean_id = refinement_id.split("/")[-1].strip()
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements/{clean_id}"
+        return self._request("GET", path)
+
+    def create_findings_refinement(
+        self,
+        display_name: str,
+        query: str,
+        curated_rule_ids: Optional[List[str]] = None,
+        refinement_type: str = "DETECTION_EXCLUSION",
+    ) -> Dict[str, Any]:
+        """Creates a new UDM findings refinement detection exclusion."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements"
+        body: Dict[str, Any] = {
+            "displayName": display_name,
+            "query": query,
+            "type": refinement_type,
+        }
+        if curated_rule_ids:
+            formatted_rules = []
+            for r in curated_rule_ids:
+                clean_r = r.split("/")[-1].strip()
+                if r.startswith("projects/"):
+                    formatted_rules.append(r)
+                else:
+                    formatted_rules.append(
+                        f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules/{clean_r}"
+                    )
+            body["detectionExclusionApplication"] = {"curatedRules": formatted_rules}
+        return self._request("POST", path, body=body)
+
+    def delete_findings_refinement(self, refinement_id: str) -> Dict[str, Any]:
+        """Deletes an active UDM findings refinement exclusion."""
+        clean_id = refinement_id.split("/")[-1].strip()
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements/{clean_id}"
+        return self._request("DELETE", path)
+
+    def test_findings_refinement(
+        self,
+        curated_rule_ids: List[str],
+        query: str,
+        start_time: str,
+        end_time: str,
+        refinement_type: str = "DETECTION_EXCLUSION",
+        timeout: Optional[float] = 120.0,
+    ) -> List[Dict[str, Any]]:
+        """Simulates and dry-runs an exclusion query against historical detections."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:testFindingsRefinement"
+        formatted_rules = []
+        for r in curated_rule_ids:
+            clean_r = r.split("/")[-1].strip()
+            if r.startswith("projects/"):
+                formatted_rules.append(r)
+            else:
+                formatted_rules.append(
+                    f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules/{clean_r}"
+                )
+        body = {
+            "detectionExclusionApplication": {
+                "curatedRules": formatted_rules
+            },
+            "type": refinement_type,
+            "query": query,
+            "interval": {
+                "startTime": start_time,
+                "endTime": end_time,
+            },
+        }
+        res = self._request("POST", path, body=body, timeout=timeout)
+        if isinstance(res, list):
+            return res
+        return []
+
+
 
     # --- Milestone 5.8: Content Hub Marketplace Response Integrations Methods ---
 
@@ -1335,10 +1493,14 @@ class GoogleSecOpsAdapter:
 
     def execute_dashboard_query(
         self,
-        query_name: str,
+        query_name: Optional[str] = None,
+        query_text: Optional[str] = None,
         filters: Optional[List[Dict[str, Any]]] = None,
         use_previous_time_range: bool = False,
         query_source: str = "DASHBOARD",
+        time_unit: str = "DAY",
+        time_value: str = "1",
+        dialect: str = "YL2",
     ) -> DashboardQueryResult:
         """Executes a dashboard query and returns normalized columnar/row-oriented results.
         
@@ -1346,11 +1508,18 @@ class GoogleSecOpsAdapter:
         other telemetry dashboards. This method normalizes the column-oriented API response
         into an easy-to-use row-oriented format.
         
+        Supports both pre-configured named query resources (by ID or full resource name)
+        and ad-hoc inline query expressions.
+
         Args:
-            query_name: Dashboard query resource name or short ID.
+            query_name: Dashboard query resource name, short ID, or inline query expression.
+            query_text: Explicit inline query expression (e.g. YL2 / stats query syntax).
             filters: Optional list of filter dictionaries to apply.
             use_previous_time_range: Whether to use the query's previous time range.
             query_source: Query source context (default: "DASHBOARD").
+            time_unit: Relative time unit for inline queries (e.g. "DAY", "HOUR", "MONTH").
+            time_value: Relative time value for inline queries (e.g. "1", "24", "7").
+            dialect: Query dialect for inline queries (default: "YL2").
             
         Returns:
             DashboardQueryResult with parsed columns and rows for easy data access.
@@ -1361,14 +1530,41 @@ class GoogleSecOpsAdapter:
             >>> for row in result.rows:
             >>>     print(row['timestamp'], row['total_bytes_ingested'])
         """
-        full_query_name = query_name
-        if not query_name.startswith("projects/"):
-            clean_id = query_name.split("/")[-1]
-            full_query_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
+        # Determine if query_name is actually an inline query expression
+        target_text = query_text
+        target_name = query_name
+
+        if target_text is None and target_name is not None:
+            stripped = target_name.strip()
+            if "\n" in target_name or stripped.startswith("$") or "match:" in target_name or "outcome:" in target_name:
+                target_text = target_name
+                target_name = None
+
+        if target_text:
+            query_payload = {
+                "query": target_text,
+                "dialect": dialect,
+                "input": {
+                    "relativeTime": {
+                        "timeUnit": time_unit,
+                        "startTimeVal": str(time_value),
+                    }
+                },
+            }
+            query_label = "inline_dashboard_query"
+        elif target_name:
+            full_query_name = target_name
+            if not target_name.startswith("projects/"):
+                clean_id = target_name.split("/")[-1]
+                full_query_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
+            query_payload = {"name": full_query_name}
+            query_label = target_name
+        else:
+            raise ValueError("Either query_name or query_text must be provided to execute_dashboard_query.")
 
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries:execute"
         body = {
-            "query": {"name": full_query_name},
+            "query": query_payload,
             "filters": filters or [],
             "usePreviousTimeRange": use_previous_time_range,
             "querySource": query_source,
@@ -1376,7 +1572,7 @@ class GoogleSecOpsAdapter:
         res = self._request("POST", path, body=body)
         
         # Parse column-oriented response into rows
-        return self._parse_dashboard_result(res, query_name)
+        return self._parse_dashboard_result(res, query_label)
 
     def _parse_dashboard_result(self, raw_response: Dict[str, Any], query_name: str) -> DashboardQueryResult:
         """Transforms column-oriented dashboard API response into normalized row-oriented format.
@@ -1608,6 +1804,24 @@ class GoogleSecOpsAdapter:
                 if p_name.endswith(clean_id) or p_name.split("/")[-1] == clean_id:
                     return p
             raise ValueError(f"Parser '{clean_id}' not found for log type '{clean_lt}'")
+
+    def run_parser(
+        self,
+        log_type: str,
+        parser_cbn_b64: str,
+        raw_log_text: str,
+    ) -> Dict[str, Any]:
+        """Runs a Logstash CBN parser configuration against a raw log string via :runParser API."""
+        clean_lt = log_type.split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}:runParser"
+        log_b64 = base64.b64encode(raw_log_text.encode("utf-8")).decode("utf-8")
+        body = {
+            "parser": {
+                "cbn": parser_cbn_b64,
+            },
+            "log": log_b64,
+        }
+        return self._request("POST", path, body=body)
 
     def list_parser_extensions(
         self,

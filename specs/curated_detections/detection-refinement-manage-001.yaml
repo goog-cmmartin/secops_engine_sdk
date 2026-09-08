@@ -1,0 +1,56 @@
+version: "1.0.0"
+name: "detection-refinement-manage-001"
+capability_id: "curated_detections.refinements.list"
+description: "Declarative workflow contract for CRUD operations and dry-run simulation of UDM findings refinements and detection exclusions."
+category: "curated_detections"
+capabilities:
+  - id: "curated_detections.refinements.list"
+  - id: "curated_detections.refinements.test"
+  - id: "curated_detections.refinements.create"
+  - id: "curated_detections.refinements.delete"
+
+invariants:
+  strict_origin: true
+  no_synthetic_data: true
+  explicit_errors: true
+
+operations:
+  list:
+    inputs:
+      page_size: integer
+    outputs:
+      refinements: array
+  get:
+    inputs:
+      refinement_id: string
+    outputs:
+      refinement: object
+  create:
+    inputs:
+      display_name: string
+      query: string
+      curated_rule_ids: array
+    outputs:
+      summary: object
+  delete:
+    inputs:
+      refinement_id: string
+    outputs:
+      status: object
+  test:
+    inputs:
+      curated_rule_ids: array
+      query: string
+      lookback_days: integer
+    outputs:
+      curated_rule_id: string
+      query: string
+      total_detections: integer
+      excluded_detections: integer
+      suppression_ratio: float
+
+api_mappings:
+  findings_refinements:
+    endpoint: "GET|POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/findingsRefinements"
+  test_findings_refinement:
+    endpoint: "POST /v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/findingsRefinements:testFindingsRefinement"

@@ -116,8 +116,13 @@ class WorkflowRegistry:
         self._capabilities[capability.capability_id] = capability
 
     def get(self, capability_id: str) -> Optional[WorkflowCapability]:
-        """Retrieves a capability by ID."""
-        return self._capabilities.get(capability_id)
+        """Retrieves a capability by capability ID or MCP tool name."""
+        if capability_id in self._capabilities:
+            return self._capabilities[capability_id]
+        for cap in self._capabilities.values():
+            if cap.mcp_tool_name == capability_id:
+                return cap
+        return None
 
     def list_capabilities(self, category: Optional[str] = None) -> List[WorkflowCapability]:
         """Lists registered capabilities, optionally filtered by category."""
@@ -126,8 +131,8 @@ class WorkflowRegistry:
         return list(self._capabilities.values())
 
     def execute(self, capability_id: str, *args, **kwargs) -> Any:
-        """Executes a capability by ID."""
-        cap = self._capabilities.get(capability_id)
+        """Executes a capability by capability ID or MCP tool name."""
+        cap = self.get(capability_id)
         if not cap:
             raise KeyError(f"Capability '{capability_id}' not found in registry.")
         return cap.handler(*args, **kwargs)

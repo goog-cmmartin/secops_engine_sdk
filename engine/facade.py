@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, List, Optional, Union
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from engine.domain import (
     AlertInvestigation,
@@ -13,10 +14,12 @@ from engine.domain import (
     CaseSearchQuery,
     CaseSearchResultItem,
     CaseStatus,
+    CasePriority,
     CaseTimeline,
     CaseTimelineEvent,
     CaseTriageAssessment,
     CaseTriageBatch,
+    CaseAiInvestigationResult,
     CaseWallRecord,
     CaseWallResult,
     TriageVerdict,
@@ -52,6 +55,7 @@ from engine.domain import (
     ContentPackDetail,
     ContentPackSearchQuery,
     ContentPackSummary,
+    CuratedDetectionHealthReport,
     CuratedDetectionMetrics,
     CuratedRuleDetail,
     CuratedRuleSearchQuery,
@@ -60,9 +64,21 @@ from engine.domain import (
     CuratedRuleSetDetail,
     CuratedRuleSetSummary,
     CuratedRuleSummary,
+    DetectionTuningReport,
+    DimensionCardinality,
+    EntityCardinalityRecord,
+    EntityCardinalityReport,
+    FindingsRefinementBatch,
+    FindingsRefinementSummary,
+    FindingsRefinementTestResult,
+    NoisyRuleRecord,
+    NoisyRulesBatch,
+    RuleCaseHistoryBatch,
+    RuleCaseHistoryRecord,
     DashboardBatch,
     DashboardChart,
     DashboardDetail,
+    DashboardHealthCheckResult,
     DashboardHealthFinding,
     DashboardHealthReport,
     DashboardHealthStatus,
@@ -126,8 +142,12 @@ from engine.domain import (
     ParserHealthFinding,
     ParserHealthReport,
     ParserHealthStatus,
+    ParserRunResult,
+    ParserRunResultEntry,
     ParserSummary,
     PlaybookBatch,
+    UnparsedLogDiagnostic,
+    UnparsedLogsDiagnosticBatch,
     PlaybookCategory,
     PlaybookDetail,
     PlaybookSearchQuery,
@@ -202,6 +222,12 @@ from engine.domain import (
     StatsSearchRequest,
     StatsSearchResult,
     StatsSearchSession,
+    UDMEvent,
+    coerce_case_priority,
+    coerce_case_status,
+    coerce_entity_type,
+    coerce_field_filters,
+    coerce_playbook_type,
     SupportSettingProperty,
     SupportSettingsBatch,
     SoarNetworkSummary,
@@ -232,6 +258,11 @@ from engine.domain import (
     SoarWebhookSummary,
     SoarWebhookDetail,
     SoarWebhookBatch,
+    ProductSourceStat,
+    ProductSourceStatsBatch,
+    RawLogValidationResult,
+    RawLogSnippet,
+    RawLogSearchResult,
     ValidationResult,
 )
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
@@ -254,7 +285,11 @@ from engine.workflows.case_investigation import (
     InvestigateCaseWorkflow,
 )
 from engine.workflows.case_search import SearchCasesWorkflow
-from engine.workflows.case_triage import OrchestrateCaseTriageWorkflow
+from engine.workflows.case_triage import (
+    CaseTriageWorkflow,
+    OrchestrateCaseTriageWorkflow,
+)
+from engine.workflows.case_ai_investigation import InvestigateCaseWithAIWorkflow
 from engine.workflows.case_wall import (
     GetCaseWallWorkflow,
     ListCaseCommentsWorkflow,
@@ -270,6 +305,15 @@ from engine.workflows.curated_detections import (
     GetCuratedRuleSetDetailWorkflow,
     SearchCuratedRuleSetsWorkflow,
     SetCuratedRuleSetDeploymentWorkflow,
+)
+from engine.workflows.detection_tuning import (
+    AnalyzeEntityCardinalityWorkflow,
+    CrossReferenceRuleCasesWorkflow,
+    DiagnoseAndTuneDetectionWorkflow,
+    FindTopNoisyRulesWorkflow,
+    ManageFindingsRefinementsWorkflow,
+    TestFindingsRefinementWorkflow,
+    translate_to_udm_refinement,
 )
 from engine.workflows.dashboards import (
     run_dashboard_health_check,
@@ -325,10 +369,12 @@ from engine.workflows.marketplace_integrations import (
     SearchMarketplaceIntegrationsWorkflow,
 )
 from engine.workflows.parser import (
+    FindUnparsedLogsAndDiagnoseWorkflow,
     GetLogTypeSettingWorkflow,
     GetParserDetailWorkflow,
     GetParserExtensionDetailWorkflow,
     ListLogTypesWorkflow,
+    RunParserWorkflow,
     SearchParserExtensionsWorkflow,
     SearchParsersWorkflow,
 )
@@ -343,6 +389,11 @@ from engine.workflows.playbook_health import AuditPlaybookHealthWorkflow
 from engine.workflows.preview_feature import (
     GetPreviewFeatureWorkflow,
     ListPreviewFeaturesWorkflow,
+)
+from engine.workflows.raw_log_search import (
+    QueryProductSourceStatsWorkflow,
+    SearchRawLogsWorkflow,
+    ValidateRawLogQueryWorkflow,
 )
 from engine.workflows.refine_search import (
     RefineSearchWorkflow,
@@ -434,6 +485,11 @@ from engine.workflows.detection_rules import (
 from engine.workflows.rule_health import AuditRuleHealthWorkflow
 
 
+def _normalize_case_id(case_id: Union[str, int]) -> str:
+    """Normalizes case identifier to string, stripping whitespace and URI/resource prefixes."""
+    s = str(case_id).strip()
+    return s.split("/")[-1] if "/" in s else s
+
 
 class SecOpsEngine:
     """The central workflow engine exposing high-level SecOps domain capabilities."""
@@ -456,6 +512,9 @@ class SecOpsEngine:
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
         "_search_udm_stats_wf": lambda e: SearchUDMStatsWorkflow(e.adapter),
+        "_query_product_source_stats_wf": lambda e: QueryProductSourceStatsWorkflow(e.adapter),
+        "_validate_raw_log_query_wf": lambda e: ValidateRawLogQueryWorkflow(e.adapter),
+        "_search_raw_logs_wf": lambda e: SearchRawLogsWorkflow(e.adapter),
         "_investigate_event_wf": lambda e: InvestigateEventWorkflow(e.adapter),
         "_refine_search_wf": lambda e: RefineSearchWorkflow(e._search_udm_wf),
         "_search_from_entity_wf": lambda e: SearchFromEntityWorkflow(e._search_udm_wf),
@@ -476,7 +535,17 @@ class SecOpsEngine:
         "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
-        "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter),
+        "_case_triage_wf": lambda e: CaseTriageWorkflow(e.adapter),
+        "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter, triage_workflow=e._case_triage_wf),
+        "_case_ai_investigate_wf": lambda e: InvestigateCaseWithAIWorkflow(
+            e.adapter,
+            investigate_workflow=e._investigate_case_wf,
+            case_summary_workflow=e._get_case_summary_wf,
+            search_udm_workflow=e._search_udm_wf,
+            incident_workflow=e._set_case_incident_wf,
+            update_alert_workflow=e._update_case_alert_wf,
+            add_comment_workflow=e._add_case_comment_wf,
+        ),
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
         "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
@@ -498,6 +567,17 @@ class SecOpsEngine:
         "_get_curated_rule_wf": lambda e: GetCuratedRuleDetailWorkflow(e.adapter),
         "_get_curated_metrics_wf": lambda e: GetCuratedDetectionMetricsWorkflow(e.adapter),
         "_set_curated_ruleset_deployment_wf": lambda e: SetCuratedRuleSetDeploymentWorkflow(e.adapter),
+        "_find_top_noisy_rules_wf": lambda e: FindTopNoisyRulesWorkflow(e.adapter),
+        "_analyze_entity_cardinality_wf": lambda e: AnalyzeEntityCardinalityWorkflow(e.adapter),
+        "_cross_reference_rule_cases_wf": lambda e: CrossReferenceRuleCasesWorkflow(e.adapter),
+        "_test_findings_refinement_wf": lambda e: TestFindingsRefinementWorkflow(e.adapter),
+        "_manage_findings_refinements_wf": lambda e: ManageFindingsRefinementsWorkflow(e.adapter),
+        "_diagnose_and_tune_detection_wf": lambda e: DiagnoseAndTuneDetectionWorkflow(
+            e.adapter,
+            e._analyze_entity_cardinality_wf,
+            e._cross_reference_rule_cases_wf,
+            e._test_findings_refinement_wf,
+        ),
         "_search_marketplace_integrations_wf": lambda e: SearchMarketplaceIntegrationsWorkflow(e.adapter),
         "_get_marketplace_integration_wf": lambda e: GetMarketplaceIntegrationDetailWorkflow(e.adapter),
         "_get_marketplace_integration_diff_wf": lambda e: GetMarketplaceIntegrationDiffWorkflow(e.adapter),
@@ -518,6 +598,8 @@ class SecOpsEngine:
         "_list_log_types_wf": lambda e: ListLogTypesWorkflow(e.adapter),
         "_search_parsers_wf": lambda e: SearchParsersWorkflow(e.adapter),
         "_get_parser_wf": lambda e: GetParserDetailWorkflow(e.adapter),
+        "_run_parser_wf": lambda e: RunParserWorkflow(e.adapter),
+        "_diagnose_unparsed_wf": lambda e: FindUnparsedLogsAndDiagnoseWorkflow(e.adapter),
         "_search_parser_extensions_wf": lambda e: SearchParserExtensionsWorkflow(e.adapter),
         "_get_parser_extension_wf": lambda e: GetParserExtensionDetailWorkflow(e.adapter),
         "_get_log_type_setting_wf": lambda e: GetLogTypeSettingWorkflow(e.adapter),
@@ -642,6 +724,42 @@ class SecOpsEngine:
                 mcp_tool_name="search_udm_stats",
                 composed=False,
                 evidence_path="evidence/search/udm_stats",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="log.product_sources.stats",
+                name="Query Product Source Statistics",
+                description="Queries product log sources, data ingestion volumes, and active sources in the tenant.",
+                category="log",
+                handler=self.query_product_source_stats,
+                mcp_tool_name="query_product_source_stats",
+                composed=False,
+                evidence_path="evidence/log/product_sources_stats",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="log.query.validate_query",
+                name="Validate Raw Log Query Syntax",
+                description="Validates raw log search query syntax against Chronicle query compiler.",
+                category="log",
+                handler=self.validate_raw_log_query,
+                mcp_tool_name="validate_raw_log_query",
+                composed=False,
+                evidence_path="evidence/log/validate_query",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="log.raw_logs.search",
+                name="Search Raw Logs",
+                description="Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges.",
+                category="log",
+                handler=self.search_raw_logs,
+                mcp_tool_name="search_raw_logs",
+                composed=False,
+                evidence_path="evidence/log/raw_logs_search",
             )
         )
         self.registry.register(
@@ -981,6 +1099,19 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.ai_investigate",
+                name="Autonomous AI Case Investigation",
+                description="Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact.",
+                category="case",
+                handler=self.ai_investigate_case,
+                mcp_tool_name="ai_investigate_case",
+                composed=True,
+                uses=("case.investigate", "case.get_summary", "search.udm", "case.comment"),
+                evidence_path="discovery/observations/03_case_triage_first_touch.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="playbook.search",
                 name="SOAR Playbook Search & Discovery",
                 description="Searches, lists, and filters SOAR playbooks across categories, triggers, and environments.",
@@ -1035,7 +1166,8 @@ class SecOpsEngine:
                 category="playbook",
                 handler=self.audit_soar_playbook_health,
                 mcp_tool_name="audit_soar_playbook_health",
-                composed=False,
+                composed=True,
+                uses=("playbook.search", "dashboard.execute_query"),
                 evidence_path="evidence/playbook/audit_health",
             )
         )
@@ -1242,6 +1374,109 @@ class SecOpsEngine:
                 composed=True,
                 uses=["curated_detections.metrics"],
                 evidence_path="evidence/curated_detections/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.refinements.list",
+                name="List UDM Findings Refinements",
+                description="Lists active UDM findings refinements and detection exclusions across the tenant.",
+                category="curated_detections",
+                handler=self.list_findings_refinements,
+                mcp_tool_name="list_findings_refinements",
+                composed=False,
+                evidence_path="evidence/curated_detections/refinements_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.refinements.test",
+                name="Test UDM Findings Refinement",
+                description="Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio.",
+                category="curated_detections",
+                handler=self.test_findings_refinement,
+                mcp_tool_name="test_findings_refinement",
+                composed=False,
+                evidence_path="evidence/curated_detections/refinements_test",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.refinements.create",
+                name="Create UDM Findings Refinement",
+                description="Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections.",
+                category="curated_detections",
+                handler=self.create_findings_refinement,
+                mcp_tool_name="create_findings_refinement",
+                composed=False,
+                evidence_path="evidence/curated_detections/refinements_create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.refinements.delete",
+                name="Delete UDM Findings Refinement",
+                description="Removes an active UDM findings refinement exclusion.",
+                category="curated_detections",
+                handler=self.delete_findings_refinement,
+                mcp_tool_name="delete_findings_refinement",
+                composed=False,
+                evidence_path="evidence/curated_detections/refinements_delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.tuning.top_noisy_rules",
+                name="Identify Top Noisy Rules",
+                description="Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification.",
+                category="curated_detections",
+                handler=self.find_top_noisy_rules,
+                mcp_tool_name="find_top_noisy_rules",
+                composed=False,
+                evidence_path="evidence/curated_detections/tuning_top_noisy",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.tuning.entity_cardinality",
+                name="Analyze Entity Cardinality",
+                description="Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule.",
+                category="curated_detections",
+                handler=self.analyze_entity_cardinality,
+                mcp_tool_name="analyze_entity_cardinality",
+                composed=False,
+                evidence_path="evidence/curated_detections/tuning_entity_cardinality",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.tuning.case_history",
+                name="Cross-Reference Rule Cases",
+                description="Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes.",
+                category="curated_detections",
+                handler=self.cross_reference_rule_cases,
+                mcp_tool_name="cross_reference_rule_cases",
+                composed=False,
+                evidence_path="evidence/curated_detections/tuning_case_history",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.tuning.diagnose",
+                name="Diagnose and Tune Detection",
+                description="End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression.",
+                category="curated_detections",
+                handler=self.tune_detection,
+                mcp_tool_name="tune_detection",
+                composed=True,
+                uses=[
+                    "curated_detections.tuning.entity_cardinality",
+                    "curated_detections.tuning.case_history",
+                    "curated_detections.refinements.test",
+                    "curated_detections.get_rule",
+                    "rule.get",
+                ],
+                evidence_path="evidence/curated_detections/tuning_diagnose",
             )
         )
         self.registry.register(
@@ -1496,6 +1731,36 @@ class SecOpsEngine:
                 mcp_tool_name="get_parser",
                 composed=False,
                 evidence_path="evidence/parser/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="parser.run",
+                name="Run Ingestion Parser",
+                description="Executes a Logstash CBN parser configuration against a raw log string.",
+                category="parser",
+                handler=self.run_parser,
+                mcp_tool_name="run_parser",
+                composed=False,
+                evidence_path="evidence/parser/run",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="parser.diagnose_unparsed",
+                name="Diagnose Unparsed Logs",
+                description="Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors.",
+                category="parser",
+                handler=self.diagnose_unparsed_logs,
+                mcp_tool_name="diagnose_unparsed_logs",
+                composed=True,
+                uses=[
+                    "log.raw_logs.search",
+                    "parser.log_types.list",
+                    "parser.get",
+                    "parser.run",
+                ],
+                evidence_path="evidence/parser/diagnose_unparsed",
             )
         )
         self.registry.register(
@@ -2478,16 +2743,70 @@ class SecOpsEngine:
 
 
 
+    def execute(self, capability_id: str, *args: Any, **kwargs: Any) -> Any:
+        """Universal capability dispatcher.
+
+        Executes any registered workflow capability by its capability ID (e.g. 'dashboards.health_check')
+        or its MCP tool name (e.g. 'run_dashboard_health_check').
+
+        Args:
+            capability_id: Capability ID or MCP tool name.
+            *args: Positional arguments forwarded to the capability handler.
+            **kwargs: Keyword arguments forwarded to the capability handler.
+
+        Returns:
+            The output returned by the capability's handler.
+        """
+        return self.registry.execute(capability_id, *args, **kwargs)
+
     def search_udm(
         self,
-        request: SearchRequest,
+        request: Optional[Union[SearchRequest, str]] = None,
+        query: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        receive_limit: int = 10000,
+        limit: Optional[int] = None,
+        batch_size: int = 2000,
+        customer_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        location: Optional[str] = None,
+        materialize_budget: Optional[int] = None,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
+        **kwargs: Any,
     ) -> SearchSession:
-        """Executes the canonical UDM Search workflow."""
+        """Executes the canonical UDM Search workflow.
+
+        Supports polymorphic invocation:
+        - Passing a pre-built SearchRequest: `engine.search_udm(request)`
+        - Passing a query string positionally: `engine.search_udm("metadata.log_type = ...", start_time=..., end_time=...)`
+        - Passing flat keyword arguments: `engine.search_udm(query="...", start_time="...", end_time="...")`
+        """
+        if isinstance(request, SearchRequest):
+            req = request
+        else:
+            q = query or (request if isinstance(request, str) else None)
+            if not q:
+                raise ValueError("A query string or SearchRequest must be provided to search_udm")
+            if start_time is None or end_time is None:
+                raise ValueError("start_time and end_time are required when query is passed as a string or keyword argument")
+            effective_limit = limit if limit is not None else kwargs.get("limit", receive_limit)
+            req = SearchRequest(
+                query=q,
+                start_time=start_time,
+                end_time=end_time,
+                receive_limit=effective_limit,
+                batch_size=batch_size,
+                customer_id=customer_id,
+                project_id=project_id,
+                location=location,
+                materialize_budget=materialize_budget,
+            )
+
         return self._search_udm_wf.execute(
-            request=request,
+            request=req,
             on_batch=on_batch,
             on_state_change=on_state_change,
             cancel_token=cancel_token,
@@ -2537,21 +2856,80 @@ class SecOpsEngine:
             max_poll_seconds=max_poll_seconds,
         )
 
+    def query_product_source_stats(
+        self,
+        start_time: Optional[Union[str, datetime]] = None,
+        end_time: Optional[Union[str, datetime]] = None,
+        lookback_hours: int = 24,
+    ) -> ProductSourceStatsBatch:
+        """Queries product source statistics and ingested data sizes across the evaluation window."""
+        return self._query_product_source_stats_wf.execute(
+            start_time=start_time,
+            end_time=end_time,
+            lookback_hours=lookback_hours,
+        )
+
+    def validate_raw_log_query(
+        self,
+        query: str,
+        allow_unreplaced_placeholders: bool = False,
+    ) -> RawLogValidationResult:
+        """Validates raw log search query syntax against Chronicle query compiler."""
+        return self._validate_raw_log_query_wf.execute(
+            query=query,
+            allow_unreplaced_placeholders=allow_unreplaced_placeholders,
+        )
+
+    def search_raw_logs(
+        self,
+        query: str,
+        start_time: Optional[Union[str, datetime]] = None,
+        end_time: Optional[Union[str, datetime]] = None,
+        lookback_hours: int = 24,
+        log_types: Optional[Union[str, List[str]]] = None,
+        case_sensitive: bool = False,
+        page_size: int = 1000,
+        max_aggregations: int = 60,
+    ) -> RawLogSearchResult:
+        """Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges."""
+        return self._search_raw_logs_wf.execute(
+            query=query,
+            start_time=start_time,
+            end_time=end_time,
+            lookback_hours=lookback_hours,
+            log_types=log_types,
+            case_sensitive=case_sensitive,
+            page_size=page_size,
+            max_aggregations=max_aggregations,
+        )
+
     def investigate_event(
         self,
-        event_ref: Union[EventReference, Dict[str, Any], str],
+        event_ref: Optional[Union[EventReference, Dict[str, Any], str]] = None,
+        event_id: Optional[str] = None,
+        event: Optional[Union[EventReference, Dict[str, Any], str]] = None,
         eager_load_raw_log: bool = False,
+        **kwargs: Any,
     ) -> EventInvestigation:
-        """Executes the Event Investigation workflow."""
+        """Executes the Event Investigation workflow.
+
+        Accepts:
+        - `event_ref`: EventReference, UDM event dictionary/object, or event ID string.
+        - `event_id`: Alternative keyword argument for string ID.
+        - `event`: Alternative keyword argument for event reference/dict.
+        """
+        target = event_ref if event_ref is not None else (event_id or event or kwargs.get("id"))
+        if target is None:
+            raise ValueError("investigate_event requires an event reference, ID string, or event dictionary.")
         return self._investigate_event_wf.execute(
-            event_ref=event_ref,
+            event_ref=target,
             eager_load_raw_log=eager_load_raw_log,
         )
 
     def refine_search(
         self,
         base: Union[str, SearchSession],
-        filters: List[FieldFilter],
+        filters: Union[List[Union[FieldFilter, Dict[str, Any], Tuple[Any, ...]]], FieldFilter, Dict[str, Any], Tuple[Any, ...]],
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         receive_limit: int = 10000,
@@ -2561,10 +2939,18 @@ class SecOpsEngine:
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
     ) -> SearchSession:
-        """Executes the Search Refinement workflow."""
+        """Executes the Search Refinement workflow.
+
+        Supports polymorphic filters:
+        - List of FieldFilter objects
+        - Single FieldFilter object
+        - Dict or list of dicts: {"field": "principal.ip", "operator": "=", "value": "1.2.3.4"}
+        - Tuple or list of tuples: ("principal.ip", "=", "1.2.3.4") or ("principal.ip", "1.2.3.4")
+        """
+        coerced_filters = coerce_field_filters(filters)
         return self._refine_search_wf.execute(
             base=base,
-            filters=filters,
+            filters=coerced_filters,
             start_time=start_time,
             end_time=end_time,
             receive_limit=receive_limit,
@@ -2577,7 +2963,7 @@ class SecOpsEngine:
 
     def search_from_entity(
         self,
-        entity_type: EntityType,
+        entity_type: Union[EntityType, str],
         entity_value: str,
         start_time: str,
         end_time: str,
@@ -2587,9 +2973,14 @@ class SecOpsEngine:
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
     ) -> SearchSession:
-        """Executes a canonical entity pivot search workflow."""
+        """Executes a canonical entity pivot search workflow.
+
+        Supports polymorphic entity_type (EntityType enum member or case-insensitive string alias
+        such as 'ip', 'hostname', 'user', 'hash', 'domain', 'email').
+        """
+        coerced_type = coerce_entity_type(entity_type)
         return self._search_from_entity_wf.execute(
-            entity_type=entity_type,
+            entity_type=coerced_type,
             entity_value=entity_value,
             start_time=start_time,
             end_time=end_time,
@@ -2600,12 +2991,12 @@ class SecOpsEngine:
             cancel_token=cancel_token,
         )
 
-    def investigate_case(self, case_id: str) -> CaseInvestigation:
+    def investigate_case(self, case_id: Union[str, int]) -> CaseInvestigation:
         """Executes the Case Investigation Workspace workflow."""
-        return self._investigate_case_wf.execute(case_id=case_id)
+        return self._investigate_case_wf.execute(case_id=_normalize_case_id(case_id))
 
     def get_alert_playbook_status(
-        self, case_id: str, alert_id: Optional[str] = None
+        self, case_id: Union[str, int], alert_id: Optional[str] = None
     ) -> List[AlertPlaybookStatus]:
         """Returns the attached playbook + status snapshot for alert(s) in a case.
 
@@ -2623,8 +3014,8 @@ class SecOpsEngine:
             A list of :class:`AlertPlaybookStatus`. Empty if the case has no alerts
             (or the given ``alert_id`` does not match).
         """
-        investigation = self._investigate_case_wf.execute(case_id=case_id)
-        cid = str(case_id).strip().split("/")[-1]
+        cid = _normalize_case_id(case_id)
+        investigation = self._investigate_case_wf.execute(case_id=cid)
         target = str(alert_id).strip().split("/")[-1] if alert_id else None
 
         results: List[AlertPlaybookStatus] = []
@@ -2645,7 +3036,7 @@ class SecOpsEngine:
         return results
 
     def get_alert_playbook_instances(
-        self, case_id: str, alert_identifier: str
+        self, case_id: Union[str, int], alert_identifier: str
     ) -> List[PlaybookInstanceCard]:
         """Tier-2: lists authoritative playbook *run instances* for an alert.
 
@@ -2663,13 +3054,14 @@ class SecOpsEngine:
             ``definition_identifier`` can be passed to
             :meth:`get_alert_playbook_instance` for the full run.
         """
+        cid = _normalize_case_id(case_id)
         return self._alert_playbook_instances_wf.execute(
-            case_id=case_id, alert_identifier=alert_identifier
+            case_id=cid, alert_identifier=alert_identifier
         )
 
     def get_alert_playbook_instance(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         alert_identifier: str,
         definition_identifier: Optional[str] = None,
         should_fetch_steps: bool = True,
@@ -2695,8 +3087,9 @@ class SecOpsEngine:
             A :class:`PlaybookInstanceRun` with runtime status, steps, and the
             execution DAG (``relations``).
         """
+        cid = _normalize_case_id(case_id)
         return self._alert_playbook_instances_wf.execute_full(
-            case_id=case_id,
+            case_id=cid,
             alert_identifier=alert_identifier,
             definition_identifier=definition_identifier,
             should_fetch_steps=should_fetch_steps,
@@ -2706,7 +3099,7 @@ class SecOpsEngine:
 
     def get_alert_playbook_executed_path(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         alert_identifier: str,
         definition_identifier: Optional[str] = None,
     ) -> List[PlaybookInstanceStep]:
@@ -2738,24 +3131,24 @@ class SecOpsEngine:
         return run.executed_path()
 
 
-    def add_case_comment(self, case_id: str, comment: str) -> CaseCommentRecord:
+    def add_case_comment(self, case_id: Union[str, int], comment: str) -> CaseCommentRecord:
         """Executes the Add Case Comment workflow."""
-        return self._add_case_comment_wf.execute(case_id=case_id, comment=comment)
+        return self._add_case_comment_wf.execute(case_id=_normalize_case_id(case_id), comment=comment)
 
-    def list_case_comments(self, case_id: str) -> List[CaseCommentRecord]:
+    def list_case_comments(self, case_id: Union[str, int]) -> List[CaseCommentRecord]:
         """Lists all analyst comments and AI assessment notes for a SOAR case (`case.list_comments`)."""
-        return self._list_case_comments_wf.execute(case_id=case_id)
+        return self._list_case_comments_wf.execute(case_id=_normalize_case_id(case_id))
 
     def get_case_wall(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         limit: int = 50,
         page_token: Optional[str] = None,
         activity_type: Optional[str] = None,
     ) -> CaseWallResult:
         """Retrieves and parses the complete SOAR Case Activity Wall (`case.get_wall`)."""
         return self._get_case_wall_wf.execute(
-            case_id=case_id,
+            case_id=_normalize_case_id(case_id),
             limit=limit,
             page_token=page_token,
             activity_type=activity_type,
@@ -2763,7 +3156,7 @@ class SecOpsEngine:
 
     def update_case(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         assignee: Optional[str] = None,
         stage: Optional[str] = None,
         incident: Optional[bool] = None,
@@ -2773,7 +3166,7 @@ class SecOpsEngine:
     ) -> CaseUpdateResult:
         """Executes the Update Case workflow."""
         return self._update_case_wf.execute(
-            case_id=case_id,
+            case_id=_normalize_case_id(case_id),
             assignee=assignee,
             stage=stage,
             incident=incident,
@@ -2782,21 +3175,21 @@ class SecOpsEngine:
             update_mask=update_mask,
         )
 
-    def assign_case(self, case_id: str, assignee: str) -> CaseUpdateResult:
+    def assign_case(self, case_id: Union[str, int], assignee: str) -> CaseUpdateResult:
         """Executes the Assign Case workflow (to a role e.g. @Tier1 or user GUID/email)."""
-        return self._assign_case_wf.execute(case_id=case_id, assignee=assignee)
+        return self._assign_case_wf.execute(case_id=_normalize_case_id(case_id), assignee=assignee)
 
-    def set_case_stage(self, case_id: str, stage: str) -> CaseUpdateResult:
+    def set_case_stage(self, case_id: Union[str, int], stage: str) -> CaseUpdateResult:
         """Executes the Set Case Stage workflow."""
-        return self._set_case_stage_wf.execute(case_id=case_id, stage=stage)
+        return self._set_case_stage_wf.execute(case_id=_normalize_case_id(case_id), stage=stage)
 
-    def set_case_incident(self, case_id: str, incident: bool = True) -> CaseUpdateResult:
+    def set_case_incident(self, case_id: Union[str, int], incident: bool = True) -> CaseUpdateResult:
         """Executes the Set Case Incident workflow."""
-        return self._set_case_incident_wf.execute(case_id=case_id, incident=incident)
+        return self._set_case_incident_wf.execute(case_id=_normalize_case_id(case_id), incident=incident)
 
     def update_case_alert(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         alert_id: str,
         priority: Optional[str] = None,
         status: Optional[str] = None,
@@ -2805,7 +3198,7 @@ class SecOpsEngine:
     ) -> CaseAlertUpdateResult:
         """Executes the Update Case Alert workflow."""
         return self._update_case_alert_wf.execute(
-            case_id=case_id,
+            case_id=_normalize_case_id(case_id),
             alert_id=alert_id,
             priority=priority,
             status=status,
@@ -2813,46 +3206,46 @@ class SecOpsEngine:
             update_mask=update_mask,
         )
 
-    def set_case_alert_priority(self, case_id: str, alert_id: str, priority: str) -> CaseAlertUpdateResult:
+    def set_case_alert_priority(self, case_id: Union[str, int], alert_id: str, priority: str) -> CaseAlertUpdateResult:
         """Executes the Set Case Alert Priority workflow."""
-        return self._set_case_alert_priority_wf.execute(case_id=case_id, alert_id=alert_id, priority=priority)
+        return self._set_case_alert_priority_wf.execute(case_id=_normalize_case_id(case_id), alert_id=alert_id, priority=priority)
 
-    def create_case_alert_recommendation(self, case_id: str, alert_id: str) -> CaseAlertRecommendationJob:
+    def create_case_alert_recommendation(self, case_id: Union[str, int], alert_id: str) -> CaseAlertRecommendationJob:
         """Initiates async Gemini AI recommendation generation for a case alert."""
-        return self._create_case_alert_recommendation_wf.execute(case_id=case_id, alert_id=alert_id)
+        return self._create_case_alert_recommendation_wf.execute(case_id=_normalize_case_id(case_id), alert_id=alert_id)
 
-    def fetch_case_alert_recommendation(self, case_id: str, recommendation_id: str) -> CaseAlertRecommendation:
+    def fetch_case_alert_recommendation(self, case_id: Union[str, int], recommendation_id: str) -> CaseAlertRecommendation:
         """Fetches a previously generated Gemini AI recommendation for a case alert."""
-        return self._fetch_case_alert_recommendation_wf.execute(case_id=case_id, recommendation_id=recommendation_id)
+        return self._fetch_case_alert_recommendation_wf.execute(case_id=_normalize_case_id(case_id), recommendation_id=recommendation_id)
 
     def get_case_alert_recommendation(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         alert_id: str,
         timeout_sec: float = 30.0,
         poll_interval_sec: float = 2.0,
     ) -> CaseAlertRecommendation:
         """Executes end-to-end Gemini AI recommendation generation and polls until complete."""
         return self._get_case_alert_recommendation_wf.execute(
-            case_id=case_id,
+            case_id=_normalize_case_id(case_id),
             alert_id=alert_id,
             timeout_sec=timeout_sec,
             poll_interval_sec=poll_interval_sec,
         )
 
-    def get_or_create_case_summary(self, case_id: str) -> CaseSummary:
+    def get_or_create_case_summary(self, case_id: Union[str, int]) -> CaseSummary:
         """Gets or initiates generation of a Gemini AI summary for a SOAR case."""
-        return self._get_or_create_case_summary_wf.execute(case_id=case_id)
+        return self._get_or_create_case_summary_wf.execute(case_id=_normalize_case_id(case_id))
 
     def get_case_summary(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         timeout_sec: float = 90.0,
         poll_interval_sec: float = 3.0,
     ) -> CaseSummary:
         """Requests a Gemini AI case summary and polls until complete or timeout."""
         return self._get_case_summary_wf.execute(
-            case_id=case_id,
+            case_id=_normalize_case_id(case_id),
             timeout_sec=timeout_sec,
             poll_interval_sec=poll_interval_sec,
         )
@@ -2866,11 +3259,11 @@ class SecOpsEngine:
         query: Union[CaseSearchQuery, str] = "",
         start_time: Optional[Any] = None,
         end_time: Optional[Any] = None,
-        tags: Optional[List[str]] = None,
-        priorities: Optional[List[str]] = None,
-        stages: Optional[List[str]] = None,
-        environments: Optional[List[str]] = None,
-        assigned_users: Optional[List[str]] = None,
+        tags: Optional[Union[List[str], str]] = None,
+        priorities: Optional[Union[List[Union[str, CasePriority]], str, CasePriority]] = None,
+        stages: Optional[Union[List[str], str]] = None,
+        environments: Optional[Union[List[str], str]] = None,
+        assigned_users: Optional[Union[List[str], str]] = None,
         is_important: Optional[bool] = None,
         page_size: int = 50,
         page_number: int = 0,
@@ -2886,15 +3279,21 @@ class SecOpsEngine:
         """
         if isinstance(query, CaseSearchQuery):
             return self._search_cases_wf.execute(query)
+        norm_priorities = [priorities] if isinstance(priorities, (str, CasePriority)) else (priorities or [])
+        p_strings = [p.value if isinstance(p, CasePriority) else str(p) for p in norm_priorities]
+        norm_tags = [tags] if isinstance(tags, str) else (tags or [])
+        norm_stages = [stages] if isinstance(stages, str) else (stages or [])
+        norm_envs = [environments] if isinstance(environments, str) else (environments or [])
+        norm_users = [assigned_users] if isinstance(assigned_users, str) else (assigned_users or [])
         q = CaseSearchQuery(
             query_text=query,
             start_time=start_time,
             end_time=end_time,
-            tags=tags or [],
-            priorities=priorities or [],
-            stages=stages or [],
-            environments=environments or [],
-            assigned_users=assigned_users or [],
+            tags=norm_tags,
+            priorities=p_strings,
+            stages=norm_stages,
+            environments=norm_envs,
+            assigned_users=norm_users,
             is_important=is_important,
             page_size=page_size,
             page_number=page_number,
@@ -2933,7 +3332,7 @@ class SecOpsEngine:
 
     def triage_case(
         self,
-        case_id: str,
+        case_id: Union[str, int],
         fetch_summary: bool = True,
         search_precedents: bool = True,
         summary_timeout_sec: float = 15.0,
@@ -2946,8 +3345,9 @@ class SecOpsEngine:
         summary, performs historical title and entity precedent correlation, evaluates
         novelty vs repeat pattern, and optionally updates stage or posts triage audit comments.
         """
-        return self._orchestrate_case_triage_wf.triage_single_case(
-            case_id=case_id,
+        cid = _normalize_case_id(case_id)
+        return self._case_triage_wf.execute(
+            case_id=cid,
             fetch_summary=fetch_summary,
             search_precedents=search_precedents,
             summary_timeout_sec=summary_timeout_sec,
@@ -2955,22 +3355,52 @@ class SecOpsEngine:
             post_comment=post_comment,
         )
 
-    def get_case_timeline(self, case_id: str) -> CaseTimeline:
+    def ai_investigate_case(
+        self,
+        case_id: Union[str, int],
+        hunt_lookback_days: int = 14,
+        hunt_receive_limit: int = 50,
+        summary_timeout_sec: float = 90.0,
+        escalate_incident: bool = False,
+        escalate_alert_priority: Optional[str] = None,
+        post_comment: bool = False,
+        dry_run: bool = False,
+    ) -> CaseAiInvestigationResult:
+        """Executes deep autonomous AI investigation and UDM threat hunting on a case (`case.ai_investigate`).
+
+        Fetches case workspace, polls Gemini AI summary, extracts network/user/file indicators,
+        executes retrospective Chronicle UDM threat hunting across enterprise events, and
+        optionally escalates incident status and posts a formatted investigation report.
+        """
+        cid = _normalize_case_id(case_id)
+        return self._case_ai_investigate_wf.execute(
+            case_id=cid,
+            hunt_lookback_days=hunt_lookback_days,
+            hunt_receive_limit=hunt_receive_limit,
+            summary_timeout_sec=summary_timeout_sec,
+            escalate_incident=escalate_incident,
+            escalate_alert_priority=escalate_alert_priority,
+            post_comment=post_comment,
+            dry_run=dry_run,
+        )
+
+    def get_case_timeline(self, case_id: Union[str, int]) -> CaseTimeline:
         """Constructs a unified, chronologically sorted timeline of events and milestones in a case (`case.timeline`)."""
         from engine.workflows.case_triage import GetCaseTimelineWorkflow
-        return GetCaseTimelineWorkflow(self.adapter).execute(case_id=case_id)
+        cid = _normalize_case_id(case_id)
+        return GetCaseTimelineWorkflow(self.adapter).execute(case_id=cid)
 
     def orchestrate_case_triage(
         self,
-        case_ids: Optional[List[str]] = None,
+        case_ids: Optional[Union[List[Union[str, int]], str, int]] = None,
         limit: int = 5,
         open_only: bool = True,
         query_text: str = "",
-        priorities: Optional[List[str]] = None,
-        stages: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        environments: Optional[List[str]] = None,
-        assigned_users: Optional[List[str]] = None,
+        priorities: Optional[Union[List[Union[str, CasePriority]], str, CasePriority]] = None,
+        stages: Optional[Union[List[str], str]] = None,
+        tags: Optional[Union[List[str], str]] = None,
+        environments: Optional[Union[List[str], str]] = None,
+        assigned_users: Optional[Union[List[str], str]] = None,
         is_important: Optional[bool] = None,
         page_number: int = 0,
         search_precedents: bool = True,
@@ -2981,16 +3411,31 @@ class SecOpsEngine:
         Batched retrieval, parallel deep multi-resource investigation, precedent correlation,
         and automated triage scoring & subagent prompt synthesis for SOAR cases.
         """
+        if case_ids is not None:
+            if isinstance(case_ids, (str, int)):
+                norm_case_ids = [_normalize_case_id(case_ids)]
+            else:
+                norm_case_ids = [_normalize_case_id(c) for c in case_ids]
+        else:
+            norm_case_ids = None
+
+        norm_priorities = [priorities] if isinstance(priorities, (str, CasePriority)) else (priorities or [])
+        p_strings = [p.value if isinstance(p, CasePriority) else str(p) for p in norm_priorities] if priorities is not None else None
+        norm_tags = [tags] if isinstance(tags, str) else tags
+        norm_stages = [stages] if isinstance(stages, str) else stages
+        norm_envs = [environments] if isinstance(environments, str) else environments
+        norm_users = [assigned_users] if isinstance(assigned_users, str) else assigned_users
+
         return self._orchestrate_case_triage_wf.execute(
-            case_ids=case_ids,
+            case_ids=norm_case_ids,
             limit=limit,
             open_only=open_only,
             query_text=query_text,
-            priorities=priorities,
-            stages=stages,
-            tags=tags,
-            environments=environments,
-            assigned_users=assigned_users,
+            priorities=p_strings,
+            stages=norm_stages,
+            tags=norm_tags,
+            environments=norm_envs,
+            assigned_users=norm_users,
             is_important=is_important,
             page_number=page_number,
             search_precedents=search_precedents,
@@ -3015,18 +3460,19 @@ class SecOpsEngine:
         query: Optional[Union[str, PlaybookSearchQuery]] = None,
         category: Optional[str] = None,
         is_enabled: Optional[bool] = None,
-        playbook_type: Optional[PlaybookType] = None,
+        playbook_type: Optional[Union[PlaybookType, str]] = None,
         environment: Optional[str] = None,
         limit: int = 100,
     ) -> PlaybookBatch:
         """Executes the SOAR Playbook Search & Filter workflow."""
         if isinstance(query, PlaybookSearchQuery):
             return self._search_playbooks_wf.execute(query)
+        pb_type = coerce_playbook_type(playbook_type) if playbook_type is not None else None
         q = PlaybookSearchQuery(
             query=query,
             category=category,
             is_enabled=is_enabled,
-            playbook_type=playbook_type,
+            playbook_type=pb_type,
             environment=environment,
             limit=limit,
         )
@@ -3242,13 +3688,111 @@ class SecOpsEngine:
         self,
         days: int = 7,
         scan_deployments: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> CuratedDetectionHealthReport:
         """Performs a comprehensive health check and misconfiguration audit across Curated Detections."""
         from runbooks.operations.curated_detections_health import generate_curated_detections_health_report
         return generate_curated_detections_health_report(
             engine=self,
             days=days,
             scan_deployments=scan_deployments,
+        )
+
+    # --- Detection Tuning & UDM Findings Refinements Methods ---
+
+    def list_findings_refinements(
+        self,
+        page_size: int = 100,
+    ) -> FindingsRefinementBatch:
+        """Lists active tenant UDM findings refinements and detection exclusions."""
+        return self._manage_findings_refinements_wf.list_refinements(page_size=page_size)
+
+    def create_findings_refinement(
+        self,
+        display_name: str,
+        query: str,
+        curated_rule_ids: Optional[List[str]] = None,
+    ) -> FindingsRefinementSummary:
+        """Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections."""
+        return self._manage_findings_refinements_wf.create_refinement(
+            display_name=display_name,
+            query=query,
+            curated_rule_ids=curated_rule_ids,
+        )
+
+    def delete_findings_refinement(
+        self,
+        refinement_id: str,
+    ) -> Dict[str, Any]:
+        """Removes an active UDM findings refinement exclusion."""
+        return self._manage_findings_refinements_wf.delete_refinement(refinement_id)
+
+    def test_findings_refinement(
+        self,
+        curated_rule_ids: List[str],
+        query: str,
+        lookback_days: int = 14,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> FindingsRefinementTestResult:
+        """Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio."""
+        return self._test_findings_refinement_wf.execute(
+            curated_rule_ids=curated_rule_ids,
+            query=query,
+            lookback_days=lookback_days,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+    def find_top_noisy_rules(
+        self,
+        lookback_days: int = 7,
+        alert_state: str = "ALL",
+        limit: int = 20,
+    ) -> NoisyRulesBatch:
+        """Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification."""
+        return self._find_top_noisy_rules_wf.execute(
+            lookback_days=lookback_days,
+            alert_state=alert_state,
+            limit=limit,
+        )
+
+    def analyze_entity_cardinality(
+        self,
+        rule_id: str,
+        dimensions: Optional[List[str]] = None,
+        lookback_days: int = 14,
+        limit_per_dimension: int = 10,
+    ) -> EntityCardinalityReport:
+        """Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule."""
+        return self._analyze_entity_cardinality_wf.execute(
+            rule_id=rule_id,
+            dimensions=dimensions,
+            lookback_days=lookback_days,
+            limit_per_dimension=limit_per_dimension,
+        )
+
+    def cross_reference_rule_cases(
+        self,
+        rule_id: str,
+        lookback_days: int = 90,
+        limit: int = 20,
+    ) -> RuleCaseHistoryBatch:
+        """Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes."""
+        return self._cross_reference_rule_cases_wf.execute(
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            limit=limit,
+        )
+
+    def tune_detection(
+        self,
+        rule_id: str,
+        lookback_days: int = 7,
+    ) -> DetectionTuningReport:
+        """End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression."""
+        return self._diagnose_and_tune_detection_wf.execute(
+            rule_id=rule_id,
+            lookback_days=lookback_days,
         )
 
     # --- Milestone 5.8: Content Hub Marketplace Response Integrations Methods ---
@@ -3314,17 +3858,25 @@ class SecOpsEngine:
 
     def execute_dashboard_query(
         self,
-        query_name_or_id: str,
+        query_name_or_id: Optional[str] = None,
+        query_text: Optional[str] = None,
         filters: Optional[List[Dict[str, Any]]] = None,
         use_previous_time_range: bool = False,
         query_source: str = "DASHBOARD",
+        time_unit: str = "DAY",
+        time_value: str = "1",
+        dialect: str = "YL2",
     ) -> DashboardQueryResult:
-        """Executes a dashboard query and normalizes columnar output into tabular rows."""
+        """Executes a dashboard query (by resource ID or inline query expression) and normalizes columnar output into tabular rows."""
         return self._execute_dashboard_query_wf.execute(
             query_name_or_id=query_name_or_id,
+            query_text=query_text,
             filters=filters,
             use_previous_time_range=use_previous_time_range,
             query_source=query_source,
+            time_unit=time_unit,
+            time_value=time_value,
+            dialect=dialect,
         )
 
     def validate_dashboard_query(
@@ -3339,7 +3891,7 @@ class SecOpsEngine:
     def run_dashboard_health_check(
         self,
         dashboard_name: str,
-    ) -> Dict[str, Any]:
+    ) -> DashboardHealthCheckResult:
         """Executes comprehensive health check for a named dashboard.
         
         Workflow retrieves dashboard configuration, executes all widget queries,
@@ -3349,7 +3901,7 @@ class SecOpsEngine:
             dashboard_name: Display name of dashboard (e.g., "Data Ingestion and Health")
         
         Returns:
-            Dict containing dashboard_id, query_results, and human-readable summary
+            DashboardHealthCheckResult containing dashboard_id, query_results, summary, and errors
         """
         return run_dashboard_health_check(
             adapter=self.adapter,
@@ -3445,6 +3997,15 @@ class SecOpsEngine:
         """Discovers and filters supported ingestion log types."""
         return self._list_log_types_wf.execute(query=query, limit=limit)
 
+    def get_log_type_display_name(self, log_type_id: str) -> Optional[str]:
+        """Deterministically resolves an internal log_type ID (e.g. 'GCP_IDS', 'PAN_FIREWALL') to its official display name."""
+        batch = self._list_log_types_wf.execute(query=log_type_id, limit=50)
+        target = log_type_id.strip().upper()
+        for lt in batch.log_types:
+            if lt.id.upper() == target:
+                return lt.display_name
+        return None
+
     def search_parsers(
         self,
         log_type: str = "-",
@@ -3465,6 +4026,32 @@ class SecOpsEngine:
     def get_parser(self, log_type: str, parser_id: Optional[str] = None) -> ParserDetail:
         """Retrieves full parser metadata and decodes CBN Logstash filter code."""
         return self._get_parser_wf.execute(log_type=log_type, parser_id=parser_id)
+
+    def run_parser(
+        self,
+        log_type: str,
+        raw_log_text: str,
+        parser_cbn: Optional[str] = None,
+    ) -> ParserRunResult:
+        """Executes a Logstash CBN parser configuration against a raw log string."""
+        return self._run_parser_wf.execute(
+            log_type=log_type,
+            raw_log_text=raw_log_text,
+            parser_cbn=parser_cbn,
+        )
+
+    def diagnose_unparsed_logs(
+        self,
+        log_type: str,
+        lookback_hours: int = 168,
+        limit: int = 5,
+    ) -> UnparsedLogsDiagnosticBatch:
+        """Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors."""
+        return self._diagnose_unparsed_wf.execute(
+            log_type=log_type,
+            lookback_hours=lookback_hours,
+            limit=limit,
+        )
 
     def search_parser_extensions(
         self,
@@ -4129,12 +4716,16 @@ class SecOpsEngine:
     def add_data_table_rows(
         self,
         table_name_or_id: str,
-        rows: List[Dict[str, Any]],
+        rows: Union[List[Dict[str, Any]], Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Creates or appends rows in bulk to a Chronicle SIEM Data Table."""
+        """Creates or appends rows in bulk to a Chronicle SIEM Data Table.
+
+        Supports a single row dictionary or a list of row dictionaries.
+        """
+        row_list = [rows] if isinstance(rows, dict) else list(rows)
         return self._add_data_table_rows_wf.execute(
             table_name_or_id=table_name_or_id,
-            rows=rows,
+            rows=row_list,
         )
 
     def delete_data_table_row(

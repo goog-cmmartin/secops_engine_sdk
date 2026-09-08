@@ -18,6 +18,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
+from engine.domain import CuratedDetectionHealthReport
 from engine.facade import SecOpsEngine
 
 
@@ -25,7 +26,7 @@ def generate_curated_detections_health_report(
     engine: Optional[SecOpsEngine] = None,
     days: int = 7,
     scan_deployments: bool = True,
-) -> Dict[str, Any]:
+) -> CuratedDetectionHealthReport:
     """Generates a complete health, deployment, and hygiene audit for Curated Detections.
 
     Args:
@@ -34,7 +35,7 @@ def generate_curated_detections_health_report(
         scan_deployments: Whether to query deployment states for rule sets.
 
     Returns:
-        Structured dictionary containing summary statistics, findings, and ranking tables.
+        CuratedDetectionHealthReport containing summary statistics, findings, and ranking tables.
     """
     if engine is None:
         engine = SecOpsEngine()
@@ -53,11 +54,24 @@ def generate_curated_detections_health_report(
     rs_res = adapter.list_curated_rulesets(page_size=1000)
     raw_rulesets = rs_res.get("curatedRuleSets", []) if isinstance(rs_res, dict) else []
 
-    # 2. Fetch Detection Metrics & Tenant Quotas
-    metrics = engine.get_curated_detection_metrics(start_time=start_iso, end_time=end_iso)
-    tenant_metrics = metrics.tenant_metrics
-    top_firing = metrics.top_firing_rulesets or []
-    firing_map: Dict[str, int] = {f.get("resource_name", ""): int(f.get("count", 0)) for f in top_firing if f.get("resource_name")}
+    health_findings: List[Dict[str, Any]] = []
+
+    # 2. Fetch Detection Metrics & Tenant Quotas with Graceful Degradation on Timeout
+    tenant_metrics = None
+    top_firing: List[Dict[str, Any]] = []
+    firing_map: Dict[str, int] = {}
+    try:
+        metrics = engine.get_curated_detection_metrics(start_time=start_iso, end_time=end_iso)
+        tenant_metrics = metrics.tenant_metrics
+        top_firing = metrics.top_firing_rulesets or []
+        firing_map = {f.get("resource_name", ""): int(f.get("count", 0)) for f in top_firing if f.get("resource_name")}
+    except Exception as e:
+        health_findings.append({
+            "severity": "MEDIUM",
+            "code": "METRICS_TIMEOUT_DEGRADED",
+            "message": f"Detection metrics aggregation timed out or failed ({e}). Inventory and configuration audits succeeded.",
+            "recommendation": "Try evaluating detection metrics over a shorter timeframe (e.g. days=1).",
+        })
 
     # 3. Fetch Curated Individual Rules (for content freshness)
     rules_res = adapter.list_curated_rules(page_size=1000)
@@ -65,7 +79,6 @@ def generate_curated_detections_health_report(
 
     # 4. Analyze Rule Sets and Deployments
     ruleset_audits: List[Dict[str, Any]] = []
-    health_findings: List[Dict[str, Any]] = []
 
     total_broad_enabled = 0
     total_broad_alerting = 0
@@ -283,7 +296,7 @@ def generate_curated_detections_health_report(
     total_detections_period = sum(f.get("count", 0) for f in top_firing)
     healthy_count = len(raw_rulesets) - len(health_findings)
 
-    return {
+    res_dict = {
         "evaluation_period": {
             "days": days,
             "start_time": start_iso,
@@ -304,11 +317,11 @@ def generate_curated_detections_health_report(
             "healthy_rulesets_count": max(0, healthy_count),
         },
         "tenant_quotas": {
-            "quota_usage": tenant_metrics.quota_usage,
-            "quota_limit": tenant_metrics.quota_limit,
-            "total_live_rule_count": tenant_metrics.total_live_rule_count,
-            "max_live_rule_count": tenant_metrics.max_live_rule_count,
-            "total_active_count": tenant_metrics.total_active_count,
+            "quota_usage": tenant_metrics.quota_usage if tenant_metrics else 0,
+            "quota_limit": tenant_metrics.quota_limit if tenant_metrics else 0,
+            "total_live_rule_count": tenant_metrics.total_live_rule_count if tenant_metrics else 0,
+            "max_live_rule_count": tenant_metrics.max_live_rule_count if tenant_metrics else 0,
+            "total_active_count": tenant_metrics.total_active_count if tenant_metrics else 0,
         },
         "health_findings": health_findings,
         "top_firing_rulesets": top_firing[:15],
@@ -319,11 +332,14 @@ def generate_curated_detections_health_report(
         "ruleset_audits": ruleset_audits,
     }
 
+    return CuratedDetectionHealthReport(**res_dict, raw=res_dict)
 
-def print_curated_detections_health_console(report: Dict[str, Any], json_output: bool = False) -> None:
+
+def print_curated_detections_health_console(report: Any, json_output: bool = False) -> None:
     """Prints the Curated Detections health audit in rich human-readable format."""
     if json_output:
-        print(json.dumps(report, indent=2))
+        raw_dict = report.to_dict() if hasattr(report, "to_dict") else report
+        print(json.dumps(raw_dict, indent=2))
         return
 
     summary = report.get("summary", {})

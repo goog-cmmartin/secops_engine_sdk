@@ -56,6 +56,19 @@ def _parse_wall_description(activity_type: str, activity_kind: str, details: Dic
     return f"{activity_type} - {activity_kind}"
 
 
+def parse_case_comment_record(raw: Dict[str, Any]) -> CaseCommentRecord:
+    """Parses a raw SecOps case comment dict into a strongly-typed CaseCommentRecord."""
+    return CaseCommentRecord(
+        name=raw.get("name", ""),
+        comment=raw.get("comment", ""),
+        author=raw.get("user") or raw.get("creator"),
+        author_name=raw.get("userOwnerFullName") or raw.get("lastEditorFullName"),
+        create_time=parse_timestamp(raw.get("createTime")),
+        is_deleted=bool(raw.get("isDeleted", False)),
+        raw=raw,
+    )
+
+
 class ListCaseCommentsWorkflow:
     """Lists all analyst comments and AI assessment notes for a SecOps case (`case.list_comments`)."""
 
@@ -72,19 +85,7 @@ class ListCaseCommentsWorkflow:
         clean_case_id = str(case_id).strip().split("/")[-1]
         raw_comments = self.adapter.list_case_comments(clean_case_id) or []
 
-        records: List[CaseCommentRecord] = []
-        for c in raw_comments:
-            records.append(
-                CaseCommentRecord(
-                    name=c.get("name", ""),
-                    comment=c.get("comment", ""),
-                    author=c.get("user") or c.get("creator"),
-                    author_name=c.get("userOwnerFullName") or c.get("lastEditorFullName"),
-                    create_time=parse_timestamp(c.get("createTime")),
-                    is_deleted=bool(c.get("isDeleted", False)),
-                    raw=c,
-                )
-            )
+        records = [parse_case_comment_record(c) for c in raw_comments]
 
         # Sort chronologically descending (newest first)
         records.sort(

@@ -82,9 +82,9 @@ class GoogleSecOpsAdapter:
     ) -> Dict[str, Any]:
         """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
         token = self._get_auth_token()
-        url = f"{self.api_base}{path}"
+        url = path if path.startswith("https://") else f"{self.api_base}{path}"
         if params:
-            query_string = urllib.parse.urlencode(params)
+            query_string = urllib.parse.urlencode(params, doseq=True)
             url = f"{url}?{query_string}"
 
         headers = {
@@ -1501,6 +1501,8 @@ class GoogleSecOpsAdapter:
         time_unit: str = "DAY",
         time_value: str = "1",
         dialect: str = "YL2",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
     ) -> DashboardQueryResult:
         """Executes a dashboard query and returns normalized columnar/row-oriented results.
         
@@ -1519,7 +1521,9 @@ class GoogleSecOpsAdapter:
             query_source: Query source context (default: "DASHBOARD").
             time_unit: Relative time unit for inline queries (e.g. "DAY", "HOUR", "MONTH").
             time_value: Relative time value for inline queries (e.g. "1", "24", "7").
-            dialect: Query dialect for inline queries (default: "YL2").
+            dialect: Query dialect for inline queries (default: "YL2", supports "SQL").
+            start_time: Optional absolute start timestamp in RFC3339 format.
+            end_time: Optional absolute end timestamp in RFC3339 format.
             
         Returns:
             DashboardQueryResult with parsed columns and rows for easy data access.
@@ -1541,15 +1545,24 @@ class GoogleSecOpsAdapter:
                 target_name = None
 
         if target_text:
-            query_payload = {
-                "query": target_text,
-                "dialect": dialect,
-                "input": {
+            if start_time and end_time:
+                input_payload = {
+                    "timeWindow": {
+                        "startTime": start_time,
+                        "endTime": end_time,
+                    }
+                }
+            else:
+                input_payload = {
                     "relativeTime": {
                         "timeUnit": time_unit,
                         "startTimeVal": str(time_value),
                     }
-                },
+                }
+            query_payload = {
+                "query": target_text,
+                "dialect": dialect,
+                "input": input_payload,
             }
             query_label = "inline_dashboard_query"
         elif target_name:
@@ -2753,9 +2766,73 @@ class GoogleSecOpsAdapter:
         if page_token:
             params["pageToken"] = page_token
         if rule_id_or_name:
-            clean_id = rule_id_or_name.split("/")[-1]
-            params["filter"] = f'rule_id = "{clean_id}"'
+            if "curatedRules/" in rule_id_or_name:
+                filter_key = "curated_rule"
+                full_name = rule_id_or_name
+            elif rule_id_or_name.startswith("projects/"):
+                filter_key = "rule"
+                full_name = rule_id_or_name
+            else:
+                filter_key = "rule"
+                clean_id = rule_id_or_name.split("/")[-1]
+                full_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+            params["filter"] = f'{filter_key} = "{full_name}"'
         return self._request("GET", path, params=params)
+
+    def query_cloud_logging(
+        self,
+        filter_str: str,
+        project_ids: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        order_by: str = "timestamp desc",
+    ) -> Dict[str, Any]:
+        """Queries Google Cloud Logging API (v2/entries:list) via OAuth token."""
+        url = "https://logging.googleapis.com/v2/entries:list"
+        projects = project_ids or [self.project_id]
+        body: Dict[str, Any] = {
+            "resourceNames": [f"projects/{p}" for p in projects],
+            "filter": filter_str,
+            "orderBy": order_by,
+            "pageSize": page_size,
+        }
+        if page_token:
+            body["pageToken"] = page_token
+        return self._request("POST", url, body=body)
+
+    def query_cloud_monitoring_time_series(
+        self,
+        filter_str: str,
+        start_time: str,
+        end_time: str,
+        project_id: Optional[str] = None,
+        alignment_period: Optional[str] = None,
+        per_series_aligner: Optional[str] = None,
+        cross_series_reducer: Optional[str] = None,
+        group_by_fields: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Queries Google Cloud Monitoring API (v3/projects/{project_id}/timeSeries) via OAuth token."""
+        proj = project_id or self.project_id
+        url = f"https://monitoring.googleapis.com/v3/projects/{proj}/timeSeries"
+        params: Dict[str, Any] = {
+            "filter": filter_str,
+            "interval.startTime": start_time,
+            "interval.endTime": end_time,
+            "pageSize": page_size,
+        }
+        if alignment_period:
+            params["aggregation.alignmentPeriod"] = alignment_period
+        if per_series_aligner:
+            params["aggregation.perSeriesAligner"] = per_series_aligner
+        if cross_series_reducer:
+            params["aggregation.crossSeriesReducer"] = cross_series_reducer
+        if group_by_fields:
+            params["aggregation.groupByFields"] = group_by_fields
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", url, params=params)
 
 
 

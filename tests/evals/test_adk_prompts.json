@@ -1,0 +1,210 @@
+[
+  {
+    "eval_id": "eval-adk-ambiguity-01",
+    "category": "ambiguity_guardrails",
+    "agent_handle": "@rule-troubleshooter",
+    "input_prompt": "Can you fix the rule that failed?",
+    "expected_behavior": "Prompt specifies to never guess rule identifiers and ask the operator for the rule ID or list candidate rules first.",
+    "assertions": {
+      "forbid_id_guessing": true,
+      "requires_clarification_rule": "rule_id",
+      "prompt_contains_directive": "ask for clarification before guessing"
+    }
+  },
+  {
+    "eval_id": "eval-adk-ambiguity-02",
+    "category": "ambiguity_guardrails",
+    "agent_handle": "@parser-doctor",
+    "input_prompt": "Why are our logs dropping?",
+    "expected_behavior": "Prompt specifies to request the specific log_type or ingestion pipeline before diagnosing parsers.",
+    "assertions": {
+      "forbid_id_guessing": true,
+      "requires_clarification_rule": "log_type",
+      "prompt_contains_directive": "DO NOT assume or guess"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-01",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "Rule ru_9a2b is failing with compilation Code 9 execution error in production",
+    "expected_behavior": "SecOps Dispatcher must route execution error Code 9 to @rule-troubleshooter.",
+    "assertions": {
+      "target_agent": "@rule-troubleshooter",
+      "prompt_contains_routing": "Code 9 errors: recommend/delegate to `@rule-troubleshooter`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-02",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "The Chronicle forwarder is lagging by 6 hours and BindPlane collector shows drop",
+    "expected_behavior": "SecOps Dispatcher must route ingestion transport latency to @feed-agent.",
+    "assertions": {
+      "target_agent": "@feed-agent",
+      "prompt_contains_routing": "transport latency SLAs (<4h), or pipeline drops: recommend/delegate to `@feed-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-03",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "We have too much alert noise on rule ru_1122 and need to suppress false positives",
+    "expected_behavior": "SecOps Dispatcher must route alert noise and false positive suppression to @detection-tuning-agent.",
+    "assertions": {
+      "target_agent": "@detection-tuning-agent",
+      "prompt_contains_routing": "alert noise reduction or false-positive suppression: recommend/delegate to `@detection-tuning-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-04",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "Verify if our GCP Workforce Identity Federation has any unauthorized role drift",
+    "expected_behavior": "SecOps Dispatcher must route IAM and Workforce Identity governance to @identity-governor.",
+    "assertions": {
+      "target_agent": "@identity-governor",
+      "prompt_contains_routing": "credential governance: recommend/delegate to `@identity-governor`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-01",
+    "category": "skill_matching",
+    "agent_handle": "@rule-troubleshooter",
+    "input_prompt": "Audit detection rule health and identify compilation failures across the tenant",
+    "expected_behavior": "SkillCatalog must match query to task.detection_engineer.review_rule_health.",
+    "assertions": {
+      "expected_skill_id": "task.detection_engineer.review_rule_health",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-02",
+    "category": "skill_matching",
+    "agent_handle": "@feed-agent",
+    "input_prompt": "Audit feed connectivity, transport latency SLAs, and check for feed errors",
+    "expected_behavior": "SkillCatalog must match query to task.ingestion_specialist.audit_feed_health.",
+    "assertions": {
+      "expected_skill_id": "task.ingestion_specialist.audit_feed_health",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-03",
+    "category": "skill_matching",
+    "agent_handle": "@identity-governor",
+    "input_prompt": "Audit workforce identity federation assignments and IAM bindings for scope drift",
+    "expected_behavior": "SkillCatalog must match query to task.platform_engineer.audit_identity_access.",
+    "assertions": {
+      "expected_skill_id": "task.platform_engineer.audit_identity_access",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-04",
+    "category": "skill_matching",
+    "agent_handle": "@sql-analyst",
+    "input_prompt": "Check UDM search query performance, error rates, and 95th percentile latency",
+    "expected_behavior": "SkillCatalog must match query to task.platform_engineer.check_udm_search_performance.",
+    "assertions": {
+      "expected_skill_id": "task.platform_engineer.check_udm_search_performance",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-formatting-01",
+    "category": "formatting_constraints",
+    "agent_handle": "@yaral-optimizer",
+    "input_prompt": "Verify prompt formatting constraints for diff proposals",
+    "expected_behavior": "Prompt specifies unified diff format for proposed YARA-L modifications.",
+    "assertions": {
+      "prompt_contains_directive": "Format all refactored rules strictly as unified diffs in Gas Town proposals"
+    }
+  },
+  {
+    "eval_id": "eval-adk-formatting-02",
+    "category": "formatting_constraints",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "Verify prompt conciseness rules for dispatch responses",
+    "expected_behavior": "Prompt enforces conciseness constraints with maximum 3 bullet points summary.",
+    "assertions": {
+      "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
+    }
+  },
+  {
+    "eval_id": "eval-adk-ambiguity-03",
+    "category": "ambiguity_guardrails",
+    "agent_handle": "@gcp-telemetry-agent",
+    "input_prompt": "Can you check our telemetry metrics and logging?",
+    "expected_behavior": "Prompt specifies to not assume lookback time window or target log_type and default to 24h or ask for clarification.",
+    "assertions": {
+      "forbid_id_guessing": true,
+      "requires_clarification_rule": "lookback_window_or_target",
+      "prompt_contains_directive": "DO NOT assume or fabricate"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-05",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "We need to check Cloud Monitoring time series for Chronicle ingestion drops and Cloud Logging error rates",
+    "expected_behavior": "SecOps Dispatcher must route Cloud Logging error logs and Cloud Monitoring telemetry to @gcp-telemetry-agent.",
+    "assertions": {
+      "target_agent": "@gcp-telemetry-agent",
+      "prompt_contains_routing": "Cloud Logging audit and error logs, API consumption rates, or Cloud Monitoring ingestion/parsing metrics: recommend/delegate to `@gcp-telemetry-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-05",
+    "category": "skill_matching",
+    "agent_handle": "@gcp-telemetry-agent",
+    "input_prompt": "Monitor Chronicle GCP Logging and Metrics telemetry",
+    "expected_behavior": "SkillCatalog must match query to task.platform_engineer.monitor_chronicle_gcp_telemetry.",
+    "assertions": {
+      "expected_skill_id": "task.platform_engineer.monitor_chronicle_gcp_telemetry",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-formatting-03",
+    "category": "formatting_constraints",
+    "agent_handle": "@gcp-telemetry-agent",
+    "input_prompt": "Verify prompt conciseness rules for telemetry responses",
+    "expected_behavior": "Prompt enforces conciseness constraints with maximum 3 bullet points summary.",
+    "assertions": {
+      "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
+    }
+  },
+  {
+    "eval_id": "eval-adk-routing-06",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "Can you check if our tenant configuration or SOAR settings drifted from baseline?",
+    "expected_behavior": "SecOps Dispatcher must route tenant configuration baselines and settings drift to @tenant-posture-agent.",
+    "assertions": {
+      "target_agent": "@tenant-posture-agent",
+      "prompt_contains_routing": "tenant configuration baselines, settings audit, SOAR/SIEM parameter posture, or configuration drift: recommend/delegate to `@tenant-posture-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-06",
+    "category": "skill_matching",
+    "agent_handle": "@tenant-posture-agent",
+    "input_prompt": "Audit tenant configuration posture and detect configuration drift",
+    "expected_behavior": "SkillCatalog must match query to task.platform_engineer.audit_tenant_configuration_posture.",
+    "assertions": {
+      "expected_skill_id": "task.platform_engineer.audit_tenant_configuration_posture",
+      "min_match_score": 15
+    }
+  },
+  {
+    "eval_id": "eval-adk-formatting-04",
+    "category": "formatting_constraints",
+    "agent_handle": "@tenant-posture-agent",
+    "input_prompt": "Verify prompt conciseness rules for tenant posture responses",
+    "expected_behavior": "Prompt enforces conciseness constraints with maximum 3 bullet points summary.",
+    "assertions": {
+      "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
+    }
+  }
+]

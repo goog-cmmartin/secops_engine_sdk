@@ -100,7 +100,8 @@ htmlcov/
 dmypy.json
 
 # Antigravity & Agent workspace artifacts
-.agents/
+.agents/*
+!.agents/skills/
 .gemini/
 
 # Legacy / Prototype Scratch Folders
@@ -114,3 +115,9 @@ secops_state_graph*
 # Live Tenant Capture & Evidence Data
 evidence/
 
+# External reference repositories (Gastown, Zulip, etc.)
+references/
+
+# Local state & chat history
+.state/
+.chat/

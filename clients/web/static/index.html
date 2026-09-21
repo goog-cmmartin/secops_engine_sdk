@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google SecOps Multi-Agent Fleet</title>
+  <link rel="stylesheet" href="/static/style.css?v=2.3.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+</head>
+<body>
+  <!-- Global Top Navigation Bar -->
+  <header class="app-topbar">
+    <div class="topbar-brand">
+      <span class="topbar-logo">
+        <svg class="ui-icon icon-brand" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </span>
+      <span class="topbar-title">Google SecOps Multi-Agent Fleet</span>
+      <span class="live-indicator"></span>
+    </div>
+    <nav class="topbar-nav">
+      <button id="navBtnChat" class="nav-tab active">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Fleet Chat</span>
+      </button>
+      <button id="navBtnGastown" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+        <span>Gas Town Board</span>
+        <span id="navBoardBadge" class="nav-pill-badge" style="display:none;">0</span>
+      </button>
+      <button id="navBtnIngestion" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <span>Ingestion &amp; Normalization</span>
+      </button>
+      <button id="navBtnLibrary" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Agent Library</span>
+      </button>
+    </nav>
+    <div class="topbar-meta">
+      <span class="meta-tag">ADK 2</span>
+      <span class="meta-tag">Gas Town HITL</span>
+      <span id="fleetStatusTag" class="meta-status">10 Agents Active</span>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- Left Navigation Sidebar: Slack-Style Streams & Collapsible DMs -->
+    <aside id="sidebarLeft" class="sidebar-left">
+      <div class="workspace-header">
+        <div class="workspace-title">
+          <span class="live-indicator"></span>
+          <span>SecOps Agent Fleet</span>
+        </div>
+      </div>
+
+      <div class="nav-scrollable">
+        <div class="section-header-row">
+          <span class="section-label">Streams &amp; Topics</span>
+        </div>
+        <div id="streamsList" class="streams-list"></div>
+
+        <!-- Slack-Style Direct Messages Section -->
+        <div id="dmSectionHeader" class="section-header-row clickable" title="Toggle Direct Messages">
+          <span class="section-label">Direct Messages</span>
+          <span id="dmToggleIcon" class="section-toggle-icon">▼</span>
+        </div>
+        <div id="dmList" class="dm-list"></div>
+      </div>
+    </aside>
+
+    <!-- Center Content Area -->
+    <main class="main-content-area">
+      <!-- View 1: Fleet Chat View -->
+      <div id="chatView" class="view-panel active">
+        <!-- Chat Header -->
+        <header class="chat-header">
+          <div class="breadcrumb-container">
+            <span id="currentStreamLabel" class="breadcrumb-stream">#detections</span>
+            <span class="breadcrumb-sep">&gt;</span>
+            <span id="currentTopicLabel" class="breadcrumb-topic">rule-proposals</span>
+          </div>
+          <div class="chat-actions">
+            <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 8px;">Google ADK 2 &bull; GEAP Ready</span>
+            <button id="clearTopicBtn" class="btn-clear-topic" title="Clear message history for this topic">
+              <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Clear Topic</span>
+            </button>
+            <button id="toggleRightDrawerBtn" class="btn-drawer-toggle" title="Toggle Proposals Drawer">
+              <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+              <span>Proposals</span>
+              <span id="drawerToggleBadge" class="drawer-badge">0</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Message Timeline -->
+        <section id="messageTimeline" class="message-timeline"></section>
+
+        <!-- Message Composer -->
+        <footer class="chat-composer-box">
+          <!-- Floating Mention Dropdown Menu for Autocomplete -->
+          <div id="mentionDropdown" class="mention-dropdown" style="display:none;"></div>
+          <div class="composer-input-row">
+            <textarea
+              id="composerInput"
+              class="composer-textarea"
+              placeholder="Message #detections > rule-proposals... (type @ for agent autocomplete)"
+              rows="1"
+            ></textarea>
+            <button id="sendBtn" class="btn-send">
+              <span>Send</span>
+            </button>
+          </div>
+        </footer>
+      </div>
+
+      <!-- View 2: Dedicated Gas Town Tabbed Control Center Page View -->
+      <div id="gastownView" class="view-panel" style="display:none;">
+        <div class="page-container gastown-container">
+          <!-- Gas Town Control Center Header Banner (Honoring Gastown Mayor/Coordinator Banner) -->
+          <div class="gt-mayor-banner">
+            <div class="gt-mayor-info">
+              <span class="gt-mayor-icon">🎩</span>
+              <div class="gt-mayor-titles">
+                <div class="gt-mayor-head-row">
+                  <span class="gt-mayor-title">The Mayor</span>
+                  <span class="gt-badge gt-badge-green">Attached</span>
+                </div>
+                <div class="gt-mayor-sub">
+                  Coordinator: <code id="gtMayorHandle">@secops-dispatcher</code> &bull; Google ADK 2 &bull; GEAP Engine
+                </div>
+              </div>
+            </div>
+            <div class="gt-mayor-stats">
+              <div class="gt-stat-item">
+                <span class="gt-stat-label">Health</span>
+                <span id="gtDeaconHeartbeat" class="gt-stat-val healthy">✓ Deacon Heartbeat (&lt;1m)</span>
+              </div>
+              <div class="gt-stat-item">
+                <span class="gt-stat-label">Fleet</span>
+                <span id="gtFleetOnline" class="gt-stat-val">9 Agents Online</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary & Alerts Metric Banner -->
+          <div class="gt-summary-banner">
+            <div class="gt-summary-stats">
+              <div class="gt-summary-card">
+                <span id="gtStatPolecats" class="gt-stat-num">9</span>
+                <span class="gt-stat-caption">🦨 Polecats (Agents)</span>
+              </div>
+              <div class="gt-summary-card">
+                <span id="gtStatHooks" class="gt-stat-num">103</span>
+                <span class="gt-stat-caption">🪝 Telemetry Hooks</span>
+              </div>
+              <div class="gt-summary-card">
+                <span id="gtStatWork" class="gt-stat-num">3</span>
+                <span class="gt-stat-caption">📋 Active Work / Issues</span>
+              </div>
+              <div class="gt-summary-card">
+                <span id="gtStatConvoys" class="gt-stat-num">4</span>
+                <span class="gt-stat-caption">🚚 Convoys</span>
+              </div>
+              <div class="gt-summary-card">
+                <span id="gtStatEscalations" class="gt-stat-num gt-alert-num">1</span>
+                <span class="gt-stat-caption">⚠️ Escalations</span>
+              </div>
+            </div>
+            <div class="gt-alerts-strip">
+              <span id="gtAlertItem" class="gt-alert-pill">⏰ 3 proposals awaiting HITL operator review</span>
+            </div>
+          </div>
+
+          <!-- Gastown Tab Navigation Bar -->
+          <div class="gastown-tabs-bar">
+            <div class="gastown-tabs">
+              <button id="tabGtKanban" class="subtab active">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                <span>Kanban Board</span>
+              </button>
+              <button id="tabGtConvoys" class="subtab">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                <span>Convoys</span>
+              </button>
+              <button id="tabGtRefinery" class="subtab">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                <span>Refinery Merge Queue</span>
+              </button>
+              <button id="tabGtEscalations" class="subtab">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>Escalations</span>
+              </button>
+              <button id="tabGtPatrols" class="subtab">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>Deacon Patrols</span>
+              </button>
+            </div>
+            <div class="gastown-actions">
+              <button id="btnTriggerPatrolAll" class="btn btn-primary" onclick="triggerGastownPatrolAll()">
+                <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Patrol Fleet</span>
+              </button>
+              <button id="btnRefreshGastown" class="btn btn-secondary">
+                <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>Sync Board</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Section 1: Kanban Board -->
+          <div id="secGtKanban" class="gastown-section">
+            <div class="kanban-grid">
+              <!-- Col 1: Triage / Backlog -->
+              <div class="kanban-column" id="kanbanColTriage">
+                <div class="kanban-column-header">
+                  <div class="kanban-col-title">
+                    <span class="kanban-dot dot-triage"></span>
+                    <span>Triage / Backlog</span>
+                  </div>
+                  <span class="kanban-col-count" id="countColTriage">0</span>
+                </div>
+                <div class="kanban-cards-list" id="cardsColTriage"></div>
+              </div>
+
+              <!-- Col 2: In Progress -->
+              <div class="kanban-column" id="kanbanColProgress">
+                <div class="kanban-column-header">
+                  <div class="kanban-col-title">
+                    <span class="kanban-dot dot-progress"></span>
+                    <span>In Progress (Agents)</span>
+                  </div>
+                  <span class="kanban-col-count" id="countColProgress">0</span>
+                </div>
+                <div class="kanban-cards-list" id="cardsColProgress"></div>
+              </div>
+
+              <!-- Col 3: HITL Review (Proposals) -->
+              <div class="kanban-column" id="kanbanColReview">
+                <div class="kanban-column-header">
+                  <div class="kanban-col-title">
+                    <span class="kanban-dot dot-review"></span>
+                    <span>HITL Review (Proposals)</span>
+                  </div>
+                  <span class="kanban-col-count" id="countColReview">0</span>
+                </div>
+                <div class="kanban-cards-list" id="cardsColReview"></div>
+              </div>
+
+              <!-- Col 4: Merged / Resolved -->
+              <div class="kanban-column" id="kanbanColMerged">
+                <div class="kanban-column-header">
+                  <div class="kanban-col-title">
+                    <span class="kanban-dot dot-merged"></span>
+                    <span>Merged / Resolved</span>
+                  </div>
+                  <span class="kanban-col-count" id="countColMerged">0</span>
+                </div>
+                <div class="kanban-cards-list" id="cardsColMerged"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Convoys -->
+          <div id="secGtConvoys" class="gastown-section" style="display:none;">
+            <div class="table-card">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                    <span>Active Convoys &amp; Fleet Work Packages</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Bundled agent work packages tracked via Beads Ledger with progress completion metrics.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:100px;">Status</th>
+                      <th>Convoy ID &amp; Title</th>
+                      <th style="width:180px;">Progress</th>
+                      <th>Work Breakdown</th>
+                      <th>Assignees</th>
+                      <th style="width:100px;">Activity</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtConvoysTableBody">
+                    <tr><td colspan="6" class="table-loading">Loading active convoys...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Refinery Merge Queue -->
+          <div id="secGtRefinery" class="gastown-section" style="display:none;">
+            <div class="table-card">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                    <span>Bors-Style Refinery Merge Queue</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Human-in-the-loop verification gates, CI tests, and atomic mutation commit queue.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Proposal ID</th>
+                      <th>Target Resource</th>
+                      <th>Author</th>
+                      <th>CI Preflight</th>
+                      <th>Merge Status</th>
+                      <th>Diff Stats</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtRefineryTableBody">
+                    <tr><td colspan="7" class="table-loading">Loading merge queue...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Escalations -->
+          <div id="secGtEscalations" class="gastown-section" style="display:none;">
+            <div class="table-card">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>Severity-Routed Issue Escalations</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    P0/CRITICAL and P1/HIGH anomalies, blocked workflows, and parser drop alarms.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:100px;">Severity</th>
+                      <th>Escalation Title</th>
+                      <th>Target / Issue</th>
+                      <th>Escalated By</th>
+                      <th style="width:110px;">Age</th>
+                      <th style="width:140px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtEscalationsTableBody">
+                    <tr><td colspan="6" class="table-loading">Loading escalations...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 5: Deacon Patrols -->
+          <div id="secGtPatrols" class="gastown-section" style="display:none;">
+            <div class="deacon-patrol-header-card">
+              <div class="deacon-patrol-title-area">
+                <div class="deacon-badge-row">
+                  <span class="gt-badge gt-badge-green" id="gtDeaconStatusBadge">DEACON SUPERVISOR ONLINE</span>
+                  <span class="deacon-telemetry-pill" id="gtDeaconHeartbeatDetail">Heartbeat: Active (&lt;1m)</span>
+                  <span class="deacon-telemetry-pill" id="gtDeaconActivePatrolsPill">5 Active Patrols</span>
+                </div>
+                <h3 class="deacon-section-heading">Autonomous Background Fleet Audits (Steve Yegge Gas Town)</h3>
+                <p class="deacon-section-desc">
+                  The Deacon daemon evaluates scheduled patrol sweeps, queries live Google SecOps APIs, detects transport and parser anomalies, generates collaborative chat alerts, and autonomously registers atomic tasks in Evidence Fabric.
+                </p>
+              </div>
+              <div class="deacon-patrol-header-actions">
+                <button class="btn btn-primary" onclick="triggerGastownPatrolAll()" id="btnHeaderPatrolAll">
+                  <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span>Sweep Entire Fleet Now</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="deacon-patrols-grid" id="gtDeaconPatrolsGrid">
+              <div class="table-loading">Loading Deacon patrol cycles...</div>
+            </div>
+
+            <!-- Recent Patrol Audit Log -->
+            <div class="table-card" style="margin-top:20px;">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Recent Deacon Patrol Audit Logs</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Telemetry from live scheduled sweeps, auto-dispatched task beads, and findings.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:130px;">Timestamp</th>
+                      <th>Agent Handle</th>
+                      <th>Patrol Action</th>
+                      <th>Stream &amp; Topic</th>
+                      <th>Execution Mode</th>
+                      <th>Beads Dispatched</th>
+                      <th style="width:100px;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtPatrolAuditLogBody">
+                    <tr><td colspan="7" class="table-loading">No patrol audit executions recorded yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- View 3: Dedicated Ingestion & Normalization Full-Width Page View -->
+      <div id="ingestionView" class="view-panel" style="display:none;">
+        <div class="page-container">
+          <!-- Page Header -->
+          <div class="page-header">
+            <div class="page-title-group">
+              <h1 class="page-title">
+                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+                <span>Ingestion &amp; Normalization Engineering</span>
+              </h1>
+              <p class="page-subtitle">Health Hub transport telemetry, P95 latency SLAs, and Logstash CBN normalization</p>
+            </div>
+            <div class="page-actions">
+              <button id="pageBtnAuditFeeds" class="btn btn-primary">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+                <span class="btn-text">Audit Feeds</span>
+              </button>
+              <button id="pageBtnAuditParsers" class="btn btn-success">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <span class="btn-text">Audit Parsers</span>
+              </button>
+              <button id="pageBtnRefresh" class="btn btn-secondary">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Global Telemetry Status Banner -->
+          <div id="ingestionStatusBanner" class="telemetry-banner" style="display:none;"></div>
+
+          <!-- KPI Cards Grid -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Configured Feeds</div>
+              <div id="kpiTotalFeeds" class="kpi-value">--</div>
+              <div id="kpiFeedSub" class="kpi-sub">Auditing Health Hub...</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">P95 Transport Latency</div>
+              <div id="kpiP95Latency" class="kpi-value">--</div>
+              <div id="kpiLatencySub" class="kpi-sub">SLA threshold: 4h</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Active Parsers</div>
+              <div id="kpiTotalParsers" class="kpi-value">--</div>
+              <div id="kpiParserSub" class="kpi-sub">Validated log types</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">CBN Version Drifts</div>
+              <div id="kpiVersionDrift" class="kpi-value">--</div>
+              <div id="kpiDriftSub" class="kpi-sub">Out-of-sync parser code</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Normalizer Drop Codes</div>
+              <div id="kpiDropCodes" class="kpi-value">--</div>
+              <div id="kpiDropSub" class="kpi-sub">Unparsed / syntax issues</div>
+            </div>
+          </div>
+
+          <!-- Ingestion Page Sub-Tabs -->
+          <div class="subpage-tabs">
+            <button id="tabIngestionFeeds" class="subtab active">
+              <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><circle cx="12" cy="12" r="2"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+              <span>Feed Pipelines (@feed-agent)</span>
+            </button>
+            <button id="tabIngestionParsers" class="subtab">
+              <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              <span>Normalizers &amp; CBN (@parser-doctor)</span>
+            </button>
+            <button id="tabIngestionDiagnostics" class="subtab">
+              <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.31L4.15 19.3A2 2 0 0 0 5.86 22h12.28a2 2 0 0 0 1.71-2.7L14 9.31V2"/><line x1="8.5" y1="2" x2="15.5" y2="2"/></svg>
+              <span>Unparsed Log Diagnostic Lab</span>
+            </button>
+          </div>
+
+          <!-- Tab 1: Feed Pipelines Table -->
+          <div id="secIngestionFeeds" class="subpage-section active">
+            <div class="table-toolbar">
+              <input id="feedSearchInput" type="text" class="search-input" placeholder="Filter feeds by name, log type, or source..." />
+              <div class="filter-group">
+                <button class="filter-chip active" data-ffilter="all">All</button>
+                <button class="filter-chip" data-ffilter="HEALTHY">Healthy</button>
+                <button class="filter-chip" data-ffilter="WARN">Warn / Lag</button>
+                <button class="filter-chip" data-ffilter="FAILED">Failed</button>
+              </div>
+              <button id="btnChatFeedAgent" class="btn btn-sm btn-ghost">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>Chat with @feed-agent</span>
+              </button>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table" id="feedsTable">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Feed Name</th>
+                    <th>Log Type</th>
+                    <th>Source Type</th>
+                    <th>P95 Latency</th>
+                    <th>Last Heartbeat</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="feedsTableBody">
+                  <tr><td colspan="7" class="table-loading">Loading live feed telemetry from Chronicle...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tab 2: Parser Health Table -->
+          <div id="secIngestionParsers" class="subpage-section" style="display:none;">
+            <div class="table-toolbar">
+              <input id="parserSearchInput" type="text" class="search-input" placeholder="Filter parsers by log type or author..." />
+              <div class="filter-group">
+                <button class="filter-chip active" data-pfilter="all">All</button>
+                <button class="filter-chip" data-pfilter="HEALTHY">Healthy</button>
+                <button class="filter-chip" data-pfilter="WARN">Drift / Warn</button>
+                <button class="filter-chip" data-pfilter="FAILED">Failed</button>
+              </div>
+              <button id="btnChatParserDoctor" class="btn btn-sm btn-ghost">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>Chat with @parser-doctor</span>
+              </button>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table" id="parsersTable">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Log Type</th>
+                    <th>State</th>
+                    <th>Author</th>
+                    <th>Version Drift</th>
+                    <th>Drop Reason</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="parsersTableBody">
+                  <tr><td colspan="7" class="table-loading">Loading SIEM parser health from Chronicle...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tab 3: Unparsed Log Diagnostic Lab -->
+          <div id="secIngestionDiagnostics" class="subpage-section" style="display:none;">
+            <div class="diagnostic-lab-card">
+              <div class="lab-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.31L4.15 19.3A2 2 0 0 0 5.86 22h12.28a2 2 0 0 0 1.71-2.7L14 9.31V2"/><line x1="8.5" y1="2" x2="15.5" y2="2"/></svg>
+                    <span>Live Raw Log Diagnostic Sandbox</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Empirically queries Chronicle raw log search for <code>raw = /.*/ parsed = false</code> and replays against active Logstash CBN code.
+                  </p>
+                </div>
+              </div>
+              <div class="lab-controls">
+                <div class="lab-input-group">
+                  <label>Log Type</label>
+                  <input id="labLogTypeInput" type="text" placeholder="e.g. CS_EDR, WINEVTLOG, PAN_FIREWALL" class="search-input" />
+                </div>
+                <div class="lab-input-group" style="width:140px;">
+                  <label>Lookback Hours</label>
+                  <input id="labLookbackInput" type="number" value="168" min="1" max="720" class="search-input" />
+                </div>
+                <div class="lab-input-group" style="width:100px;">
+                  <label>Sample Limit</label>
+                  <input id="labLimitInput" type="number" value="5" min="1" max="25" class="search-input" />
+                </div>
+                <button id="btnRunLabDiagnose" class="btn btn-primary" style="align-self:flex-end;">
+                  <span>Run Diagnosis</span>
+                </button>
+              </div>
+              <div id="labDiagnosticResults" class="lab-results">
+                <div class="lab-placeholder">Enter a log type and click Run Diagnosis to replay live unparsed logs.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- View 4: Dedicated Agent Library & Capabilities Directory -->
+      <div id="libraryView" class="view-panel" style="display:none;">
+        <div class="page-container library-page-container">
+          <!-- Page Header -->
+          <div class="page-header library-header">
+            <div class="page-title-group">
+              <h1 class="page-title">
+                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span>Agent Library &amp; Capabilities Directory</span>
+              </h1>
+              <p class="page-subtitle">Inspect specialized Google ADK 2 agents, system instructions, operational protocols, and bound SDK tools</p>
+            </div>
+            <div class="page-actions library-header-actions">
+              <span class="meta-tag">10 Active Agents</span>
+              <span class="meta-tag">Google ADK 2</span>
+              <span class="meta-tag">Live Chronicle / GEAP</span>
+            </div>
+          </div>
+
+          <!-- Master-Detail Split Pane Container -->
+          <div class="library-split-pane">
+            <!-- Left Master Column: Agent Directory List -->
+            <aside class="library-sidebar-pane">
+              <div class="library-search-box">
+                <input
+                  type="text"
+                  id="agentSearchInput"
+                  class="search-input"
+                  placeholder="Filter agents by name, handle, role, or tool..."
+                />
+              </div>
+
+              <!-- Filter Chips by Subsystem -->
+              <div class="library-filter-chips">
+                <button class="lib-filter-chip active" data-subsystem="ALL">All</button>
+                <button class="lib-filter-chip" data-subsystem="detections">Detections</button>
+                <button class="lib-filter-chip" data-subsystem="ingestion">Ingestion</button>
+                <button class="lib-filter-chip" data-subsystem="identity">Identity</button>
+                <button class="lib-filter-chip" data-subsystem="analytics">Analytics</button>
+                <button class="lib-filter-chip" data-subsystem="soar">SOAR</button>
+              </div>
+
+              <!-- Scrollable Agent Cards List -->
+              <div id="agentLibraryList" class="library-agent-list">
+                <!-- Dynamically populated by renderAgentLibrary() -->
+              </div>
+            </aside>
+
+            <!-- Right Detail Column: Selected Agent Deep-Dive -->
+            <section id="agentLibraryDetail" class="library-detail-pane">
+              <!-- Dynamically populated by selectAgentInLibrary(handle) -->
+              <div class="library-placeholder-detail">
+                <div class="library-empty-icon">
+                  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                </div>
+                <h3>Select an Agent to Inspect</h3>
+                <p>Choose an agent from the directory list on the left to examine its complete system prompt, operational protocols, and bound SDK tools.</p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Drawer: Proposals & Fleet Inspector (Toggleable) -->
+    <aside id="sidebarRight" class="sidebar-right sidebar-right-closed">
+      <div class="drawer-header-bar">
+        <span class="drawer-header-title">Inspector</span>
+        <div class="drawer-header-actions">
+          <button id="btnOpenFullBoard" class="btn-drawer-action" title="Open Full Gas Town Board">
+            <span>Board ↗</span>
+          </button>
+          <button id="btnCloseDrawer" class="btn-drawer-close" title="Close Drawer">
+            <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="drawer-tabs">
+        <div id="tabProposals" class="drawer-tab active">
+          Proposals (<span id="openPropCount">0</span>)
+        </div>
+        <div id="tabTuning" class="drawer-tab">Tuning (Noise)</div>
+        <div id="tabDecay" class="drawer-tab">Decay Queue</div>
+        <div id="tabFleet" class="drawer-tab">Fleet Roster</div>
+      </div>
+      <div id="drawerContent" class="drawer-content"></div>
+    </aside>
+  </div>
+
+  <!-- Gas Town Full Diff & Preflight Modal -->
+  <div id="gastownDiffModal" class="gt-modal-overlay" style="display:none;">
+    <div class="gt-modal-card">
+      <div class="gt-modal-header">
+        <div class="gt-modal-title-group">
+          <span id="modalProposalBadge" class="badge-blue">PROPOSAL</span>
+          <h2 id="modalProposalTitle" class="gt-modal-title">Proposal Details</h2>
+        </div>
+        <button id="btnCloseDiffModal" class="gt-modal-close-btn">&times;</button>
+      </div>
+      <div class="gt-modal-body">
+        <div class="gt-modal-meta-grid">
+          <div><label>Target Resource:</label> <code id="modalTargetResource">-</code></div>
+          <div><label>Author Agent:</label> <span id="modalAuthorAgent">-</span></div>
+          <div><label>Risk Level:</label> <span id="modalRiskLevel">-</span></div>
+          <div><label>Subsystem:</label> <span id="modalSubsystem">-</span></div>
+        </div>
+        <div class="gt-modal-section">
+          <h3>Operator Rationale &amp; Context</h3>
+          <p id="modalRationale" class="gt-modal-rationale">-</p>
+        </div>
+        <div class="gt-modal-section">
+          <h3>Preflight Proof &amp; Verification Gates</h3>
+          <div id="modalPreflightProof" class="gt-preflight-box"></div>
+        </div>
+        <div class="gt-modal-section">
+          <h3>Proposed Unified Diff</h3>
+          <pre id="modalDiffContent" class="diff-block"></pre>
+        </div>
+      </div>
+      <div class="gt-modal-footer">
+        <button id="modalBtnReject" class="btn btn-danger">Reject Proposal</button>
+        <button id="modalBtnApprove" class="btn btn-primary">Merge Proposal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Toast Notifications Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/app.js?v=2.3.0"></script>
+</body>
+</html>

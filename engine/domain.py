@@ -2604,6 +2604,41 @@ class RuleHealthReport(UniversalBatchMixin):
 
 
 @dataclass
+class RuleDecayAssessment:
+    """Detailed decay risk assessment and telemetry health evaluation for a single detection rule."""
+    rule_id: str
+    rule_name: str
+    dps_score: int
+    decay_flags: List[str]
+    is_live: bool
+    days_stale: int
+    detection_count_90d: int
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    unpopulated_fields: List[str] = field(default_factory=list)
+    compiler_errors: List[str] = field(default_factory=list)
+    recommendation: str = "KEEP_ACTIVE"
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleDecayReport(UniversalBatchMixin):
+    """Tenant-wide report summarizing detection rule decay, DPS distribution, and telemetry health."""
+    assessments: List[RuleDecayAssessment]
+    total_audited: int = 0
+    broken_compilation_count: int = 0
+    silent_count: int = 0
+    stale_count: int = 0
+    unpopulated_count: int = 0
+    average_dps: float = 0.0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[RuleDecayAssessment]:
+        return self.assessments
+
+
+@dataclass
 class LogProcessingPipelineSummary:
     """Summary of a Data Processing Pipeline."""
     id: str
@@ -4190,6 +4225,10 @@ class RuleDetail:
     def yara_l_code(self) -> str:
         return self.text
 
+    @property
+    def rule_text(self) -> str:
+        return self.text
+
 
 @dataclass
 class RuleListResult:
@@ -4463,6 +4502,198 @@ class DetectionTuningReport:
     @property
     def is_curated(self) -> bool:
         return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
+
+
+@dataclass
+class CorrelatedDetectionSample:
+    """A multi-attribute correlated detection sample isolating benign administrative activity."""
+    user: str
+    command_line: str
+    hostname: str
+    ip: str
+    hash_val: str = ""
+    count: int = 0
+    last_seen: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CorrelatedSamplingBatch(UniversalBatchMixin):
+    """Batch of correlated detection event samples for a rule."""
+    rule_id: str
+    rule_name: str
+    samples: List[CorrelatedDetectionSample] = field(default_factory=list)
+    total_samples: int = 0
+    time_window: str = "14d"
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CorrelatedDetectionSample]:
+        return self.samples
+
+
+@dataclass
+class MultiFactorExclusion:
+    """A safe, multi-factor exclusion filter targeting benign background activity."""
+    rule_id: str
+    rule_name: str
+    factors: Dict[str, str]
+    yara_l_condition: str
+    udm_refinement_query: str
+    is_multi_factor: bool
+    safety_guardrail_passed: bool
+    guardrail_notes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DetectionTuningProposal:
+    """Complete tuning proposal with quantitative impact projections and compiler verification."""
+    proposal_id: str
+    rule_id: str
+    rule_name: str
+    rule_type: str
+    status: str
+    unsuppressed_trigger_count: int
+    projected_suppressed_count: int
+    noise_reduction_pct: float
+    preserved_real_alerts: int
+    multi_factor_exclusion: Optional[MultiFactorExclusion] = None
+    entity_distribution: List[Dict[str, Any]] = field(default_factory=list)
+    correlated_samples: List[CorrelatedDetectionSample] = field(default_factory=list)
+    unified_diff: str = ""
+    original_rule_text: str = ""
+    tuned_rule_text: str = ""
+    compiler_verified: bool = False
+    compiler_errors: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class GcpLogEntry:
+    """Individual Google Cloud Logging entry relating to SecOps operations or audit activity."""
+    timestamp: str
+    severity: str
+    log_name: str
+    resource_type: str = ""
+    resource_labels: Dict[str, str] = field(default_factory=list)
+    insert_id: str = ""
+    json_payload: Dict[str, Any] = field(default_factory=dict)
+    text_payload: str = ""
+    proto_payload: Dict[str, Any] = field(default_factory=dict)
+    trace: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def principal_email(self) -> str:
+        """Extracts principal email from proto_payload authenticationInfo if available."""
+        if self.proto_payload and isinstance(self.proto_payload, dict):
+            auth_info = self.proto_payload.get("authenticationInfo", {})
+            if isinstance(auth_info, dict):
+                return auth_info.get("principalEmail", "")
+        return ""
+
+    @property
+    def method_name(self) -> str:
+        """Extracts method name from proto_payload if available."""
+        if self.proto_payload and isinstance(self.proto_payload, dict):
+            return self.proto_payload.get("methodName", "")
+        return ""
+
+
+@dataclass
+class GcpLogQueryResult(UniversalBatchMixin):
+    """Batch of Google Cloud Logging entries returned from a query."""
+    entries: List[GcpLogEntry] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    total_count: int = 0
+    filter_applied: str = ""
+    projects_queried: List[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> List[GcpLogEntry]:
+        return self.entries
+
+
+@dataclass(frozen=True)
+class ChronicleIamMember:
+    """Individual or principal granted an IAM role in Google Cloud."""
+    raw_member: str
+    member_type: str  # user, group, serviceAccount, workforcePool, domain, other
+    principal_id: str
+
+
+@dataclass(frozen=True)
+class ChronicleIamRoleBinding:
+    """An IAM binding granting a Chronicle-related role to one or more members."""
+    role: str
+    role_title: str
+    is_custom: bool
+    members: List[str] = field(default_factory=list)
+    condition: Optional[Dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class ChronicleCustomRole:
+    """A project-level custom IAM role containing chronicle.* permissions."""
+    role_name: str
+    title: str
+    description: str
+    stage: str
+    chronicle_permissions: List[str] = field(default_factory=list)
+    total_permissions_count: int = 0
+
+
+@dataclass(frozen=True)
+class IdentityGovernanceReport:
+    """Comprehensive Identity & Access Governance report for a SecOps project."""
+    project_id: str
+    timestamp: str
+    chronicle_bindings: List[ChronicleIamRoleBinding] = field(default_factory=list)
+    custom_roles: List[ChronicleCustomRole] = field(default_factory=list)
+    total_privileged_users: int = 0
+    total_groups: int = 0
+    total_service_accounts: int = 0
+    total_workforce_pools: int = 0
+    inventory_summary: Optional[Dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class MetricPoint:
+    """Individual data point within a Google Cloud Monitoring time series."""
+    start_time: str
+    end_time: str
+    value: Any  # int, float, str, bool, or dict for distribution
+
+
+@dataclass
+class TimeSeriesData:
+    """A single time series stream returned from Google Cloud Monitoring."""
+    metric_type: str
+    metric_labels: Dict[str, str] = field(default_factory=dict)
+    resource_type: str = ""
+    resource_labels: Dict[str, str] = field(default_factory=dict)
+    metric_kind: str = "GAUGE"  # GAUGE, DELTA, CUMULATIVE
+    value_type: str = "INT64"   # INT64, DOUBLE, BOOL, STRING, DISTRIBUTION
+    points: List[MetricPoint] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class GcpMonitoringQueryResult(UniversalBatchMixin):
+    """Batch of Google Cloud Monitoring time series streams."""
+    time_series: List[TimeSeriesData] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    total_series: int = 0
+    filter_applied: str = ""
+    time_interval: str = ""
+    projects_queried: List[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> List[TimeSeriesData]:
+        return self.time_series
+
+
 
 
 

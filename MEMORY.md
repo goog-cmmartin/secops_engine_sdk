@@ -10,6 +10,7 @@ Table of contents for project documentation and governance.
 - [docs/SDK_INTERFACE_STANDARD.md](docs/SDK_INTERFACE_STANDARD.md) — SDK interface standards, polymorphic arguments, and design principles.
 - [docs/WORKFLOW_EXECUTION_GUIDE.md](docs/WORKFLOW_EXECUTION_GUIDE.md) — Comprehensive execution guide for all 21 composed workflows with real live outputs using Case 104982.
 - [docs/UDM_STATS_SYNTAX.md](docs/UDM_STATS_SYNTAX.md) — Query language reference and canonical examples for UDM Stats Search (aggregations, match/outcome clauses, entity graph, detections).
+- [docs/GASTOWN_ROADMAP.md](docs/GASTOWN_ROADMAP.md) — Architecture and roadmap for Steve Yegge's Gas Town autonomous fleet (Mayor, Deacon, Polecats, Beads, Convoys, Refinery).
 
 ## Reports & Artifacts
 
@@ -18,3 +19,4 @@ Table of contents for project documentation and governance.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.
 - [discovery/observations/detection_tuning_observations.md](discovery/observations/detection_tuning_observations.md) — Live Detection Tuning and UDM Findings Refinements observations.
 - [tests/UDM_SEARCH_TEST_INVENTORY.md](tests/UDM_SEARCH_TEST_INVENTORY.md) — UDM search test inventory.
+- [tests/evals/test_adk_prompts.json](tests/evals/test_adk_prompts.json) — ADK 2 Prompt & Skill evaluation benchmark dataset (ambiguity guardrails, routing precision, modular skills, conciseness constraints). Run via `python scripts/eval_adk_prompts.py`.

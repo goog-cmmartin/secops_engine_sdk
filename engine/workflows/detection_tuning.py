@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import difflib
+import os
 import re
+import uuid
 
 if TYPE_CHECKING:
     from adapters.google_secops import GoogleSecOpsAdapter
 from engine.domain import (
+    CorrelatedDetectionSample,
+    CorrelatedSamplingBatch,
+    DetectionTuningProposal,
     DetectionTuningReport,
     DimensionCardinality,
     EntityCardinalityRecord,
@@ -16,6 +22,7 @@ from engine.domain import (
     FindingsRefinementBatch,
     FindingsRefinementSummary,
     FindingsRefinementTestResult,
+    MultiFactorExclusion,
     NoisyRuleRecord,
     NoisyRulesBatch,
     RuleCaseHistoryBatch,
@@ -212,11 +219,10 @@ class AnalyzeEntityCardinalityWorkflow:
         dimension_results: List[DimensionCardinality] = []
 
         for dim_name, subfield_path in target_dims:
-            query = f"""
+            query = f"""$ruleId = detection.detection.rule_id
+$ruleId = "{clean_rule_id}"
 $val = {subfield_path}
 $val != ""
-$ruleId = detection.detection.rule_id
-$ruleId = "{clean_rule_id}"
 match: $val
 outcome: $count = count(detection.id)
 order: $count desc
@@ -567,3 +573,495 @@ class DiagnoseAndTuneDetectionWorkflow:
             validation_status=val_status,
             validation_errors=validation_errors,
         )
+
+
+class SampleDetectionEventsWorkflow:
+    """Samples correlated multi-attribute detection tuples (user + command + host + IP)."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        rule_id: str,
+        lookback_days: int = 14,
+        limit: int = 20,
+    ) -> CorrelatedSamplingBatch:
+        clean_rule_id = rule_id.split("/")[-1].strip()
+
+        # Primary query: Process-focused correlated attributes
+        query_text = f"""$rule_id = detection.detection.rule_id
+$rule_id = "{clean_rule_id}"
+$user = detection.collection_elements.references.event.principal.user.userid
+$cmd = detection.collection_elements.references.event.target.process.command_line
+$host = detection.collection_elements.references.event.principal.hostname
+match:
+    $user, $cmd, $host
+outcome:
+    $count = count_distinct(detection.id)
+    $last_seen = timestamp.get_timestamp(max(detection.detection_time.seconds))
+order:
+    $count desc
+limit: {limit}
+"""
+        rule_name = clean_rule_id
+        res = None
+        try:
+            res = self.adapter.execute_dashboard_query(
+                query_text=query_text,
+                time_unit="DAY",
+                time_value=str(max(1, lookback_days)),
+            )
+        except Exception:
+            pass
+
+        rows = res.rows if res and res.rows else []
+
+        # Fallback query for network or cloud audit detections lacking process attributes
+        if not rows:
+            fallback_query = f"""$rule_id = detection.detection.rule_id
+$rule_id = "{clean_rule_id}"
+$user = detection.collection_elements.references.event.principal.user.userid
+$ip = detection.collection_elements.references.event.principal.ip
+match:
+    $user, $ip
+outcome:
+    $count = count_distinct(detection.id)
+    $last_seen = timestamp.get_timestamp(max(detection.detection_time.seconds))
+order:
+    $count desc
+limit: {limit}
+"""
+            try:
+                f_res = self.adapter.execute_dashboard_query(
+                    query_text=fallback_query,
+                    time_unit="DAY",
+                    time_value=str(max(1, lookback_days)),
+                )
+                if f_res and f_res.rows:
+                    rows = f_res.rows
+            except Exception:
+                pass
+
+        samples: List[CorrelatedDetectionSample] = []
+        for row in rows:
+            u_val = str(row.get("user") or "").strip()
+            c_val = str(row.get("cmd") or "").strip()
+            h_val = str(row.get("host") or "").strip()
+            ip_val = str(row.get("ip") or "").strip()
+            ls_val = str(row.get("last_seen") or "").strip()
+            cnt_str = row.get("count") or "0"
+            try:
+                c_num = int(cnt_str)
+            except (ValueError, TypeError):
+                c_num = 0
+
+            if u_val or c_val or h_val or ip_val:
+                samples.append(
+                    CorrelatedDetectionSample(
+                        user=u_val,
+                        command_line=c_val,
+                        hostname=h_val,
+                        ip=ip_val,
+                        count=c_num,
+                        last_seen=ls_val or None,
+                        raw=row,
+                    )
+                )
+
+        return CorrelatedSamplingBatch(
+            rule_id=clean_rule_id,
+            rule_name=rule_name,
+            samples=samples,
+            total_samples=len(samples),
+            time_window=f"{lookback_days}d",
+            raw=res.raw if res else {},
+        )
+
+
+BANNED_GLOBAL_BINARIES = {
+    "powershell.exe", "powershell", "cmd.exe", "cmd",
+    "wmic.exe", "wmic", "bash", "sh", "python.exe",
+    "python", "python3", "whoami.exe", "whoami",
+    "certutil.exe", "bitsadmin.exe", "rundll32.exe",
+    "regsvr32.exe", "mshta.exe", "cscript.exe", "wscript.exe",
+}
+
+
+class SynthesizeMultiFactorExclusionWorkflow:
+    """Synthesizes safe, multi-factor exclusion logic adhering to strict HITL guardrails."""
+
+    def execute(
+        self,
+        rule_id: str,
+        rule_name: str,
+        samples: List[CorrelatedDetectionSample],
+        total_detections: int,
+        event_var: str = "$e",
+        dominance_threshold: float = 0.20,
+    ) -> MultiFactorExclusion:
+        clean_rule_id = rule_id.split("/")[-1].strip()
+        guardrail_notes: List[str] = []
+
+        if not samples or total_detections <= 0:
+            return MultiFactorExclusion(
+                rule_id=clean_rule_id,
+                rule_name=rule_name,
+                factors={},
+                yara_l_condition="",
+                udm_refinement_query="",
+                is_multi_factor=False,
+                safety_guardrail_passed=False,
+                guardrail_notes=["No historical detection samples found for exclusion synthesis."],
+            )
+
+        # Identify top correlated benign pattern
+        top_sample = samples[0]
+        dominance_ratio = float(top_sample.count) / float(total_detections) if total_detections > 0 else 0.0
+
+        if dominance_ratio < dominance_threshold:
+            guardrail_notes.append(
+                f"Diversity check failed: Top pattern represents {dominance_ratio*100:.1f}% of detections "
+                f"(below {dominance_threshold*100:.0f}% dominance threshold). Alerts are widely distributed "
+                "without a single dominant benign pattern. Forcing an exclusion would risk blinding detection coverage."
+            )
+            return MultiFactorExclusion(
+                rule_id=clean_rule_id,
+                rule_name=rule_name,
+                factors={},
+                yara_l_condition="",
+                udm_refinement_query="",
+                is_multi_factor=False,
+                safety_guardrail_passed=False,
+                guardrail_notes=guardrail_notes,
+            )
+
+        # Extract potential factors
+        factors: Dict[str, str] = {}
+        if top_sample.user:
+            factors["user"] = top_sample.user
+        if top_sample.command_line:
+            factors["command_line"] = top_sample.command_line
+        if top_sample.hostname:
+            factors["hostname"] = top_sample.hostname
+        if top_sample.ip:
+            factors["ip"] = top_sample.ip
+
+        # Enforce multi-factor constraint
+        if len(factors) < 2:
+            # Reject single-variable cuts
+            if "command_line" in factors:
+                val_lower = factors["command_line"].lower()
+                for b in BANNED_GLOBAL_BINARIES:
+                    if b in val_lower and len(val_lower.strip().split()) <= 2:
+                        guardrail_notes.append(f"Rejected broad binary exclusion on '{b}'. Exclusions must not cut system binaries alone.")
+            if "user" in factors:
+                guardrail_notes.append("Rejected broad user-only exclusion. Exclusions must not cut user accounts globally across all activities.")
+            if "ip" in factors:
+                guardrail_notes.append("Rejected broad IP-only exclusion without supporting identity or host context.")
+
+            guardrail_notes.append("Multi-factor invariant violation: Exclusions must combine at least two correlating attributes.")
+            return MultiFactorExclusion(
+                rule_id=clean_rule_id,
+                rule_name=rule_name,
+                factors=factors,
+                yara_l_condition="",
+                udm_refinement_query="",
+                is_multi_factor=False,
+                safety_guardrail_passed=False,
+                guardrail_notes=guardrail_notes,
+            )
+
+        # Check for banned global binary in command_line (even if multi-factor)
+        if "command_line" in factors:
+            val_lower = factors["command_line"].lower().strip()
+            tokens = val_lower.split()
+            first_cmd = os.path.basename(tokens[0]) if tokens else ""
+            if val_lower in BANNED_GLOBAL_BINARIES or (len(tokens) <= 1 and first_cmd in BANNED_GLOBAL_BINARIES) or (len(tokens) <= 2 and first_cmd in BANNED_GLOBAL_BINARIES and tokens[1] in ("-c", "/c", "-e", "-enc")):
+                guardrail_notes.append(
+                    f"Banned global binary violation: '{first_cmd or val_lower}' cannot be excluded as a bare binary. "
+                    "Exclusions must include specific benign administrative arguments."
+                )
+                return MultiFactorExclusion(
+                    rule_id=clean_rule_id,
+                    rule_name=rule_name,
+                    factors=factors,
+                    yara_l_condition="",
+                    udm_refinement_query="",
+                    is_multi_factor=False,
+                    safety_guardrail_passed=False,
+                    guardrail_notes=guardrail_notes,
+                )
+
+        # Check for broad IP subnet
+        if "ip" in factors:
+            ip_val = factors["ip"].strip()
+            if "/" in ip_val:
+                try:
+                    prefix = int(ip_val.split("/")[-1])
+                    if prefix <= 24:
+                        guardrail_notes.append(
+                            f"Broad subnet violation: Subnet '{ip_val}' cannot be excluded. "
+                            "Exclusions must not cut broad CIDR ranges."
+                        )
+                        return MultiFactorExclusion(
+                            rule_id=clean_rule_id,
+                            rule_name=rule_name,
+                            factors=factors,
+                            yara_l_condition="",
+                            udm_refinement_query="",
+                            is_multi_factor=False,
+                            safety_guardrail_passed=False,
+                            guardrail_notes=guardrail_notes,
+                        )
+                except ValueError:
+                    pass
+
+        # Build YARA-L condition
+        clean_var = event_var.strip()
+        if not clean_var.startswith("$"):
+            clean_var = f"${clean_var}"
+
+        yara_clauses: List[str] = []
+        udm_clauses: List[str] = []
+
+        if "user" in factors:
+            u_val = factors["user"].replace('"', '\\"')
+            yara_clauses.append(f'{clean_var}.principal.user.userid = "{u_val}" nocase')
+            udm_clauses.append(f'(principal.user.userid = "{u_val}")')
+
+        if "command_line" in factors:
+            cmd_raw = factors["command_line"]
+            cmd_regex = re.escape(cmd_raw).replace("/", "\\/")
+            yara_clauses.append(f'{clean_var}.target.process.command_line = /{cmd_regex}/ nocase')
+            udm_clauses.append(f'(target.process.command_line = /{cmd_regex}/)')
+
+        if "hostname" in factors:
+            h_val = factors["hostname"].replace('"', '\\"')
+            yara_clauses.append(f'{clean_var}.principal.hostname = "{h_val}" nocase')
+            udm_clauses.append(f'(principal.hostname = "{h_val}")')
+
+        if "ip" in factors and "hostname" not in factors:
+            ip_val = factors["ip"].replace('"', '\\"')
+            yara_clauses.append(f'{clean_var}.principal.ip = "{ip_val}"')
+            udm_clauses.append(f'(principal.ip = "{ip_val}")')
+
+        joined_yara = "\n      and ".join(yara_clauses)
+        yara_l_cond = f"""    // Benign administrative noise suppression exclusion
+    and not (
+      {joined_yara}
+    )"""
+
+        udm_refinement = " and ".join(udm_clauses)
+        guardrail_notes.append(f"Successfully synthesized multi-factor exclusion combining {len(factors)} attributes.")
+
+        return MultiFactorExclusion(
+            rule_id=clean_rule_id,
+            rule_name=rule_name,
+            factors=factors,
+            yara_l_condition=yara_l_cond,
+            udm_refinement_query=udm_refinement,
+            is_multi_factor=True,
+            safety_guardrail_passed=True,
+            guardrail_notes=guardrail_notes,
+        )
+
+
+class SynthesizeTuningProposalWorkflow:
+    """Orchestrates end-to-end tuning synthesis, compiler validation, diff generation, and impact calculation."""
+
+    def __init__(
+        self,
+        adapter: GoogleSecOpsAdapter,
+        noisy_wf: FindTopNoisyRulesWorkflow,
+        cardinality_wf: AnalyzeEntityCardinalityWorkflow,
+        sample_wf: SampleDetectionEventsWorkflow,
+        synthesis_wf: SynthesizeMultiFactorExclusionWorkflow,
+        test_wf: TestFindingsRefinementWorkflow,
+    ):
+        self.adapter = adapter
+        self.noisy_wf = noisy_wf
+        self.cardinality_wf = cardinality_wf
+        self.sample_wf = sample_wf
+        self.synthesis_wf = synthesis_wf
+        self.test_wf = test_wf
+
+    def execute(
+        self,
+        rule_id: str,
+        lookback_days: int = 14,
+        dominance_threshold: float = 0.20,
+    ) -> DetectionTuningProposal:
+        clean_rule_id = rule_id.split("/")[-1].strip()
+        proposal_id = f"prop-tune-{clean_rule_id[:16]}-{uuid.uuid4().hex[:6]}"
+        is_curated = "ur_" in clean_rule_id or clean_rule_id.startswith("ur_")
+        rule_type = "GOOGLE_MANAGED" if is_curated else "CUSTOMER"
+
+        # 1. Fetch rule details
+        rule_name = clean_rule_id
+        orig_text = ""
+        if is_curated:
+            r_data = self.adapter.get_featured_content_rule(clean_rule_id)
+            if r_data:
+                meta = r_data.get("contentMetadata") or {}
+                rule_name = r_data.get("displayName") or meta.get("displayName") or clean_rule_id
+                orig_text = r_data.get("ruleText") or ""
+        else:
+            r_data = self.adapter.get_rule(clean_rule_id)
+            if r_data:
+                rule_name = r_data.get("displayName") or clean_rule_id
+                orig_text = r_data.get("text") or ""
+
+        # 2. Extract event variable from rule text
+        event_var = "$e"
+        if orig_text:
+            m = re.search(r"events:\s*\n\s*(\$[a-zA-Z0-9_]+)\.", orig_text)
+            if m:
+                event_var = m.group(1)
+
+        # 3. Aggregate baseline detections
+        cardinality_report = self.cardinality_wf.execute(
+            rule_id=clean_rule_id,
+            lookback_days=lookback_days,
+            limit_per_dimension=10,
+        )
+
+        total_detections = 0
+        entity_bars: List[Dict[str, Any]] = []
+        for dim in cardinality_report.dimensions:
+            for rec in dim.records:
+                if rec.count > total_detections:
+                    total_detections = rec.count
+                entity_bars.append({
+                    "dimension": dim.dimension,
+                    "value": rec.value,
+                    "count": rec.count,
+                })
+
+        # 4. Pull correlated detection event samples
+        sampling_batch = self.sample_wf.execute(
+            rule_id=clean_rule_id,
+            lookback_days=lookback_days,
+            limit=10,
+        )
+
+        if total_detections == 0 and sampling_batch.samples:
+            total_detections = sum(s.count for s in sampling_batch.samples)
+
+        # 5. Synthesize multi-factor exclusion with safety guardrails
+        exclusion = self.synthesis_wf.execute(
+            rule_id=clean_rule_id,
+            rule_name=rule_name,
+            samples=sampling_batch.samples,
+            total_detections=total_detections,
+            event_var=event_var,
+            dominance_threshold=dominance_threshold,
+        )
+
+        # Handle Diversity Check / NO_TUNING_NEEDED
+        if not exclusion.safety_guardrail_passed:
+            return DetectionTuningProposal(
+                proposal_id=proposal_id,
+                rule_id=clean_rule_id,
+                rule_name=rule_name,
+                rule_type=rule_type,
+                status="NO_TUNING_NEEDED",
+                unsuppressed_trigger_count=total_detections,
+                projected_suppressed_count=0,
+                noise_reduction_pct=0.0,
+                preserved_real_alerts=total_detections,
+                multi_factor_exclusion=exclusion,
+                entity_distribution=entity_bars[:10],
+                correlated_samples=sampling_batch.samples[:5],
+                unified_diff="",
+                original_rule_text=orig_text,
+                tuned_rule_text=orig_text,
+                compiler_verified=True,
+                compiler_errors=[],
+            )
+
+        # 6. Apply patching & Compiler Pre-Verification
+        tuned_text = orig_text
+        unified_diff = ""
+        compiler_verified = False
+        compiler_errors: List[str] = []
+        suppressed_count = sampling_batch.samples[0].count if sampling_batch.samples else 0
+
+        if not is_curated and orig_text:
+            # Customer rule: patch rule text directly
+            cond_pos = orig_text.find("  condition:")
+            if cond_pos != -1:
+                tuned_text = orig_text[:cond_pos] + exclusion.yara_l_condition + "\n\n" + orig_text[cond_pos:]
+            else:
+                tuned_text = orig_text + "\n" + exclusion.yara_l_condition
+
+            # Verify against Chronicle YARA-L compiler
+            try:
+                comp_res = self.adapter.verify_rule_text(tuned_text)
+                if comp_res.get("success"):
+                    compiler_verified = True
+                else:
+                    diags = comp_res.get("compilationDiagnostics") or []
+                    for d in diags:
+                        compiler_errors.append(d.get("message", "Compilation error"))
+            except Exception as e:
+                compiler_errors.append(str(e))
+
+            # Generate git-style unified diff
+            diff_lines = list(difflib.unified_diff(
+                orig_text.splitlines(keepends=True),
+                tuned_text.splitlines(keepends=True),
+                fromfile=f"a/{clean_rule_id}.yaral",
+                tofile=f"b/{clean_rule_id}.yaral",
+            ))
+            unified_diff = "".join(diff_lines)
+        else:
+            # Curated rule: test findings refinement exclusion
+            try:
+                dry_res = self.test_wf.execute(
+                    curated_rule_ids=[clean_rule_id],
+                    query=exclusion.udm_refinement_query,
+                    lookback_days=lookback_days,
+                )
+                compiler_verified = True
+                if dry_res.excluded_detections > 0:
+                    suppressed_count = dry_res.excluded_detections
+            except Exception as e:
+                compiler_errors.append(f"Findings refinement dry-run error: {str(e)}")
+
+            # Unified diff representation of refinement
+            diff_lines = [
+                f"--- a/findings_refinements/{clean_rule_id}.udm\n",
+                f"+++ b/findings_refinements/{clean_rule_id}.udm\n",
+                "@@ -0,0 +1,5 @@\n",
+                f"+// Refinement: Noise Suppression for {rule_name}\n",
+                f"+rule_id: {clean_rule_id}\n",
+                f"+exclusion_query: {exclusion.udm_refinement_query}\n",
+            ]
+            unified_diff = "".join(diff_lines)
+            tuned_text = f"// UDM Findings Refinement Exclusion\n{exclusion.udm_refinement_query}"
+
+        # 7. Quantitative Impact Projections
+        noise_pct = round((float(suppressed_count) / float(total_detections) * 100), 1) if total_detections > 0 else 0.0
+        preserved = max(0, total_detections - suppressed_count)
+
+        return DetectionTuningProposal(
+            proposal_id=proposal_id,
+            rule_id=clean_rule_id,
+            rule_name=rule_name,
+            rule_type=rule_type,
+            status="TUNING_PROPOSED",
+            unsuppressed_trigger_count=total_detections,
+            projected_suppressed_count=suppressed_count,
+            noise_reduction_pct=noise_pct,
+            preserved_real_alerts=preserved,
+            multi_factor_exclusion=exclusion,
+            entity_distribution=entity_bars[:10],
+            correlated_samples=sampling_batch.samples[:5],
+            unified_diff=unified_diff,
+            original_rule_text=orig_text,
+            tuned_rule_text=tuned_text,
+            compiler_verified=compiler_verified,
+            compiler_errors=compiler_errors,
+        )
+

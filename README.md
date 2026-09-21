@@ -23,8 +23,17 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 * **Client Interfaces & Integration:**
   * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking (including `secops detection baseline|cardinality|cases|test-refinement|tune`).
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
-  * **TUI (`clients/tui/`, `run_tui.py`)**: Textual-based two-pane terminal UI for case triage with responsive threading, offline demo mode, and clean domain/presentation separation (proof-of-concept).
-  * **Universal Capability Registry (`engine.facade`)**: 160+ modular registered capabilities across 38 workflow modules for direct Python SDK and AI agent integration.
+  * **Autonomous ADK 2 Agent Fleet (`agents/`)**: 9 specialized AI agents governed by Gas Town human-in-the-loop (HITL) proposal reviews, evidence stores, and real-time streaming chat across `#general`, `#detections`, `#ingestion`, and `#identity`:
+    * `@secops-dispatcher`: Orchestrator and task delegator.
+    * `@rule-troubleshooter`: Detection latency, timeout, and execution auditor.
+    * `@yaral-optimizer`: High-performance YARAL refactoring engineer.
+    * `@logjammer-agent`: Ingestion burst and quota anomaly investigator.
+    * `@identity-governor`: IAM, RBAC, and access privilege compliance auditor.
+    * `@detection-decay-agent`: Detection health, DPS decay scoring, and rule lifecycle manager.
+    * `@detection-tuning-agent`: False positive noise suppression and multi-factor exclusion synthesizer.
+    * `@feed-agent` (`@ingestion-doctor`): Feed transport latency, silent push stop, and Health Hub pipeline auditor.
+    * `@parser-doctor` (`@cbn-optimizer`): CBN syntax validator, version drift detector, and unparsed log diagnostic engineer.
+  * **Universal Capability Registry (`engine.facade`)**: 175 modular registered capabilities across 41 workflow modules for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---
@@ -40,6 +49,10 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 ├── .gitignore                # Git exclusion rules
 ├── adapters/                 # Google SecOps REST API transport layer
 │   └── google_secops.py      # Authenticated HTTP adapter & endpoint definitions
+├── agents/                   # Autonomous ADK 2 AI Agent Fleet & Gas Town HITL governance
+│   ├── manifests/            # Declarative agent YAML manifests (@feed-agent, @parser-doctor, ...)
+│   ├── generated/            # Typed ADK 2 agent classes with tool bindings and chat dispatch
+│   └── core/                 # Gas Town proposal manager, evidence fabric store, and base agent
 ├── engine/                   # Workflow runtime, domain models, config, and facade
 │   ├── config.py             # Centralized tenant configuration loader
 │   ├── domain.py             # Strongly-typed domain models & universal batch protocol
@@ -48,10 +61,11 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   ├── registry.py           # Capability registry, taxonomy & agent-safety metadata
 │   ├── taxonomy.py           # kind/domain/cardinality derivation & safety policy
 │   ├── schema.py             # Canonical UDM schemas & field mappings
-│   └── workflows/            # Modular workflow implementations (21 workflow modules)
+│   └── workflows/            # Modular workflow implementations (41 workflow modules)
 ├── clients/                  # Multi-tier frontends
 │   ├── cli/                  # Terminal CLI executable (secops.py)
-│   └── desktop/              # Qt / PySide6 Native Desktop application
+│   ├── desktop/              # Qt / PySide6 Native Desktop application
+│   └── web/                  # Real-time WebSocket multi-agent chat interface with generative widgets
 ├── tui/                      # Textual TUI proof-of-concept
 │   ├── app.py                # Two-pane Textual App with background workers
 │   ├── render.py             # Stateless Rich-based rendering (Tables, Panels)

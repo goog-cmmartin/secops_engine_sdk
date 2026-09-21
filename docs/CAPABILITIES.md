@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-08 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-09-21 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**167 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**177 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-09-08 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 25 |
+| workflow | 28 |
 | primitive | 27 |
-| query | 115 |
-| **total** | **167** |
+| query | 122 |
+| **total** | **177** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 48 |
-| bounded | 5 |
+| single | 49 |
+| bounded | 11 |
 | unbounded | 62 |
-| (n/a — workflows/primitive) | 52 |
+| (n/a — workflows/primitive) | 55 |
 
 ## Workflows
 
@@ -44,6 +44,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `curated_detections.audit_health` | curated_detections | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
 | `curated_detections.tuning.diagnose` | curated_detections | End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression. |
+| `curated_detections.tuning.synthesize` | curated_detections | Synthesizes safe multi-factor exclusions enforcing HITL safety guardrails, compiles candidate rule patches or UDM refinements, and calculates noise reduction projections. |
 | `dashboard.audit_health` | dashboard | Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness. |
 | `dashboard.get` | dashboard | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.health_check` | dashboard | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
@@ -56,9 +57,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.diagnose_unparsed` | parser | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
 | `playbook.audit_health` | playbook | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `rule.audit_health` | rule | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
+| `rule.decay.audit` | rule | Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring. |
 | `search.from_entity` | search | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | search | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | search | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
+| `tenant.posture.audit` | siem_settings | Audits tenant configuration posture across root instance, Gemini AI triage, UEBA risk scoring, pipelines, SOAR global settings, and SOC topography. |
 
 ## All capabilities by domain
 
@@ -120,12 +123,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
 | `content_pack.search` | query | `unbounded` | `search_content_packs` | Searches, lists, and filters Content Hub Marketplace Content Packs across categories and pack types. |
 
-### curated_detections  (14: workflow=2, primitive=7, query=5)
+### curated_detections  (16: workflow=3, primitive=7, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `curated_detections.audit_health` | workflow | — | `audit_curated_detections_health` | Performs a comprehensive deployment posture audit, detects misconfigurations like broad alerting, identifies top firing rules, and ranks newest/oldest content. |
 | `curated_detections.tuning.diagnose` | workflow | — | `tune_detection` | End-to-end autonomous workflow that analyzes noisy rules, profiles cardinality, cross-references SOAR cases, formulates exclusions, and dry-run tests suppression. |
+| `curated_detections.tuning.synthesize` | workflow | — | `synthesize_detection_tuning` | Synthesizes safe multi-factor exclusions enforcing HITL safety guardrails, compiles candidate rule patches or UDM refinements, and calculates noise reduction projections. |
 | `curated_detections.refinements.create` | primitive | — | `create_findings_refinement` | Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections. |
 | `curated_detections.refinements.delete` | primitive | — | `delete_findings_refinement` | Removes an active UDM findings refinement exclusion. |
 | `curated_detections.refinements.test` | primitive | — | `test_findings_refinement` | Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio. |
@@ -138,6 +142,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
 | `curated_detections.refinements.list` | query | `unbounded` | `list_findings_refinements` | Lists active UDM findings refinements and detection exclusions across the tenant. |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
+| `curated_detections.tuning.samples` | query | `bounded` | `sample_detection_events` | Pulls correlated multi-attribute detection tuples (user + command + host + IP) from detection collection elements. |
 
 ### dashboard  (6: workflow=3, query=3)
 
@@ -205,6 +210,26 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `feed.search` | query | `unbounded` | `search_feeds` | Searches, lists, and filters push/pull ingestion feeds across source types and log types. |
 | `feed_schema.list_log_types` | query | `unbounded` | `list_feed_log_type_schemas` | Lists log types supported by a specific feed source with lean payload handling. |
 | `feed_schema.list_sources` | query | `unbounded` | `list_feed_source_type_schemas` | Lists all supported feed source types and collection mechanisms. |
+
+### gcp_logging  (1: query=1)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `gcp_logging.search` | query | `bounded` | `query_gcp_cloud_logging` | Queries Google Cloud Logging for SecOps audit, error, parser, and forwarder telemetry via ADC. |
+
+### gcp_monitoring  (1: query=1)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `gcp_monitoring.time_series` | query | `bounded` | `query_gcp_cloud_metrics` | Queries Google Cloud Monitoring time series for Chronicle ingestion, normalizer, agent, and API metrics. |
+
+### identity  (3: query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `identity.custom_roles.list` | query | `bounded` | `get_chronicle_custom_roles` | Discovers custom GCP IAM roles within the project granting chronicle.* permissions. |
+| `identity.iam.bindings` | query | `bounded` | `get_chronicle_iam_bindings` | Inspects project IAM policy for predefined Chronicle roles and custom role assignments. |
+| `identity.inventory.report` | query | `single` | `fetch_inventory_identity_report` | Retrieves identity access insights and workforce pool assignments from SecOps Inventory. |
 
 ### integration  (4: query=4)
 
@@ -278,15 +303,17 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
 
-### rule  (11: workflow=1, primitive=4, query=6)
+### rule  (13: workflow=2, primitive=4, query=7)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `rule.audit_health` | workflow | — | `audit_rule_health` | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
+| `rule.decay.audit` | workflow | — | `audit_rule_decay` | Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring. |
 | `rule.create` | primitive | — | `create_rule` | Creates a new YARA-L detection rule in Chronicle SIEM. |
 | `rule.delete` | primitive | — | `delete_rule` | Deletes a custom detection rule from Chronicle SIEM. |
 | `rule.deployment.update` | primitive | — | `update_rule_deployment` | Updates deployment properties (enabled, alerting, frequency) of a rule. |
 | `rule.patch` | primitive | — | `patch_rule` | Updates the YARA-L logic of an existing detection rule. |
+| `rule.decay.telemetry` | query | `bounded` | `get_rule_detection_counts` | Queries 90-day detection count aggregations using authoritative native detection schema. |
 | `rule.deployment.get` | query | `single` | `get_rule_deployment` | Retrieves deployment, frequency, and alerting status of a rule. |
 | `rule.errors` | query | `unbounded` | `list_rule_errors` | Lists runtime and execution errors across detection rules. |
 | `rule.get` | query | `single` | `get_rule` | Retrieves full details and YARA-L logic of a detection rule. |
@@ -303,10 +330,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `search.udm` | workflow | — | `search_udm` | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
 | `search.udm.stats` | query | `unbounded` | `search_udm_stats` | Validates, initiates, streams, and aggregates UDM statistics, match/outcome metrics, and multi-field grouping operations via LRO. |
 
-### siem_settings  (6: query=6)
+### siem_settings  (7: workflow=1, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `tenant.posture.audit` | workflow | — | `audit_tenant_posture` | Audits tenant configuration posture across root instance, Gemini AI triage, UEBA risk scoring, pipelines, SOAR global settings, and SOC topography. |
 | `pipeline.get` | query | `single` | `get_log_processing_pipeline` | Retrieves full transform statements and stream bindings for a Data Processing Pipeline. |
 | `pipeline.search` | query | `unbounded` | `search_log_processing_pipelines` | Discovers and lists Data Processing Pipelines with parser transforms and Bindplane SaaS links. |
 | `siem.agent_settings.get` | query | `single` | `get_agent_settings` | Retrieves tenant configuration for automated triage, investigation filters, delays, and quotas. |

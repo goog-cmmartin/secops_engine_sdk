@@ -437,6 +437,18 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     det_tune.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
     det_tune.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    det_samples = detection_sub.add_parser("samples", help="Sample correlated detection events (user + cmd + host + IP)")
+    det_samples.add_argument("rule_id", help="Rule ID (e.g. ur_... or ru_...)")
+    det_samples.add_argument("--days", type=int, default=14, help="Lookback window in days (default: 14)")
+    det_samples.add_argument("--limit", type=int, default=10, help="Max samples (default: 10)")
+    det_samples.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    det_synth = detection_sub.add_parser("synthesize-tuning", help="Synthesize safe multi-factor exclusions and quantitative projections")
+    det_synth.add_argument("rule_id", help="Rule ID (e.g. ur_... or ru_...)")
+    det_synth.add_argument("--days", type=int, default=14, help="Lookback window in days (default: 14)")
+    det_synth.add_argument("--dominance", type=float, default=0.20, help="Dominance threshold for diversity check (default: 0.20)")
+    det_synth.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # Marketplace Response Integrations command
     mp_parser = subparsers.add_parser("marketplace", help="Search Content Hub Marketplace Response Integrations, compare version diffs, and inspect affected playbooks")
     mp_sub = mp_parser.add_subparsers(dest="mp_action", required=True)
@@ -1015,6 +1027,27 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_audit.add_argument("--out", "-o", help="Optional path to output JSON report file")
     rule_audit.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    # Cloud Monitoring command
+    mon_parser = subparsers.add_parser("monitoring", help="Query Google Cloud Monitoring time series for Chronicle metrics")
+    mon_sub = mon_parser.add_subparsers(dest="monitoring_action", required=True)
+
+    mon_query = mon_sub.add_parser("query", help="Execute raw Cloud Monitoring time series filter query")
+    mon_query.add_argument("filter", help="Cloud Monitoring filter expression (e.g. 'metric.type = starts_with(\"chronicle.googleapis.com/\")')")
+    mon_query.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
+    mon_query.add_argument("--start", help="Start RFC3339 timestamp")
+    mon_query.add_argument("--end", help="End RFC3339 timestamp")
+    mon_query.add_argument("--period", default="3600s", help="Alignment period duration string (default: 3600s)")
+    mon_query.add_argument("--aligner", default="ALIGN_SUM", help="Per-series aligner (default: ALIGN_SUM)")
+    mon_query.add_argument("--reducer", help="Cross-series reducer (e.g. REDUCE_SUM, REDUCE_MEAN)")
+    mon_query.add_argument("--group-by", nargs="*", help="Group by fields")
+    mon_query.add_argument("--limit", type=int, default=50, help="Max time series streams (default: 50)")
+    mon_query.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    mon_health = mon_sub.add_parser("chronicle-health", help="Quick Chronicle ingestion and normalizer telemetry overview")
+    mon_health.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
+    mon_health.add_argument("--log-type", help="Optional log type filter")
+    mon_health.add_argument("--json", action="store_true", help="Output raw JSON")
+
     args = parser.parse_args()
 
     if args.command == "search":
@@ -1139,6 +1172,89 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_rule_cli(args)
     elif args.command == "runbook":
         run_runbook_cli(args)
+    elif args.command == "monitoring":
+        run_monitoring_cli(args)
+
+
+def run_monitoring_cli(args):
+    engine = SecOpsEngine()
+    if args.monitoring_action == "query":
+        res = engine.query_cloud_monitoring(
+            filter_str=args.filter,
+            start_time=args.start,
+            end_time=args.end,
+            hours=args.hours,
+            alignment_period=args.period,
+            per_series_aligner=args.aligner,
+            cross_series_reducer=args.reducer,
+            group_by_fields=args.group_by,
+            page_size=args.limit,
+        )
+        if getattr(args, "json", False):
+            out = {
+                "total_series": res.total_series,
+                "filter_applied": res.filter_applied,
+                "time_interval": res.time_interval,
+                "projects_queried": res.projects_queried,
+                "time_series": [s.raw for s in res.time_series],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"\n=== Google Cloud Monitoring Time Series ({res.total_series} series) ===")
+        print(f"Filter   : {res.filter_applied}")
+        print(f"Interval : {res.time_interval}")
+        print(f"Projects : {', '.join(res.projects_queried)}\n")
+        for i, s in enumerate(res.time_series, 1):
+            print(f"[{i}] Metric: {s.metric_type}")
+            if s.metric_labels:
+                labels_str = ", ".join(f"{k}={v}" for k, v in s.metric_labels.items())
+                print(f"    Labels: {labels_str}")
+            print(f"    Resource: {s.resource_type} ({s.metric_kind} / {s.value_type})")
+            print(f"    Data Points ({len(s.points)}):")
+            for p in s.points[:10]:
+                print(f"      - {p.end_time}: {p.value}")
+            if len(s.points) > 10:
+                print(f"      ... ({len(s.points) - 10} more points)")
+            print()
+
+    elif args.monitoring_action == "chronicle-health":
+        print(f"\n=== Chronicle Health Telemetry (Last {args.hours} Hours) ===")
+        ingestion = engine.get_chronicle_ingestion_metrics(hours=args.hours, log_type=args.log_type)
+        normalizer = engine.get_chronicle_normalizer_metrics(hours=args.hours, log_type=args.log_type)
+        api = engine.get_chronicle_api_metrics(hours=args.hours)
+
+        if getattr(args, "json", False):
+            out = {
+                "hours": args.hours,
+                "ingestion_series_count": ingestion.total_series,
+                "normalizer_series_count": normalizer.total_series,
+                "api_series_count": api.total_series,
+                "ingestion": [s.raw for s in ingestion.time_series],
+                "normalizer": [s.raw for s in normalizer.time_series],
+                "api": [s.raw for s in api.time_series],
+            }
+            print(json.dumps(out, indent=2))
+            return
+
+        print(f"Ingestion Streams  : {ingestion.total_series}")
+        for s in ingestion.time_series:
+            latest_val = s.points[0].value if s.points else "N/A"
+            lt = s.metric_labels.get("log_type", "all")
+            print(f"  - {s.metric_type} (log_type={lt}): {latest_val}")
+
+        print(f"\nNormalizer Streams : {normalizer.total_series}")
+        for s in normalizer.time_series:
+            latest_val = s.points[0].value if s.points else "N/A"
+            lt = s.metric_labels.get("log_type", "all")
+            print(f"  - {s.metric_type} (log_type={lt}): {latest_val}")
+
+        print(f"\nAPI Request Streams: {api.total_series}")
+        for s in api.time_series:
+            latest_val = s.points[0].value if s.points else "N/A"
+            code = s.metric_labels.get("response_code_class", "total")
+            print(f"  - {s.metric_type} (code={code}): {latest_val}")
+        print()
 
 
 def run_runbook_cli(args):
@@ -2855,6 +2971,85 @@ def run_detection_cli(args):
                 print(f"Historical Cases  : {len(report.linked_cases.cases)} case(s) found in SOAR")
         except Exception as e:
             print(f"Error tuning detection: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "samples":
+        try:
+            batch = engine.sample_detection_events(
+                rule_id=args.rule_id,
+                lookback_days=args.days,
+                limit=args.limit,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps({
+                    "rule_id": batch.rule_id,
+                    "total_samples": batch.total_samples,
+                    "lookback_window": batch.time_window,
+                    "samples": [
+                        {
+                            "user": s.user,
+                            "command_line": s.command_line,
+                            "hostname": s.hostname,
+                            "ip": s.ip,
+                            "count": s.count,
+                            "last_seen": s.last_seen,
+                        }
+                        for s in batch.samples
+                    ],
+                }, indent=2))
+                return
+
+            print(f"\n=== CORRELATED DETECTION EVENT SAMPLES for {batch.rule_id} ({batch.time_window}) ===")
+            print(f"Total Correlated Samples: {batch.total_samples}\n")
+            for idx, s in enumerate(batch.samples, 1):
+                print(f"[{idx}] Count: {s.count:,} | User: {s.user or 'N/A'} | Host: {s.hostname or 'N/A'} | IP: {s.ip or 'N/A'}")
+                if s.command_line:
+                    print(f"    Command: {s.command_line}")
+                if s.last_seen:
+                    print(f"    Last Seen: {s.last_seen}")
+        except Exception as e:
+            print(f"Error sampling detection events: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.detection_action == "synthesize-tuning":
+        try:
+            prop = engine.synthesize_detection_tuning(
+                rule_id=args.rule_id,
+                lookback_days=args.days,
+                dominance_threshold=args.dominance,
+            )
+            if getattr(args, "json", False):
+                print(json.dumps({
+                    "proposal_id": prop.proposal_id,
+                    "rule_id": prop.rule_id,
+                    "rule_name": prop.rule_name,
+                    "status": prop.status,
+                    "unsuppressed_trigger_count": prop.unsuppressed_trigger_count,
+                    "projected_suppressed_count": prop.projected_suppressed_count,
+                    "noise_reduction_pct": prop.noise_reduction_pct,
+                    "preserved_real_alerts": prop.preserved_real_alerts,
+                    "compiler_verified": prop.compiler_verified,
+                    "unified_diff": prop.unified_diff,
+                    "factors": prop.multi_factor_exclusion.factors if prop.multi_factor_exclusion else {},
+                }, indent=2))
+                return
+
+            print(f"\n=== DETECTION TUNING PROPOSAL for {prop.rule_name} ({prop.rule_id}) ===")
+            print(f"Proposal ID         : {prop.proposal_id}")
+            print(f"Tuning Status       : {prop.status}")
+            print(f"Baseline Triggers   : {prop.unsuppressed_trigger_count:,}")
+            print(f"Projected Suppressed: {prop.projected_suppressed_count:,} ({prop.noise_reduction_pct}% noise reduction)")
+            print(f"Preserved Alerts    : {prop.preserved_real_alerts:,}")
+            print(f"Compiler Verified   : {prop.compiler_verified}")
+            if prop.multi_factor_exclusion and prop.multi_factor_exclusion.factors:
+                print(f"Multi-Factor Conjunction:")
+                for k, v in prop.multi_factor_exclusion.factors.items():
+                    print(f"  - {k}: {v}")
+            if prop.unified_diff:
+                print("\nProposed Unified Diff:")
+                print(prop.unified_diff)
+        except Exception as e:
+            print(f"Error synthesizing detection tuning: {e}", file=sys.stderr)
             sys.exit(1)
 
 

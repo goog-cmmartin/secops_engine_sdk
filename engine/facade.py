@@ -65,6 +65,10 @@ from engine.domain import (
     CuratedRuleSetSummary,
     CuratedRuleSummary,
     DetectionTuningReport,
+    CorrelatedDetectionSample,
+    CorrelatedSamplingBatch,
+    MultiFactorExclusion,
+    DetectionTuningProposal,
     DimensionCardinality,
     EntityCardinalityRecord,
     EntityCardinalityReport,
@@ -264,6 +268,15 @@ from engine.domain import (
     RawLogSnippet,
     RawLogSearchResult,
     ValidationResult,
+    GcpLogEntry,
+    GcpLogQueryResult,
+    MetricPoint,
+    TimeSeriesData,
+    GcpMonitoringQueryResult,
+    ChronicleCustomRole,
+    ChronicleIamMember,
+    ChronicleIamRoleBinding,
+    IdentityGovernanceReport,
 )
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
 from engine.workflows.alert_investigation import InvestigateAlertWorkflow
@@ -312,6 +325,9 @@ from engine.workflows.detection_tuning import (
     DiagnoseAndTuneDetectionWorkflow,
     FindTopNoisyRulesWorkflow,
     ManageFindingsRefinementsWorkflow,
+    SampleDetectionEventsWorkflow,
+    SynthesizeMultiFactorExclusionWorkflow,
+    SynthesizeTuningProposalWorkflow,
     TestFindingsRefinementWorkflow,
     translate_to_udm_refinement,
 )
@@ -483,6 +499,17 @@ from engine.workflows.detection_rules import (
     ListRuleErrorsWorkflow,
 )
 from engine.workflows.rule_health import AuditRuleHealthWorkflow
+from engine.workflows.gcp_logging_query import GcpLoggingQueryWorkflow
+from engine.workflows.gcp_monitoring_query import GcpMonitoringQueryWorkflow
+from engine.workflows.identity_governance import IdentityGovernanceWorkflow
+from engine.workflows.rule_decay import (
+    AuditRuleDecayWorkflow,
+    QueryRuleDetectionCountsWorkflow,
+    AuditUdmFieldPopulationWorkflow,
+    calculate_decay_score,
+    extract_udm_fields_from_yaral,
+)
+from engine.domain import RuleDecayAssessment, RuleDecayReport
 
 
 def _normalize_case_id(case_id: Union[str, int]) -> str:
@@ -576,6 +603,16 @@ class SecOpsEngine:
             e.adapter,
             e._analyze_entity_cardinality_wf,
             e._cross_reference_rule_cases_wf,
+            e._test_findings_refinement_wf,
+        ),
+        "_sample_detection_events_wf": lambda e: SampleDetectionEventsWorkflow(e.adapter),
+        "_synthesize_multi_factor_exclusion_wf": lambda e: SynthesizeMultiFactorExclusionWorkflow(),
+        "_synthesize_tuning_proposal_wf": lambda e: SynthesizeTuningProposalWorkflow(
+            e.adapter,
+            e._find_top_noisy_rules_wf,
+            e._analyze_entity_cardinality_wf,
+            e._sample_detection_events_wf,
+            e._synthesize_multi_factor_exclusion_wf,
             e._test_findings_refinement_wf,
         ),
         "_search_marketplace_integrations_wf": lambda e: SearchMarketplaceIntegrationsWorkflow(e.adapter),
@@ -691,6 +728,11 @@ class SecOpsEngine:
         "_update_rule_deployment_wf": lambda e: UpdateRuleDeploymentWorkflow(e.adapter),
         "_list_rule_errors_wf": lambda e: ListRuleErrorsWorkflow(e.adapter),
         "_audit_rule_health_wf": lambda e: AuditRuleHealthWorkflow(e.adapter),
+        "_query_cloud_logging_wf": lambda e: GcpLoggingQueryWorkflow(e.adapter),
+        "_query_cloud_monitoring_wf": lambda e: GcpMonitoringQueryWorkflow(e.adapter),
+        "_audit_rule_decay_wf": lambda e: AuditRuleDecayWorkflow(e.adapter),
+        "_query_rule_detection_counts_wf": lambda e: QueryRuleDetectionCountsWorkflow(e.adapter),
+        "_audit_udm_population_wf": lambda e: AuditUdmFieldPopulationWorkflow(e.adapter),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -1481,6 +1523,40 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="curated_detections.tuning.samples",
+                name="Sample Correlated Detection Events",
+                description="Pulls correlated multi-attribute detection tuples (user + command + host + IP) from detection collection elements.",
+                category="curated_detections",
+                handler=self.sample_detection_events,
+                mcp_tool_name="sample_detection_events",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/curated_detections/tuning_samples",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.tuning.synthesize",
+                name="Synthesize Detection Tuning",
+                description="Synthesizes safe multi-factor exclusions enforcing HITL safety guardrails, compiles candidate rule patches or UDM refinements, and calculates noise reduction projections.",
+                category="curated_detections",
+                handler=self.synthesize_detection_tuning,
+                mcp_tool_name="synthesize_detection_tuning",
+                composed=True,
+                uses=[
+                    "curated_detections.tuning.entity_cardinality",
+                    "curated_detections.tuning.samples",
+                    "curated_detections.refinements.test",
+                    "curated_detections.get_rule",
+                    "rule.get",
+                    "rule.verify",
+                ],
+                evidence_path="evidence/curated_detections/tuning_synthesize",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="marketplace_integration.search",
                 name="Search Marketplace Response Integrations",
                 description="Discovers, searches, and filters Marketplace Response Integrations across categories and update states.",
@@ -1966,6 +2042,37 @@ class SecOpsEngine:
                 mcp_tool_name="get_tenant_instance",
                 composed=False,
                 evidence_path="evidence/siem_settings/tenant/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="tenant.posture.audit",
+                name="Audit Complete Tenant Configuration Posture",
+                description="Audits tenant configuration posture across root instance, Gemini AI triage, UEBA risk scoring, pipelines, SOAR global settings, and SOC topography.",
+                category="siem_settings",
+                handler=self.audit_tenant_posture,
+                mcp_tool_name="audit_tenant_posture",
+                composed=True,
+                uses=(
+                    "siem.tenant.get",
+                    "siem.agent_settings.get",
+                    "siem.risk_config.get",
+                    "siem.managed_domains.get",
+                    "pipeline.search",
+                    "soar.company.get",
+                    "soar.data_retention.get",
+                    "soar.email_settings.get",
+                    "soar.support_settings.get",
+                    "case_config.alert_grouping.settings.get",
+                    "case_config.title_settings.get",
+                    "soar.soc_role.list",
+                    "soar.environment.search",
+                    "soar.remote_agent.search",
+                    "soar.network.search",
+                    "soar.domain.search",
+                    "soar.custom_list.search",
+                ),
+                evidence_path="evidence/tenant_settings/audit",
             )
         )
         self.registry.register(
@@ -2736,6 +2843,103 @@ class SecOpsEngine:
                 composed=True,
                 uses=("rule.list", "rule.errors", "dashboard.execute_query"),
                 evidence_path="evidence/rule/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.decay.audit",
+                name="Audit Detection Rule Decay",
+                description="Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring.",
+                category="rule",
+                handler=self.audit_rule_decay,
+                mcp_tool_name="audit_rule_decay",
+                composed=True,
+                uses=("rule.list", "rule.get", "rule.verify", "dashboard.execute_query"),
+                evidence_path="evidence/rule/decay_audit",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.decay.telemetry",
+                name="Query Rule Detection Telemetry (90-Day)",
+                description="Queries 90-day detection count aggregations using authoritative native detection schema.",
+                category="rule",
+                handler=self.get_rule_detection_counts,
+                mcp_tool_name="get_rule_detection_counts",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/rule/decay_telemetry",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="gcp_logging.search",
+                name="Search GCP Cloud Logging for SecOps",
+                description="Queries Google Cloud Logging for SecOps audit, error, parser, and forwarder telemetry via ADC.",
+                category="gcp_logging",
+                handler=self.query_cloud_logging,
+                mcp_tool_name="query_gcp_cloud_logging",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/gcp_logging/search",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="gcp_monitoring.time_series",
+                name="Query GCP Cloud Monitoring Metrics for SecOps",
+                description="Queries Google Cloud Monitoring time series for Chronicle ingestion, normalizer, agent, and API metrics.",
+                category="gcp_monitoring",
+                handler=self.query_cloud_monitoring,
+                mcp_tool_name="query_gcp_cloud_metrics",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/gcp_monitoring/time_series",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="identity.iam.bindings",
+                name="Audit GCP IAM Bindings for Chronicle",
+                description="Inspects project IAM policy for predefined Chronicle roles and custom role assignments.",
+                category="identity",
+                handler=self.get_chronicle_iam_bindings,
+                mcp_tool_name="get_chronicle_iam_bindings",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/identity/iam_bindings",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="identity.custom_roles.list",
+                name="List Custom GCP IAM Roles with Chronicle Permissions",
+                description="Discovers custom GCP IAM roles within the project granting chronicle.* permissions.",
+                category="identity",
+                handler=self.get_chronicle_custom_roles,
+                mcp_tool_name="get_chronicle_custom_roles",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/identity/custom_roles",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="identity.inventory.report",
+                name="Fetch SecOps Inventory Identity Governance Report",
+                description="Retrieves identity access insights and workforce pool assignments from SecOps Inventory.",
+                category="identity",
+                handler=self.fetch_inventory_identity_report,
+                mcp_tool_name="fetch_inventory_identity_report",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/identity/inventory_report",
             )
         )
 
@@ -3795,6 +3999,32 @@ class SecOpsEngine:
             lookback_days=lookback_days,
         )
 
+    def sample_detection_events(
+        self,
+        rule_id: str,
+        lookback_days: int = 14,
+        limit: int = 20,
+    ) -> CorrelatedSamplingBatch:
+        """Pulls correlated multi-attribute detection tuples (user + command + host + IP) from detection collection elements."""
+        return self._sample_detection_events_wf.execute(
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            limit=limit,
+        )
+
+    def synthesize_detection_tuning(
+        self,
+        rule_id: str,
+        lookback_days: int = 14,
+        dominance_threshold: float = 0.20,
+    ) -> DetectionTuningProposal:
+        """Synthesizes safe multi-factor exclusions enforcing HITL safety guardrails, compiles candidate rule patches or UDM refinements, and calculates noise reduction projections."""
+        return self._synthesize_tuning_proposal_wf.execute(
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            dominance_threshold=dominance_threshold,
+        )
+
     # --- Milestone 5.8: Content Hub Marketplace Response Integrations Methods ---
 
     def search_marketplace_integrations(
@@ -3866,6 +4096,8 @@ class SecOpsEngine:
         time_unit: str = "DAY",
         time_value: str = "1",
         dialect: str = "YL2",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
     ) -> DashboardQueryResult:
         """Executes a dashboard query (by resource ID or inline query expression) and normalizes columnar output into tabular rows."""
         return self._execute_dashboard_query_wf.execute(
@@ -3877,6 +4109,8 @@ class SecOpsEngine:
             time_unit=time_unit,
             time_value=time_value,
             dialect=dialect,
+            start_time=start_time,
+            end_time=end_time,
         )
 
     def validate_dashboard_query(
@@ -4172,6 +4406,11 @@ class SecOpsEngine:
     def get_tenant_instance(self) -> TenantInstanceDetails:
         """Retrieves root tenant instance details and configuration flags."""
         return self._get_tenant_instance_wf.execute()
+
+    def audit_tenant_posture(self) -> Dict[str, Any]:
+        """Audits complete tenant configuration posture across SIEM, SOAR, RBAC, and topography."""
+        from runbooks.operations.tenant_settings_audit import generate_tenant_settings_report
+        return generate_tenant_settings_report(self)
 
     # --- Milestone 6.1: SOAR Settings & Case Data Configuration ---
 
@@ -4872,6 +5111,201 @@ class SecOpsEngine:
             latency_threshold_min=latency_threshold_min,
             page_size=page_size,
         )
+
+    def query_cloud_logging(
+        self,
+        filter_str: str,
+        project_ids: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        order_by: str = "timestamp desc",
+    ) -> GcpLogQueryResult:
+        """Queries Google Cloud Logging API for SecOps events, errors, and audit logs."""
+        return self._query_cloud_logging_wf.execute(
+            filter_str=filter_str,
+            project_ids=project_ids,
+            page_size=page_size,
+            page_token=page_token,
+            order_by=order_by,
+        )
+
+    def query_secops_errors(
+        self,
+        hours: int = 24,
+        component: Optional[str] = None,
+        page_size: int = 50,
+    ) -> GcpLogQueryResult:
+        """Queries Google Cloud Logging for SecOps operational errors."""
+        return self._query_cloud_logging_wf.query_secops_errors(
+            hours=hours, component=component, page_size=page_size
+        )
+
+    def query_secops_audit_logs(
+        self,
+        hours: int = 24,
+        human_only: Optional[bool] = None,
+        page_size: int = 50,
+    ) -> GcpLogQueryResult:
+        """Queries Google Cloud Logging for SecOps Cloud Audit activity logs."""
+        return self._query_cloud_logging_wf.query_secops_audit_logs(
+            hours=hours, human_only=human_only, page_size=page_size
+        )
+
+    def query_cloud_monitoring(
+        self,
+        filter_str: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        hours: int = 24,
+        project_id: Optional[str] = None,
+        alignment_period: Optional[str] = None,
+        per_series_aligner: Optional[str] = None,
+        cross_series_reducer: Optional[str] = None,
+        group_by_fields: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+    ) -> GcpMonitoringQueryResult:
+        """Queries Google Cloud Monitoring time series for SecOps and Chronicle metrics."""
+        return self._query_cloud_monitoring_wf.execute(
+            filter_str=filter_str,
+            start_time=start_time,
+            end_time=end_time,
+            hours=hours,
+            project_id=project_id,
+            alignment_period=alignment_period,
+            per_series_aligner=per_series_aligner,
+            cross_series_reducer=cross_series_reducer,
+            group_by_fields=group_by_fields,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def get_chronicle_ingestion_metrics(
+        self,
+        hours: int = 24,
+        log_type: Optional[str] = None,
+        alignment_period: str = "3600s",
+        per_series_aligner: str = "ALIGN_SUM",
+        project_id: Optional[str] = None,
+    ) -> GcpMonitoringQueryResult:
+        """Queries Chronicle log ingestion volume and count time series."""
+        return self._query_cloud_monitoring_wf.query_chronicle_ingestion_metrics(
+            hours=hours,
+            log_type=log_type,
+            alignment_period=alignment_period,
+            per_series_aligner=per_series_aligner,
+            project_id=project_id,
+        )
+
+    def get_chronicle_normalizer_metrics(
+        self,
+        hours: int = 24,
+        log_type: Optional[str] = None,
+        alignment_period: str = "3600s",
+        per_series_aligner: str = "ALIGN_SUM",
+        project_id: Optional[str] = None,
+    ) -> GcpMonitoringQueryResult:
+        """Queries Chronicle normalizer and parser throughput metrics."""
+        return self._query_cloud_monitoring_wf.query_chronicle_normalizer_metrics(
+            hours=hours,
+            log_type=log_type,
+            alignment_period=alignment_period,
+            per_series_aligner=per_series_aligner,
+            project_id=project_id,
+        )
+
+    def get_chronicle_api_metrics(
+        self,
+        hours: int = 24,
+        alignment_period: str = "3600s",
+        project_id: Optional[str] = None,
+    ) -> GcpMonitoringQueryResult:
+        """Queries Chronicle API consumption and request count metrics."""
+        return self._query_cloud_monitoring_wf.query_chronicle_api_metrics(
+            hours=hours,
+            alignment_period=alignment_period,
+            project_id=project_id,
+        )
+
+    @property
+    def _identity_governance_wf(self) -> IdentityGovernanceWorkflow:
+        if not hasattr(self, "_identity_governance_workflow_instance") or self._identity_governance_workflow_instance is None:
+            self._identity_governance_workflow_instance = IdentityGovernanceWorkflow(self.adapter)
+        return self._identity_governance_workflow_instance
+
+    def get_chronicle_iam_bindings(
+        self,
+        project_id: Optional[str] = None,
+    ) -> List[ChronicleIamRoleBinding]:
+        """Audits project GCP IAM policy for default and custom Chronicle roles."""
+        return self._identity_governance_wf.get_chronicle_iam_bindings(project_id=project_id)
+
+    def get_chronicle_custom_roles(
+        self,
+        project_id: Optional[str] = None,
+    ) -> List[ChronicleCustomRole]:
+        """Lists custom GCP IAM roles within the project granting chronicle.* permissions."""
+        return self._identity_governance_wf.get_chronicle_custom_roles(project_id=project_id)
+
+    def fetch_inventory_identity_report(
+        self,
+        inventory_base_url: str = "http://localhost:8000",
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Retrieves identity access insights from the SecOps Inventory service."""
+        return self._identity_governance_wf.fetch_inventory_identity_report(
+            inventory_base_url=inventory_base_url,
+            tenant_id=tenant_id,
+        )
+
+    def generate_identity_governance_report(
+        self,
+        project_id: Optional[str] = None,
+        inventory_base_url: str = "http://localhost:8000",
+    ) -> IdentityGovernanceReport:
+        """Generates a complete Identity Governance report combining IAM bindings, custom roles, and inventory data."""
+        return self._identity_governance_wf.generate_governance_report(
+            project_id=project_id,
+            inventory_base_url=inventory_base_url,
+        )
+
+    def audit_rule_decay(
+        self,
+        rule_id: Optional[str] = None,
+        lookback_days: int = 90,
+        check_population: bool = True,
+        schema_cache: Optional[Any] = None,
+    ) -> RuleDecayReport:
+        """Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring."""
+        return self._audit_rule_decay_wf.execute(
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            check_population=check_population,
+            schema_cache=schema_cache,
+        )
+
+    def get_rule_detection_counts(
+        self,
+        lookback_days: int = 90,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Queries 90-day detection count aggregations using authoritative native detection schema."""
+        return self._query_rule_detection_counts_wf.execute(lookback_days=lookback_days)
+
+    def audit_udm_field_population(
+        self,
+        field_paths: List[str],
+        vendor_product: Optional[str] = None,
+        lookback_days: int = 30,
+        schema_cache: Optional[Any] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Audits live UDM field population for detection rule telemetry."""
+        return self._audit_udm_population_wf.execute(
+            field_paths=field_paths,
+            vendor_product=vendor_product,
+            lookback_days=lookback_days,
+            schema_cache=schema_cache,
+        )
+
 
 
 

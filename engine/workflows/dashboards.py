@@ -250,6 +250,8 @@ class ExecuteDashboardQueryWorkflow:
         time_unit: str = "DAY",
         time_value: str = "1",
         dialect: str = "YL2",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
     ) -> DashboardQueryResult:
         """Executes query and returns result."""
         # Adapter already returns normalized DashboardQueryResult
@@ -262,6 +264,8 @@ class ExecuteDashboardQueryWorkflow:
             time_unit=time_unit,
             time_value=time_value,
             dialect=dialect,
+            start_time=start_time,
+            end_time=end_time,
         )
 
 

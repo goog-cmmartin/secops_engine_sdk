@@ -69,6 +69,9 @@ class AuditRuleHealthWorkflow:
                 r_key = err.curated_rule.split("/")[-1].lower()
             if r_key:
                 errors_by_rule.setdefault(r_key, []).append(err)
+                base_key = r_key.split("@")[0]
+                if base_key != r_key:
+                    errors_by_rule.setdefault(base_key, []).append(err)
 
         # 3. Collect Telemetry from Rule Detections Overview & Rule Observability
         telemetry = self._collect_rule_dashboard_telemetry()

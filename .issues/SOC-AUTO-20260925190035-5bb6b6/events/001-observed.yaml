@@ -1,0 +1,16 @@
+event_id: SOC-AUTO-20260925190035-5bb6b6-evt-001
+issue_id: SOC-AUTO-20260925190035-5bb6b6
+sequence: 1
+transition_type: OBSERVED
+transition: OBSERVED
+actor: '@feed-agent'
+timestamp: '2026-09-25T19:00:35.215075+00:00'
+details: &id001
+  title: 'ingestion: patrol_audit_feeds'
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': ''SUCCESS'', ''created_beads'':
+    1}'
+  desired_state: NOMINAL
+  severity: MEDIUM
+metadata: *id001
+evidence_refs: &id002 []
+evidence_references: *id002

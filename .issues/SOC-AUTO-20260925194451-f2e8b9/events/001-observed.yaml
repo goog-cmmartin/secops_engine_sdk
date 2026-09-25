@@ -1,0 +1,16 @@
+event_id: SOC-AUTO-20260925194451-f2e8b9-evt-001
+issue_id: SOC-AUTO-20260925194451-f2e8b9
+sequence: 1
+transition_type: OBSERVED
+transition: OBSERVED
+actor: '@identity-governor'
+timestamp: '2026-09-25T19:44:51.167314+00:00'
+details: &id001
+  title: 'identity: patrol_run_identity_drift_audit'
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': ''SUCCESS'', ''created_beads'':
+    1}'
+  desired_state: NOMINAL
+  severity: MEDIUM
+metadata: *id001
+evidence_refs: &id002 []
+evidence_references: *id002

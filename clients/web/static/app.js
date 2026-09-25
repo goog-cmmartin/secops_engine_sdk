@@ -15,8 +15,56 @@ const state = {
   isRightDrawerOpen: false,
 };
 
+// --- Theme Management ---
+function getPreferredTheme() {
+  const saved = localStorage.getItem("secops_theme");
+  if (saved) return saved;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  if (theme === "light") {
+    document.documentElement.classList.add("smp-theme-light");
+    document.documentElement.classList.remove("smp-theme-dark");
+  } else {
+    document.documentElement.classList.add("smp-theme-dark");
+    document.documentElement.classList.remove("smp-theme-light");
+  }
+  localStorage.setItem("secops_theme", theme);
+  const icon = document.getElementById("themeToggleIcon");
+  if (icon) {
+    icon.textContent = theme === "light" ? "☀️" : "🌙";
+  }
+}
+
+function initTheme() {
+  const current = getPreferredTheme();
+  applyTheme(current);
+  const btn = document.getElementById("themeToggleBtn");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      const active = document.documentElement.getAttribute("data-theme") || "dark";
+      const target = active === "dark" ? "light" : "dark";
+      applyTheme(target);
+    });
+  }
+}
+
+// Pre-apply theme before render to eliminate flash
+(function() {
+  const t = localStorage.getItem("secops_theme") || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", t);
+  if (t === "light") {
+    document.documentElement.classList.add("smp-theme-light");
+  } else {
+    document.documentElement.classList.add("smp-theme-dark");
+  }
+})();
+
 // --- Initialization ---
 document.addEventListener("DOMContentLoaded", async () => {
+  initTheme();
   const hash = window.location.hash.replace(/^#/, "");
   if (hash === "dashboards" || hash.startsWith("dashboards") || hash === "ingestion" || hash.startsWith("ingestion")) {
     switchView("dashboards");
@@ -108,6 +156,22 @@ function setupEventListeners() {
       } finally {
         btnTriggerRuleAudit.disabled = false;
         btnTriggerRuleAudit.innerHTML = "<span>🛡️ Audit Rules</span>";
+      }
+    });
+  }
+  const btnTriggerMitreAudit = document.getElementById("btnTriggerMitreAudit");
+  if (btnTriggerMitreAudit) {
+    btnTriggerMitreAudit.addEventListener("click", async () => {
+      btnTriggerMitreAudit.disabled = true;
+      btnTriggerMitreAudit.innerHTML = "<span>⏳ Analyzing...</span>";
+      try {
+        await fetch("/api/mitre/audit?profile=global_baseline", { method: "POST" });
+        await switchTopic("threat_intel", "mitre-coverage");
+      } catch (err) {
+        console.error("MITRE audit failed:", err);
+      } finally {
+        btnTriggerMitreAudit.disabled = false;
+        btnTriggerMitreAudit.innerHTML = "<span>🎯 MITRE Coverage</span>";
       }
     });
   }
@@ -545,6 +609,11 @@ async function switchTopic(stream, topic) {
     btnAuditHeader.style.display = (stream === "detections") ? "inline-flex" : "none";
   }
 
+  const btnMitreHeader = document.getElementById("btnTriggerMitreAudit");
+  if (btnMitreHeader) {
+    btnMitreHeader.style.display = (stream === "threat_intel" || stream === "detections") ? "inline-flex" : "none";
+  }
+
   renderStreams();
   renderDirectMessages();
   await loadMessages(stream, topic);
@@ -641,7 +710,7 @@ function renderDirectMessages() {
     emptyRow.style.color = "var(--text-dim)";
     emptyRow.innerHTML = `
       <div>No agents matching "<strong>${escapeHtml(query)}</strong>"</div>
-      <button id="dmResetSearchBtn" style="margin-top:6px; background:none; border:none; color:var(--accent-blue); font-size:11px; cursor:pointer; text-decoration:underline;">Clear filter</button>
+      <button id="dmResetSearchBtn" style="margin-top:6px; background:none; border:none; color:var(--text-accent); font-size:11px; cursor:pointer; text-decoration:underline;">Clear filter</button>
     `;
     container.appendChild(emptyRow);
     const resetBtn = document.getElementById("dmResetSearchBtn");
@@ -795,6 +864,8 @@ function appendMessageToTimeline(msg) {
     widgetHtml = renderFinopsCostCard(msg.widget);
   } else if (msg.widget && msg.widget.type === "raw_log_search_card") {
     widgetHtml = renderRawLogSearchCard(msg.widget);
+  } else if (msg.widget && msg.widget.type === "mitre_coverage_card") {
+    widgetHtml = renderMitreCoverageCard(msg.widget);
   }
 
   card.innerHTML = `
@@ -1145,7 +1216,7 @@ function renderDecayAuditWidget(widget) {
       <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; background:rgba(31,41,55,0.4); padding:8px 10px; border-radius:6px;">
         <div style="font-size:12px;">
           <strong style="color:var(--text-main);">Action:</strong>
-          <span style="color:var(--accent-blue); font-weight:600; margin-left:4px;">${escapeHtml(widget.recommendation || "INVESTIGATE")}</span>
+          <span style="color:var(--text-accent); font-weight:600; margin-left:4px;">${escapeHtml(widget.recommendation || "INVESTIGATE")}</span>
         </div>
         <div style="display:flex; gap:6px;">
           <button class="btn-approve" style="background:#4f46e5; padding:4px 10px; font-size:11px;" onclick="promptRemediateRule('${widget.rule_id}')">
@@ -2805,6 +2876,173 @@ function renderRawLogSearchCard(w) {
   `;
 }
 
+function promptMitreCoverageAudit(profileId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@mitre-attack-agent audit coverage for ${profileId}`;
+  input.focus();
+}
+
+function promptMitreTechniqueInspect(techniqueId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@mitre-attack-agent inspect rules for ${techniqueId}`;
+  input.focus();
+}
+
+async function copyMitreExecutiveReport(profileId) {
+  try {
+    showToast("info", "Generating executive MITRE ATT&CK report...");
+    const res = await fetch(`/api/mitre/report?profile=${encodeURIComponent(profileId)}`);
+    const data = await res.json();
+    const markdown = data.report?.markdown || data.report || "";
+    if (!markdown) {
+      showToast("error", "Received empty MITRE report");
+      return;
+    }
+    await navigator.clipboard.writeText(markdown);
+    showToast("success", "Executive MITRE Report copied to clipboard!");
+  } catch (err) {
+    showToast("error", "Failed copying report: " + err.message);
+  }
+}
+
+function renderMitreCoverageCard(widget) {
+  const data = widget.assessment || widget.data || widget;
+  const score = Math.round(data.coverage_score || 0);
+  const profileName = data.profile_name || "Global Baseline";
+  const profileId = data.profile_id || "global_baseline";
+  const validatedTechniques = data.validated_technique_count || 0;
+  const totalRules = (data.total_rules_evaluated || 0).toLocaleString();
+  const enabledRules = (data.enabled_rules_count || 0).toLocaleString();
+  const visTactics = data.visibility_tactics_count || 0;
+  const detTactics = data.detection_tactics_count || 0;
+  const blindTactics = Array.isArray(data.blind_tactics) ? data.blind_tactics : [];
+  const resilientCount = data.resilient_techniques_count || (Array.isArray(data.resilient_techniques) ? data.resilient_techniques.length : 0);
+  const fragileCount = data.fragile_techniques_count || (Array.isArray(data.fragile_techniques) ? data.fragile_techniques.length : 0);
+  const visibilityGapsCount = data.visibility_gaps_count || (Array.isArray(data.visibility_gaps) ? data.visibility_gaps.length : 0);
+  const detectionGapsCount = data.detection_gaps_count || (Array.isArray(data.detection_gaps) ? data.detection_gaps.length : 0);
+  const criticalTechniques = Array.isArray(data.critical_techniques) ? data.critical_techniques : [];
+
+  let scoreColor = "#34d399";
+  let scoreBg = "rgba(16, 185, 129, 0.15)";
+  let scoreBorder = "rgba(16, 185, 129, 0.4)";
+  if (score < 50) {
+    scoreColor = "#f87171";
+    scoreBg = "rgba(239, 68, 68, 0.15)";
+    scoreBorder = "rgba(239, 68, 68, 0.4)";
+  } else if (score < 80) {
+    scoreColor = "#fbbf24";
+    scoreBg = "rgba(245, 158, 11, 0.15)";
+    scoreBorder = "rgba(245, 158, 11, 0.4)";
+  }
+
+  const totalDenom = (resilientCount + fragileCount + detectionGapsCount) || 1;
+  const resPct = Math.min(100, Math.round((resilientCount / totalDenom) * 100));
+  const fragPct = Math.min(100 - resPct, Math.round((fragileCount / totalDenom) * 100));
+  const gapPct = Math.max(0, 100 - resPct - fragPct);
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid #7c3aed; margin-top:8px; padding:14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">🎯</span>
+          <div>
+            <div style="font-weight:700; font-size:14px; color:#f3f4f6;">MITRE ATT&CK Strategic Posture</div>
+            <div style="font-size:11px; color:var(--text-muted);">
+              Threat Profile: <strong style="color:#c084fc;">${escapeHtml(profileName)}</strong> &bull; ATT&CK v18.1 Enterprise Matrix
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="padding:4px 10px; border-radius:4px; font-weight:800; font-size:13px; color:${scoreColor}; background:${scoreBg}; border:1px solid ${scoreBorder};">
+            ${score}% COVERAGE
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Grid -->
+      <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Covered Techs</div>
+          <div style="font-size:16px; font-weight:700; color:#34d399;">${validatedTechniques}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Evaluated Rules</div>
+          <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalRules}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Resilient (≥2)</div>
+          <div style="font-size:16px; font-weight:700; color:#38bdf8;">${resilientCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Fragile (SPoF)</div>
+          <div style="font-size:16px; font-weight:700; color:${fragileCount > 0 ? '#fbbf24' : '#34d399'};">${fragileCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Tactical Vis</div>
+          <div style="font-size:16px; font-weight:700; color:#a78bfa;">${visTactics}/14</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Blind Tactics</div>
+          <div style="font-size:16px; font-weight:700; color:${blindTactics.length > 0 ? '#f87171' : '#34d399'};">${blindTactics.length}</div>
+        </div>
+      </div>
+
+      <!-- Resilience & Posture Progress Bar -->
+      <div style="margin-bottom:12px; background:rgba(17,24,39,0.5); padding:8px 10px; border-radius:4px; border:1px solid rgba(75,85,99,0.3);">
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+          <span style="color:var(--text-muted);">Technique Defense Posture:</span>
+          <span style="font-weight:600; color:#f3f4f6;">${resilientCount} Resilient &bull; ${fragileCount} Fragile SPoF &bull; ${detectionGapsCount} Gap</span>
+        </div>
+        <div style="height:6px; background:rgba(75,85,99,0.3); border-radius:3px; overflow:hidden; display:flex;">
+          <div style="width:${resPct}%; background:#38bdf8;" title="${resilientCount} Resilient (>=2 rules)"></div>
+          <div style="width:${fragPct}%; background:#fbbf24;" title="${fragileCount} Fragile (1 rule)"></div>
+          <div style="width:${gapPct}%; background:#f87171;" title="${detectionGapsCount} Detection Gap"></div>
+        </div>
+      </div>
+
+      <!-- Critical Gaps / Recommendations Section -->
+      ${criticalTechniques.length > 0 ? `
+        <div style="margin-bottom:10px;">
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+            <span>High-Risk Uncovered Techniques (${criticalTechniques.length})</span>
+            <span style="font-size:10px; color:#f87171; font-weight:600;">Priority Defenses Required</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;">
+            ${criticalTechniques.slice(0, 5).map(t => `
+              <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:4px; padding:5px 8px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <button onclick="promptMitreTechniqueInspect('${escapeHtml(t.technique_id || '')}')" class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-size:10px; font-family:var(--font-mono); border:none; cursor:pointer;" title="Click to inspect mapped rules">
+                    ${escapeHtml(t.technique_id || '')}
+                  </button>
+                  <span style="font-size:11.5px; font-weight:600; color:#f3f4f6;">${escapeHtml(t.name || '')}</span>
+                </div>
+                <div style="font-size:10.5px; color:var(--text-muted);">
+                  Risk Weight: <strong style="color:#fbbf24;">${t.risk_weight || 5}</strong>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Interactive Actions -->
+      <div style="display:flex; gap:8px; justify-content:flex-end; border-top:1px solid rgba(75,85,99,0.2); padding-top:10px; margin-top:8px;">
+        <button class="btn-drawer-action" onclick="copyMitreExecutiveReport('${escapeHtml(profileId)}')" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+          📄 Copy Full Report
+        </button>
+        <button class="btn-drawer-action" onclick="promptMitreCoverageAudit('financial_services')" style="background:rgba(124,58,237,0.2); color:#c084fc; border:1px solid rgba(124,58,237,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+          🏦 FinServ Profile
+        </button>
+        <button class="btn-drawer-action" onclick="promptMitreCoverageAudit('cloud_native')" style="background:rgba(14,165,233,0.2); color:#38bdf8; border:1px solid rgba(14,165,233,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+          ☁️ Cloud-Native Profile
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 async function renderTuningDrawer() {
   const container = document.getElementById("drawerContent");
   container.innerHTML = `
@@ -3268,7 +3506,7 @@ async function renderDecayDrawer() {
       itemsContainer.innerHTML = `
         <div style="text-align:center; padding:24px; color:var(--text-dim); font-size:12px;">
           No rules in decay queue.<br><br>
-          <button onclick="document.getElementById('btnRunSyncNow').click()" style="background:var(--accent-blue); border:none; color:white; padding:6px 12px; border-radius:4px; font-size:11.5px; cursor:pointer;">
+          <button onclick="document.getElementById('btnRunSyncNow').click()" style="background:var(--btn-primary-bg, var(--secops-cta-primary, #1a73e8)); border:none; color:white; padding:6px 12px; border-radius:4px; font-size:11.5px; cursor:pointer;">
             Run Initial 90-Day Telemetry Sync
           </button>
         </div>
@@ -3420,7 +3658,7 @@ function renderFleetDrawerItems() {
     const item = document.createElement("div");
     item.className = "drawer-proposal-item";
     item.innerHTML = `
-      <div style="font-weight:700; font-size:13px; color:var(--accent-blue);">${escapeHtml(a.handle)}</div>
+      <div style="font-weight:700; font-size:13px; color:var(--text-accent);">${escapeHtml(a.handle)}</div>
       <div style="font-size:12px; font-weight:600; color:var(--text-main); margin: 2px 0;">${escapeHtml(a.role)}</div>
       <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">${escapeHtml(a.description)}</div>
       <div style="font-size:10.5px; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center;">
@@ -4494,8 +4732,8 @@ function renderFeedsTable() {
     return `
       <tr>
         <td><span class="status-badge ${statusClass}">${escapeHtml(status)}</span></td>
-        <td style="font-weight:600; color:#f8fafc;">${escapeHtml(f.feed_name || f.feed_id || "Feed")}</td>
-        <td><code style="color:#38bdf8; font-size:11.5px;">${escapeHtml(f.log_type || "N/A")}</code></td>
+        <td style="font-weight:600; color:var(--text-main);">${escapeHtml(f.feed_name || f.feed_id || "Feed")}</td>
+        <td><code style="color:var(--text-code); font-size:11.5px; background:var(--code-bg); padding:1.5px 5.5px; border-radius:3px; border:1px solid var(--code-border);">${escapeHtml(f.log_type || "N/A")}</code></td>
         <td style="color:var(--text-muted); font-size:11.5px;">${escapeHtml(f.source_type || "CHRONICLE_API")}</td>
         <td>${escapeHtml(String(latency))}</td>
         <td style="color:var(--text-dim); font-size:11px;">${escapeHtml(String(lastHeartbeat))}</td>
@@ -4545,8 +4783,8 @@ function renderParsersTable() {
     return `
       <tr>
         <td><span class="status-badge ${statusClass}">${escapeHtml(status)}</span></td>
-        <td><code style="color:#a78bfa; font-weight:700; font-size:12px;">${escapeHtml(p.log_type || "N/A")}</code></td>
-        <td style="color:#cbd5e1;">${escapeHtml(p.state || "ACTIVE")}</td>
+        <td><code style="color:var(--accent-purple); font-weight:700; font-size:12px;">${escapeHtml(p.log_type || "N/A")}</code></td>
+        <td style="color:var(--text-main);">${escapeHtml(p.state || "ACTIVE")}</td>
         <td style="color:var(--text-muted); font-size:11.5px;">${escapeHtml(author)}</td>
         <td style="font-size:11px; ${hasDrift ? 'color:#f59e0b;' : 'color:var(--text-dim);'}">${escapeHtml(driftText)}</td>
         <td style="font-size:11px; color:var(--text-muted);">${escapeHtml(dropReason)}</td>
@@ -4742,7 +4980,7 @@ function renderDiagnosticResults(data, logType) {
     <div style="display:flex; flex-direction:column; gap:12px;">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
         <span style="font-weight:700; color:#f8fafc;">Diagnostic Report: <code>${escapeHtml(logType)}</code></span>
-        <span style="font-size:11px; color:var(--accent-blue);">${totalAnalyzed} unparsed events inspected</span>
+        <span style="font-size:11px; color:var(--text-accent);">${totalAnalyzed} unparsed events inspected</span>
       </div>
       <div>
         <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase;">Primary Normalization Drop Issue:</div>

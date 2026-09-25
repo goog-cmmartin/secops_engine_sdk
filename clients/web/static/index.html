@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Google SecOps Multi-Agent Fleet</title>
-  <link rel="stylesheet" href="/static/style.css?v=2.4.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
+  <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
+  <link rel="stylesheet" href="/static/style.css?v=2.5.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -48,6 +53,9 @@
       <span class="meta-tag">ADK 2</span>
       <span class="meta-tag">HITL Review</span>
       <span id="fleetStatusTag" class="meta-status">20 Agents Active</span>
+      <button id="themeToggleBtn" class="theme-toggle-btn" title="Toggle Theme (Dark / Light)" aria-label="Toggle Theme">
+        <span id="themeToggleIcon" class="theme-toggle-icon">🌙</span>
+      </button>
     </div>
 
   </header>
@@ -112,6 +120,9 @@
             <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 8px;">Google ADK 2 &bull; GEAP Ready</span>
             <button id="btnTriggerRuleAudit" class="btn-drawer-action" style="display:none; background:#059669; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run unified detection repository audit across custom and curated rules">
               <span>🛡️ Audit Rules</span>
+            </button>
+            <button id="btnTriggerMitreAudit" class="btn-drawer-action" style="display:none; background:#7c3aed; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run strategic MITRE ATT&CK coverage assessment across 5,800+ rules and live telemetry">
+              <span>🎯 MITRE Coverage</span>
             </button>
             <button id="clearTopicBtn" class="btn-clear-topic" title="Clear message history for this topic">
               <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -582,11 +593,11 @@
                 <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                 <span class="btn-text">Audit Parsers</span>
               </button>
-              <button id="pageBtnAuditRules" class="btn" style="background:#059669; color:white; border:none;">
+              <button id="pageBtnAuditRules" class="btn btn-success">
                 <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                 <span class="btn-text">Audit Rules</span>
               </button>
-              <button id="pageBtnAnalyzeCost" class="btn" style="background:#0284c7; color:white; border:none;">
+              <button id="pageBtnAnalyzeCost" class="btn btn-primary">
                 <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                 <span class="btn-text">Log Costs &amp; FinOps</span>
               </button>
@@ -1029,20 +1040,20 @@
               <p class="page-subtitle">Deterministic shift handovers, institutional posture, cross-agent entity dossiers, and surfaced knowledge gaps</p>
             </div>
             <div class="page-actions briefing-header-actions">
-              <div class="shift-selector-group" style="display:flex; align-items:center; gap:8px;">
-                <label for="shiftWindowSelect" style="font-size:12px; color:#94a3b8; font-weight:600;">Lookback:</label>
-                <select id="shiftWindowSelect" class="form-select" style="background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:6px 10px; border-radius:6px; font-size:12px;">
+              <div class="shift-selector-group">
+                <label for="shiftWindowSelect" class="form-label-inline">Lookback:</label>
+                <select id="shiftWindowSelect" class="form-select">
                   <option value="8" selected>Last 8 Hours (Standard Shift)</option>
                   <option value="12">Last 12 Hours</option>
                   <option value="24">Last 24 Hours</option>
                   <option value="48">Last 48 Hours</option>
                 </select>
               </div>
-              <button id="btnTriggerShiftBrief" class="btn btn-primary" title="Trigger @soc-briefing-agent to compute shift brief" style="display:flex; align-items:center; gap:6px;">
+              <button id="btnTriggerShiftBrief" class="btn btn-primary" title="Trigger @soc-briefing-agent to compute shift brief">
                 <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 <span>Trigger Shift Brief</span>
               </button>
-              <button id="btnRefreshPosture" class="btn btn-secondary" title="Recompute institutional knowledge and posture snapshot" style="display:flex; align-items:center; gap:6px;">
+              <button id="btnRefreshPosture" class="btn btn-secondary" title="Recompute institutional knowledge and posture snapshot">
                 <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 <span>Refresh Posture</span>
               </button>
@@ -1050,7 +1061,7 @@
           </div>
 
           <!-- Sub-Navigation Tabs: Shift Briefing | Posture & Gaps | Entity Dossiers -->
-          <div class="subnav-tabs-bar" style="display:flex; gap:8px; border-bottom:1px solid #1e293b; margin-bottom:16px;">
+          <div class="subnav-tabs-bar">
             <button id="tabBtnShiftBrief" class="subnav-tab active">Shift Handover Briefing</button>
             <button id="tabBtnPostureGaps" class="subnav-tab">Institutional Posture &amp; Gaps</button>
             <button id="tabBtnEntityDossier" class="subnav-tab">Cross-Agent Entity Dossier</button>
@@ -1059,88 +1070,88 @@
           <!-- Tab Content 1: Shift Handover Briefing -->
           <div id="tabContentShiftBrief" class="briefing-tab-pane active">
             <!-- Shift Header Metadata Banner -->
-            <div id="shiftMetaBanner" class="brief-meta-banner" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between;">
-              <div class="shift-badge-row" style="display:flex; align-items:center; gap:10px;">
-                <span id="shiftTitleBadge" class="badge-blue" style="font-weight:700;">SHIFT BRIEFING</span>
-                <span id="shiftTimestampBadge" class="meta-tag" style="background:#1e293b; color:#94a3b8; padding:3px 8px; border-radius:4px; font-size:11px;">-</span>
-                <span id="shiftGeneratedByBadge" class="meta-tag" style="background:#1e293b; color:#38bdf8; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600;">@soc-briefing-agent</span>
+            <div id="shiftMetaBanner" class="brief-meta-banner">
+              <div class="shift-badge-row">
+                <span id="shiftTitleBadge" class="badge-blue">SHIFT BRIEFING</span>
+                <span id="shiftTimestampBadge" class="meta-tag">-</span>
+                <span id="shiftGeneratedByBadge" class="meta-tag meta-tag-agent">@soc-briefing-agent</span>
               </div>
-              <button id="btnCopySlackBlock" class="btn btn-secondary btn-sm" title="Copy Slack Block Kit payload" style="font-size:11px; padding:4px 8px;">Copy Slack Blocks</button>
+              <button id="btnCopySlackBlock" class="btn btn-secondary btn-sm" title="Copy Slack Block Kit payload">Copy Slack Blocks</button>
             </div>
 
             <!-- 5 Operational Delta Categories Grid -->
-            <div class="delta-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:18px;">
+            <div class="delta-grid">
               <!-- Requires Attention -->
-              <div class="delta-card delta-card-urgent" style="background:#151016; border:1px solid rgba(239, 68, 68, 0.4); border-radius:8px; padding:12px;">
-                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#f87171; display:flex; align-items:center; gap:5px;">
+              <div class="delta-card delta-card-urgent">
+                <div class="delta-card-header">
+                  <div class="delta-card-title">
                     <span>⚠️ Requires Attention</span>
                   </div>
-                  <span id="countRequiresAttention" class="delta-badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                  <span id="countRequiresAttention" class="delta-badge">0</span>
                 </div>
-                <div class="delta-card-body" id="listRequiresAttention" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
-                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No critical blockers.</p>
+                <div class="delta-card-body" id="listRequiresAttention">
+                  <p class="empty-state-muted">No critical blockers.</p>
                 </div>
               </div>
 
               <!-- Changed Since Previous Shift -->
-              <div class="delta-card delta-card-changed" style="background:#0f1820; border:1px solid rgba(56, 189, 248, 0.4); border-radius:8px; padding:12px;">
-                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#38bdf8; display:flex; align-items:center; gap:5px;">
+              <div class="delta-card delta-card-changed">
+                <div class="delta-card-header">
+                  <div class="delta-card-title">
                     <span>🔄 Changed Since Previous</span>
                   </div>
-                  <span id="countChangedSincePrevious" class="delta-badge" style="background:rgba(56,189,248,0.2); color:#38bdf8; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                  <span id="countChangedSincePrevious" class="delta-badge">0</span>
                 </div>
-                <div class="delta-card-body" id="listChangedSincePrevious" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
-                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No mutations this shift.</p>
+                <div class="delta-card-body" id="listChangedSincePrevious">
+                  <p class="empty-state-muted">No mutations this shift.</p>
                 </div>
               </div>
 
               <!-- Agent Work in Progress -->
-              <div class="delta-card delta-card-wip" style="background:#131522; border:1px solid rgba(129, 140, 248, 0.4); border-radius:8px; padding:12px;">
-                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#818cf8; display:flex; align-items:center; gap:5px;">
+              <div class="delta-card delta-card-wip">
+                <div class="delta-card-header">
+                  <div class="delta-card-title">
                     <span>🤖 Agent Work in Progress</span>
                   </div>
-                  <span id="countAgentWip" class="delta-badge" style="background:rgba(129,140,248,0.2); color:#818cf8; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                  <span id="countAgentWip" class="delta-badge">0</span>
                 </div>
-                <div class="delta-card-body" id="listAgentWip" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
-                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No active autonomous leases.</p>
+                <div class="delta-card-body" id="listAgentWip">
+                  <p class="empty-state-muted">No active autonomous leases.</p>
                 </div>
               </div>
 
               <!-- No Action Required -->
-              <div class="delta-card delta-card-healthy" style="background:#0e1915; border:1px solid rgba(34, 197, 94, 0.4); border-radius:8px; padding:12px;">
-                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#4ade80; display:flex; align-items:center; gap:5px;">
+              <div class="delta-card delta-card-healthy">
+                <div class="delta-card-header">
+                  <div class="delta-card-title">
                     <span>🛡️ Verified Baselines</span>
                   </div>
-                  <span id="countHealthy" class="delta-badge" style="background:rgba(34,197,94,0.2); color:#4ade80; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                  <span id="countHealthy" class="delta-badge">0</span>
                 </div>
-                <div class="delta-card-body" id="listHealthy" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
-                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No baseline checks recorded.</p>
+                <div class="delta-card-body" id="listHealthy">
+                  <p class="empty-state-muted">No baseline checks recorded.</p>
                 </div>
               </div>
 
               <!-- Carry-Over Issues -->
-              <div class="delta-card delta-card-carryover" style="background:#171612; border:1px solid rgba(234, 179, 8, 0.4); border-radius:8px; padding:12px;">
-                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#facc15; display:flex; align-items:center; gap:5px;">
+              <div class="delta-card delta-card-carryover">
+                <div class="delta-card-header">
+                  <div class="delta-card-title">
                     <span>⏳ Carry-Over Issues</span>
                   </div>
-                  <span id="countCarryover" class="delta-badge" style="background:rgba(234,179,8,0.2); color:#facc15; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                  <span id="countCarryover" class="delta-badge">0</span>
                 </div>
-                <div class="delta-card-body" id="listCarryover" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
-                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No backlog issues.</p>
+                <div class="delta-card-body" id="listCarryover">
+                  <p class="empty-state-muted">No backlog issues.</p>
                 </div>
               </div>
             </div>
 
             <!-- Full Briefing Executive Narrative Section -->
-            <div class="card briefing-narrative-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
-              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:8px;">Executive Briefing Narrative</h3>
-              <div id="shiftNarrativeBody" class="markdown-preview-pane" style="font-size:13px; line-height:1.6; color:#cbd5e1;">
-                <p class="empty-state-muted" style="color:#64748b;">Loading shift briefing narrative...</p>
+            <div class="card briefing-narrative-card">
+              <h3 class="card-section-title">Executive Briefing Narrative</h3>
+              <div id="shiftNarrativeBody" class="markdown-preview-pane">
+                <p class="empty-state-muted">Loading shift briefing narrative...</p>
               </div>
             </div>
           </div>
@@ -1148,62 +1159,62 @@
           <!-- Tab Content 2: Institutional Posture & Knowledge Gaps -->
           <div id="tabContentPostureGaps" class="briefing-tab-pane" style="display:none;">
             <!-- Posture Gauges Grid -->
-            <div class="posture-metrics-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
-              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
-                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:6px;">Assertion Freshness</span>
-                <div class="freshness-bar-container" style="display:flex; height:10px; border-radius:5px; overflow:hidden; background:#1e293b; margin-bottom:6px;">
-                  <div id="freshnessBarFresh" style="background:#22c55e; width:60%;" title="Fresh (<1h)"></div>
-                  <div id="freshnessBarRecent" style="background:#eab308; width:30%;" title="Recent (1-24h)"></div>
-                  <div id="freshnessBarStale" style="background:#ef4444; width:10%;" title="Stale (>24h)"></div>
+            <div class="posture-metrics-grid">
+              <div class="metric-card">
+                <span class="metric-label">Assertion Freshness</span>
+                <div class="freshness-bar-container">
+                  <div id="freshnessBarFresh" style="width:60%;" title="Fresh (<1h)"></div>
+                  <div id="freshnessBarRecent" style="width:30%;" title="Recent (1-24h)"></div>
+                  <div id="freshnessBarStale" style="width:10%;" title="Stale (>24h)"></div>
                 </div>
-                <div id="freshnessLegend" style="font-size:10px; color:#94a3b8;">Fresh: 0 | Recent: 0 | Stale: 0</div>
+                <div id="freshnessLegend" class="freshness-legend">Fresh: 0 | Recent: 0 | Stale: 0</div>
               </div>
 
-              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
-                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Telemetry &amp; Feeds</span>
-                <span id="postureTelemetryVal" style="font-size:16px; font-weight:700; color:#38bdf8; display:block;">Active</span>
-                <span class="metric-sub" style="font-size:10px; color:#64748b;">Chronicle Ingestion</span>
+              <div class="metric-card">
+                <span class="metric-label">Telemetry &amp; Feeds</span>
+                <span id="postureTelemetryVal" class="metric-val status-blue">Active</span>
+                <span class="metric-sub">Chronicle Ingestion</span>
               </div>
 
-              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
-                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Parsing Quality</span>
-                <span id="postureParsingVal" style="font-size:16px; font-weight:700; color:#4ade80; display:block;">Healthy</span>
-                <span class="metric-sub" style="font-size:10px; color:#64748b;">CBN Normalization</span>
+              <div class="metric-card">
+                <span class="metric-label">Parsing Quality</span>
+                <span id="postureParsingVal" class="metric-val status-green">Healthy</span>
+                <span class="metric-sub">CBN Normalization</span>
               </div>
 
-              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
-                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Detection Health</span>
-                <span id="postureDetectionsVal" style="font-size:16px; font-weight:700; color:#a78bfa; display:block;">Operational</span>
-                <span class="metric-sub" style="font-size:10px; color:#64748b;">YARA-L Rule Engine</span>
+              <div class="metric-card">
+                <span class="metric-label">Detection Health</span>
+                <span id="postureDetectionsVal" class="metric-val status-purple">Operational</span>
+                <span class="metric-sub">YARA-L Rule Engine</span>
               </div>
 
-              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
-                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Surfaced Unknowns</span>
-                <span id="postureGapsCount" style="font-size:16px; font-weight:700; color:#f87171; display:block;">0</span>
-                <span class="metric-sub" style="font-size:10px; color:#64748b;">Institutional Knowledge Gaps</span>
+              <div class="metric-card">
+                <span class="metric-label">Surfaced Unknowns</span>
+                <span id="postureGapsCount" class="metric-val status-red">0</span>
+                <span class="metric-sub">Institutional Knowledge Gaps</span>
               </div>
             </div>
 
             <!-- Surfaced Institutional Knowledge Gaps Table -->
-            <div class="card gaps-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
-              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+            <div class="card gaps-card">
+              <h3 class="card-section-title">
                 <span>Surfaced Institutional Knowledge Gaps &amp; Unknowns</span>
                 <span class="badge-blue" style="font-size:10px; padding:2px 6px;">Zero Hallucination</span>
               </h3>
-              <div class="table-responsive" style="overflow-x:auto;">
-                <table class="data-table" id="tableKnowledgeGaps" style="width:100%; border-collapse:collapse; font-size:12px;">
+              <div class="table-responsive">
+                <table class="data-table" id="tableKnowledgeGaps">
                   <thead>
-                    <tr style="border-bottom:1px solid #1e293b; text-align:left; color:#94a3b8;">
-                      <th style="padding:8px 10px;">Gap ID</th>
-                      <th style="padding:8px 10px;">Category</th>
-                      <th style="padding:8px 10px;">Subject</th>
-                      <th style="padding:8px 10px;">Description</th>
-                      <th style="padding:8px 10px;">Severity</th>
-                      <th style="padding:8px 10px;">Investigation Agent</th>
+                    <tr>
+                      <th>Gap ID</th>
+                      <th>Category</th>
+                      <th>Subject</th>
+                      <th>Description</th>
+                      <th>Severity</th>
+                      <th>Investigation Agent</th>
                     </tr>
                   </thead>
                   <tbody id="bodyKnowledgeGaps">
-                    <tr><td colspan="6" style="padding:12px; color:#64748b; text-align:center;">Loading institutional knowledge gaps...</td></tr>
+                    <tr><td colspan="6" style="padding:12px; color:var(--text-dim); text-align:center;">Loading institutional knowledge gaps...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1212,22 +1223,22 @@
 
           <!-- Tab Content 3: Cross-Agent Entity Dossier -->
           <div id="tabContentEntityDossier" class="briefing-tab-pane" style="display:none;">
-            <div class="card dossier-search-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px; margin-bottom:16px;">
-              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:8px;">Cross-Agent Entity Dossier Explorer</h3>
-              <p style="font-size:12px; color:#94a3b8; margin-bottom:14px;">Synthesize multi-agent factual assertions, health statuses, and knowledge gaps for any operational entity (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
-              <div class="dossier-search-bar" style="display:flex; gap:10px; align-items:center;">
-                <select id="dossierSubjectType" class="form-select" style="background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:7px 12px; border-radius:6px; font-size:12px;">
+            <div class="card dossier-search-card">
+              <h3 class="card-section-title">Cross-Agent Entity Dossier Explorer</h3>
+              <p class="card-section-desc">Synthesize multi-agent factual assertions, health statuses, and knowledge gaps for any operational entity (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
+              <div class="dossier-search-bar">
+                <select id="dossierSubjectType" class="form-select">
                   <option value="log_type">Log Source (log_type)</option>
                   <option value="rule_id">Detection Rule (rule_id)</option>
                   <option value="playbook_id">SOAR Playbook (playbook_id)</option>
                   <option value="feed_id">Ingestion Feed (feed_id)</option>
                 </select>
-                <input type="text" id="dossierSubjectId" class="form-input" placeholder="e.g. PAN_FIREWALL" style="flex:1; background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:7px 12px; border-radius:6px; font-size:12px;" />
-                <button id="btnFetchDossier" class="btn btn-primary" style="padding:7px 16px; font-size:12px;">Fetch Dossier</button>
+                <input type="text" id="dossierSubjectId" class="form-input" placeholder="e.g. PAN_FIREWALL" />
+                <button id="btnFetchDossier" class="btn btn-primary">Fetch Dossier</button>
               </div>
             </div>
 
-            <div id="dossierResultContainer" class="dossier-result-container" style="display:none; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
+            <div id="dossierResultContainer" class="dossier-result-container" style="display:none;">
               <!-- Dynamic Dossier Rendering -->
             </div>
           </div>

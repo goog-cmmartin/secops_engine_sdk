@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from agents.core.git_guard import git_commits_enabled
+from agents.core.ledger import resolve_ledger_root
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,11 @@ class ProposalManager:
     """Governs the lifecycle of git-backed change proposals under .proposals/."""
 
     def __init__(self, root_dir: Optional[Path] = None):
-        self.root_dir = Path(root_dir) if root_dir else Path.cwd()
+        """Args:
+            root_dir: Ledger root. Defaults to ``SECOPS_LEDGER_ROOT`` or
+                ``~/.secops/ledger``; must be outside the SDK repository.
+        """
+        self.root_dir = resolve_ledger_root(root_dir)
         self.proposals_dir = self.root_dir / ".proposals"
         self.open_dir = self.proposals_dir / "open"
         self.merged_dir = self.proposals_dir / "merged"

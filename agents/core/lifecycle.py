@@ -39,7 +39,7 @@ class SOCLifecycleManager:
     ):
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
         self.work_queue = work_queue or get_work_queue(root_dir=str(self.root_dir))
-        self.materializer = materializer or IssueMaterializer(root_dir=self.root_dir)
+        self.materializer = materializer or IssueMaterializer()
 
     def open_issue(
         self,

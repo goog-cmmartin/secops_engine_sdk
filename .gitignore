@@ -115,10 +115,14 @@ plan.md
 test_qt_app.py
 secops_state_graph*
 
-# Live Tenant Capture & Evidence Data (top-level only; durable .issues evidence is tracked)
+# Live Tenant Capture & Evidence Data
 /evidence/
-!/.issues/
-!/.issues/**
+
+# SOC ledger (issue records + change proposals) is tenant data and lives OUTSIDE
+# this repo in its own git repository: $SECOPS_LEDGER_ROOT (default ~/.secops/ledger).
+# See agents/core/ledger.py. Never commit these here.
+/.issues/
+/.proposals/
 
 # External reference repositories (Gastown, Zulip, etc.)
 references/

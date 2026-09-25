@@ -72,11 +72,11 @@ def _build_engine() -> SecOpsEngine:
 
 # Core singleton instances
 chat_store = ChatStore(root_dir=REPO_ROOT)
-proposal_manager = ProposalManager(root_dir=REPO_ROOT)
+proposal_manager = ProposalManager()  # ledger: SECOPS_LEDGER_ROOT
 engine = _build_engine()
 evidence_store = get_evidence_store(root_dir=str(REPO_ROOT))
 work_queue = get_work_queue(root_dir=str(REPO_ROOT))
-issue_materializer = IssueMaterializer(root_dir=REPO_ROOT)
+issue_materializer = IssueMaterializer()  # ledger: SECOPS_LEDGER_ROOT
 lifecycle_manager = SOCLifecycleManager(
     work_queue=work_queue,
     materializer=issue_materializer,

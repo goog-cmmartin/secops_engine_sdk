@@ -55,7 +55,7 @@ def main() -> None:
     )
 
     engine = build_audit_engine()
-    prop_mgr = ProposalManager(root_dir=REPO_ROOT)
+    prop_mgr = ProposalManager()
     fleet = create_agent_fleet(engine=engine, proposal_manager=prop_mgr)
 
     total_caps = len(engine.registry.list_capabilities())

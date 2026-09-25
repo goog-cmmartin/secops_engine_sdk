@@ -42,6 +42,7 @@ from engine.domain import (
 )
 from agents.core.evidence_store import normalize_doc_id
 from agents.core.git_guard import git_commits_enabled
+from agents.core.ledger import resolve_ledger_root
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,11 @@ class IssueMaterializer:
     """Manages the durable Git filesystem representation of SOC work items."""
 
     def __init__(self, root_dir: Optional[Path] = None):
-        self.root_dir = Path(root_dir) if root_dir else Path.cwd()
+        """Args:
+            root_dir: Ledger root. Defaults to ``SECOPS_LEDGER_ROOT`` or
+                ``~/.secops/ledger``; must be outside the SDK repository.
+        """
+        self.root_dir = resolve_ledger_root(root_dir)
         self.issues_dir = self.root_dir / ".issues"
         self.issues_dir.mkdir(parents=True, exist_ok=True)
 

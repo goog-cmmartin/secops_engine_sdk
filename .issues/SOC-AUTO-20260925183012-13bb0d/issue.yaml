@@ -1,0 +1,37 @@
+id: SOC-AUTO-20260925183012-13bb0d
+issue_id: SOC-AUTO-20260925183012-13bb0d
+type: patrol_audit_feeds
+plane: data
+operational_plane: data
+status: AVAILABLE
+severity: MEDIUM
+confidence: 1.0
+priority_score: 50
+source:
+  deacon_id: '@feed-agent'
+  observed_at: '2026-09-25T18:30:12.397158+00:00'
+  evidence_fabric_uris: []
+  initial_metrics: {}
+problem:
+  title: 'ingestion: patrol_audit_feeds'
+  description: ''
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': ''SUCCESS'', ''created_beads'':
+    0}'
+  desired_state: NOMINAL
+  affected_objects: []
+routing:
+  requires_capabilities: {}
+  claimed_by: null
+  claim_timestamp: null
+governance:
+  required_authority_tier: TIER_2_PEER_REVIEW
+  validation_criteria: []
+  rollback_spec: {}
+lease: null
+attempts: []
+active_proposal_id: null
+applied_change_id: null
+references: {}
+created_at: '2026-09-25T18:30:12.397193+00:00'
+updated_at: '2026-09-25T18:30:12.397197+00:00'
+closed_at: null

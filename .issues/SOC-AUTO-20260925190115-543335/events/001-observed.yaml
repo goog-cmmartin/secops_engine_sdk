@@ -1,0 +1,16 @@
+event_id: SOC-AUTO-20260925190115-543335-evt-001
+issue_id: SOC-AUTO-20260925190115-543335
+sequence: 1
+transition_type: OBSERVED
+transition: OBSERVED
+actor: '@detection-decay-agent'
+timestamp: '2026-09-25T19:01:15.591133+00:00'
+details: &id001
+  title: 'detections: patrol_audit_rules'
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': ''SUCCESS'', ''created_beads'':
+    1}'
+  desired_state: NOMINAL
+  severity: MEDIUM
+metadata: *id001
+evidence_refs: &id002 []
+evidence_references: *id002

@@ -1,21 +1,35 @@
 ---
 id: task.platform_engineer.check_udm_search_performance
-title: "Check UDM Search Performance and Error Rates"
+title: Check UDM Search Performance and Error Rates
 type: task
 persona: persona.platform_engineer
 trigger:
-  - scheduled_weekly
-  - on_demand
+- scheduled_weekly
+- on_demand
 capabilities_used:
-  - dashboard.execute_query
-  - search.udm.stats
+- dashboard.execute_query
+- search.udm.stats
 related_concepts:
-  - concept.udm_search_lifecycle
+- concept.udm_search_lifecycle
 related_features:
-  - feature.siem.native_dashboards
+- feature.siem.native_dashboards
 evaluation_rules:
   warning_latency_p95_ms: 15000
   critical_failure_rate_pct: 5.0
+status: stable
+description: Check UDM Search Performance and Error Rates (task reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Check UDM Search Performance and Error Rates

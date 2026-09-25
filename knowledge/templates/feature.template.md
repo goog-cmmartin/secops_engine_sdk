@@ -1,7 +1,20 @@
 ---
 id: feature.<platform>.<feature_name>
-title: "<Feature Title>"
 type: feature
+title: "<Feature Title>"
+description: "<One-sentence summary of this platform capability>"
+tags:
+  - secops
+  - capability
+status: stable  # valid: draft, stable, deprecated
+generated: { by: "<actor>", at: "<iso8601>" }
+verified:
+  - { by: "human:<reviewer_id>", at: "<iso8601>" }
+stale_after: "<iso8601>"
+sources:
+  - id: official-doc
+    resource: "<url_or_path>"
+    title: "<API Documentation Title>"
 platform: secops_siem     # valid: secops_siem, secops_soar, bindplane, gcp
 sdk_capabilities:
   - <capability_id>       # must match WorkflowCapability in engine/registry.py

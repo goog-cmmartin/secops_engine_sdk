@@ -1,28 +1,42 @@
 ---
 id: task.platform_engineer.audit_tenant_configuration_posture
-title: "Audit Tenant Configuration Posture & Drift"
+title: Audit Tenant Configuration Posture & Drift
 type: task
 persona: persona.platform_engineer
 trigger:
-  - scheduled_daily
-  - on_demand
+- scheduled_daily
+- on_demand
 capabilities_used:
-  - siem.tenant.get
-  - siem.agent_settings.get
-  - siem.risk_config.get
-  - soar.company.get
-  - soar.data_retention.get
-  - soar.support_settings.get
-  - case_config.alert_grouping.settings.get
+- siem.tenant.get
+- siem.agent_settings.get
+- siem.risk_config.get
+- soar.company.get
+- soar.data_retention.get
+- soar.support_settings.get
+- case_config.alert_grouping.settings.get
 related_concepts:
-  - concept.workforce_identity_federation
-  - concept.ingestion_pipeline_topology
+- concept.workforce_identity_federation
+- concept.ingestion_pipeline_topology
 related_features:
-  - feature.siem.siem_settings
-  - feature.soar.soar_settings
+- feature.siem.siem_settings
+- feature.soar.soar_settings
 evaluation_rules:
   critical_configuration_drift: 0
   unauthorized_support_access: false
+status: stable
+description: Audit Tenant Configuration Posture & Drift (task reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Audit Tenant Configuration Posture & Drift

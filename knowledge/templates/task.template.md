@@ -1,7 +1,21 @@
 ---
 id: task.<persona_name>.<task_name>
-title: "<Task Title>"
 type: task
+title: "<Task Title>"
+description: "<One-sentence summary of this executable runbook procedure>"
+tags:
+  - secops
+  - runbook
+  - task
+status: stable  # valid: draft, stable, deprecated
+generated: { by: "<actor>", at: "<iso8601>" }
+verified:
+  - { by: "human:<reviewer_id>", at: "<iso8601>" }
+stale_after: "<iso8601>"
+sources:
+  - id: official-runbook-doc
+    resource: "<url_or_path>"
+    title: "<Procedure Specification Title>"
 persona: persona.<persona_name>
 trigger:
   - scheduled_weekly     # valid: scheduled_daily, scheduled_weekly, on_demand, incident_triggered

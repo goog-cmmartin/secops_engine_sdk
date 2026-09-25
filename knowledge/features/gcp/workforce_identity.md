@@ -1,18 +1,32 @@
 ---
 id: feature.gcp.workforce_identity
-title: "GCP Workforce Identity Pools & Data RBAC Context"
+title: GCP Workforce Identity Pools & Data RBAC Context
 type: feature
 platform: gcp
 sdk_capabilities:
-  - data_rbac.environment.search
-  - data_rbac.scope.search
-  - data_rbac.label.search
+- data_rbac.environment.search
+- data_rbac.scope.search
+- data_rbac.label.search
 mcp_tools:
-  - search_environment_scopes
-  - search_data_rbac_scopes
-  - search_data_rbac_labels
+- search_environment_scopes
+- search_data_rbac_scopes
+- search_data_rbac_labels
 related_concepts:
-  - concept.workforce_identity_federation
+- concept.workforce_identity_federation
+status: stable
+description: GCP Workforce Identity Pools & Data RBAC Context (feature reference in
+  Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # GCP Workforce Identity Pools & Data RBAC Context

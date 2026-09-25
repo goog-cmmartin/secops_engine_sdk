@@ -1,17 +1,31 @@
 ---
 id: concept.bindplane_telemetry_architecture
-title: "BindPlane OP OpenTelemetry Collection Architecture"
+title: BindPlane OP OpenTelemetry Collection Architecture
 type: concept
 applies_to:
-  - bindplane
-  - secops_siem
+- bindplane
+- secops_siem
 related_features:
-  - feature.bindplane.agent_fleet
-  - feature.siem.feed_management
+- feature.bindplane.agent_fleet
+- feature.siem.feed_management
 tags:
-  - bindplane
-  - opentelemetry
-  - collectors
+- bindplane
+- opentelemetry
+- collectors
+status: stable
+description: BindPlane OP OpenTelemetry Collection Architecture (concept reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # BindPlane OP OpenTelemetry Collection Architecture

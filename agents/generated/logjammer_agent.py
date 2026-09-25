@@ -29,6 +29,8 @@ class LogjammerAgentAgent(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name='LogJammer Agent',
@@ -44,6 +46,8 @@ class LogjammerAgentAgent(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided
@@ -271,13 +275,16 @@ class LogjammerAgentAgent(BaseSecOpsAdkAgent):
             try:
                 pending_todos = self.evidence_store.list_todos(status="PENDING")
                 for td in pending_todos:
-                    t_desc = td.get("description", "") + td.get("title", "")
+                    t_desc = f"{td.get('description', '')} {td.get('title', '')} {td.get('target_resource_id', '')}"
                     if proposal_id in t_desc or proposal.target_resource_id in t_desc:
-                        self.evidence_store.update_todo_status(
-                            todo_id=td["id"],
-                            status="RESOLVED",
-                            resolution=f"Empirically verified by {self.handle}: {proposal.preflight.replay_summary}",
-                        )
+                        tid = td.get("todo_id") or td.get("id")
+                        if tid:
+                            self.evidence_store.update_todo_status(
+                                todo_id=tid,
+                                status="RESOLVED",
+                                proposal_id=proposal.id,
+                                resolution=f"Empirically verified by {self.handle}: {proposal.preflight.replay_summary}",
+                            )
             except Exception:
                 pass
 

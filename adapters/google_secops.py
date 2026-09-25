@@ -1503,6 +1503,7 @@ class GoogleSecOpsAdapter:
         dialect: str = "YL2",
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        clear_cache: Optional[bool] = None,
     ) -> DashboardQueryResult:
         """Executes a dashboard query and returns normalized columnar/row-oriented results.
         
@@ -1524,6 +1525,7 @@ class GoogleSecOpsAdapter:
             dialect: Query dialect for inline queries (default: "YL2", supports "SQL").
             start_time: Optional absolute start timestamp in RFC3339 format.
             end_time: Optional absolute end timestamp in RFC3339 format.
+            clear_cache: Optional boolean to force fresh query execution bypassing cache.
             
         Returns:
             DashboardQueryResult with parsed columns and rows for easy data access.
@@ -1582,6 +1584,8 @@ class GoogleSecOpsAdapter:
             "usePreviousTimeRange": use_previous_time_range,
             "querySource": query_source,
         }
+        if clear_cache is not None:
+            body["clearCache"] = bool(clear_cache)
         res = self._request("POST", path, body=body)
         
         # Parse column-oriented response into rows
@@ -1628,16 +1632,31 @@ class GoogleSecOpsAdapter:
                 values = col_data.get('values', [])
                 
                 if row_idx < len(values):
-                    val_obj = values[row_idx].get('value', {})
-                    # Extract typed value (stringVal, int64Val, doubleVal, boolVal)
-                    # Try each type in order - first non-None wins
-                    actual_val = (
-                        val_obj.get('stringVal') if val_obj.get('stringVal') is not None else
-                        val_obj.get('int64Val') if val_obj.get('int64Val') is not None else
-                        val_obj.get('doubleVal') if val_obj.get('doubleVal') is not None else
-                        val_obj.get('boolVal') if val_obj.get('boolVal') is not None else
-                        None
-                    )
+                    val_container = values[row_idx]
+                    val_obj = val_container.get('value', {})
+                    if 'list' in val_container and isinstance(val_container['list'], dict):
+                        actual_val = [
+                            item.get('stringVal') if item.get('stringVal') is not None
+                            else item.get('int64Val') if item.get('int64Val') is not None
+                            else item.get('value', {}).get('stringVal') if isinstance(item.get('value'), dict)
+                            else item
+                            for item in val_container['list'].get('values', [])
+                        ]
+                    elif 'arrayVal' in val_obj and isinstance(val_obj['arrayVal'], dict):
+                        actual_val = [
+                            item.get('value', {}).get('stringVal') if isinstance(item.get('value'), dict) and item.get('value', {}).get('stringVal') is not None
+                            else item.get('stringVal') if item.get('stringVal') is not None
+                            else item
+                            for item in val_obj['arrayVal'].get('values', [])
+                        ]
+                    else:
+                        actual_val = (
+                            val_obj.get('stringVal') if val_obj.get('stringVal') is not None else
+                            val_obj.get('int64Val') if val_obj.get('int64Val') is not None else
+                            val_obj.get('doubleVal') if val_obj.get('doubleVal') is not None else
+                            val_obj.get('boolVal') if val_obj.get('boolVal') is not None else
+                            None
+                        )
                     row[col_name] = actual_val
             
             rows.append(row)
@@ -2703,6 +2722,18 @@ class GoogleSecOpsAdapter:
             path = f"/v1alpha/{clean_id}:listRevisions"
         else:
             path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}:listRevisions"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", path, params=params)
+
+    def list_rule_deployments(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists rule deployments across all detection rules in Chronicle SIEM."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/-/deployments"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
             params["pageToken"] = page_token

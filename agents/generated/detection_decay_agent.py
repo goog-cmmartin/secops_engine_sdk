@@ -34,6 +34,8 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name='Detection Decay Agent',
@@ -49,6 +51,8 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided
@@ -79,11 +83,23 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
         # 1. Fetch 90-day detection telemetry
         telemetry_map = self.engine.get_rule_detection_counts(lookback_days=lookback_days)
 
-        # 2. List rules
+        # 2. Fetch rule deployments for live status and archive filtering
+        deployment_map = {}
+        try:
+            deployments_res = self.engine.list_rule_deployments(page_size=1000)
+            raw_deps = getattr(deployments_res, "deployments", []) or []
+            for d in raw_deps:
+                d_id = getattr(d, "rule_id", "") or (d.name.split("/")[-2] if hasattr(d, "name") and "/" in d.name else "")
+                if d_id:
+                    deployment_map[d_id] = d
+        except Exception as dep_err:
+            pass
+
+        # 3. List rules
         rules_res = self.engine.list_rules(page_size=100, view="FULL")
         rules = getattr(rules_res, "rules", []) or []
 
-        # 3. Process rules, compute DPS, and persist to Evidence Fabric
+        # 4. Process rules, compute DPS, and persist to Evidence Fabric
         candidates = []
         texts_to_embed = []
         rule_ids_to_embed = []
@@ -102,6 +118,28 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
                 raw_name = getattr(r, "name", "") or (r.get("name") if isinstance(r, dict) else "")
                 if raw_name:
                     r_id = raw_name.split("/")[-1].split("@")[0]
+
+            dep = deployment_map.get(r_id)
+            is_archived = False
+            if dep:
+                is_archived = bool(getattr(dep, "archived", False) or (dep.raw.get("archived", False) if hasattr(dep, "raw") else False))
+            if not is_archived:
+                is_archived = bool(getattr(r, "archived", False) or (r.get("archived", False) if isinstance(r, dict) else False))
+
+            if is_archived:
+                continue
+
+            # Accurate is_live status
+            is_live = False
+            if dep:
+                is_live = bool(
+                    getattr(dep, "enabled", False)
+                    or getattr(dep, "alerting", False)
+                    or getattr(dep, "run_frequency", "") == "LIVE"
+                    or getattr(dep, "execution_state", "") == "ACTIVE"
+                )
+            else:
+                is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
 
             r_name = (
                 getattr(r, "display_name", "")
@@ -128,6 +166,7 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
                 detection_telemetry_90d=t_data,
                 syntax_verified=syntax_verified,
                 compiler_diagnostics=comp_diags,
+                is_live=is_live,
             )
 
             if "BROKEN_COMPILATION" in flags:
@@ -137,7 +176,6 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
             if "STALE" in flags:
                 stale_count += 1
 
-            is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
             det_count = t_data.get("count", 0)
 
             state_doc = {
@@ -176,6 +214,31 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
         candidates.sort(key=lambda x: x["dps_score"], reverse=True)
         avg_dps = round(sum(c["dps_score"] for c in candidates) / len(candidates), 1) if candidates else 0.0
 
+        # Deduplicate top_candidates by display name so top slots highlight distinct rules
+        seen_names = set()
+        top_candidates = []
+        for c in candidates:
+            norm_name = (c.get("rule_name") or "").strip().lower()
+            if norm_name and norm_name not in seen_names:
+                seen_names.add(norm_name)
+                top_candidates.append(c)
+            elif not norm_name:
+                top_candidates.append(c)
+            if len(top_candidates) >= 5:
+                break
+
+        seen_ret_names = set()
+        top_return_candidates = []
+        for c in candidates:
+            norm_name = (c.get("rule_name") or "").strip().lower()
+            if norm_name and norm_name not in seen_ret_names:
+                seen_ret_names.add(norm_name)
+                top_return_candidates.append(c)
+            elif not norm_name:
+                top_return_candidates.append(c)
+            if len(top_return_candidates) >= 10:
+                break
+
         widget = {
             "type": "decay_sync_card",
             "total_rules": len(candidates),
@@ -183,7 +246,7 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
             "silent_count": silent_count,
             "stale_count": stale_count,
             "average_dps": avg_dps,
-            "top_candidates": candidates[:5],
+            "top_candidates": top_candidates,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.last_widget = widget
@@ -203,7 +266,7 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
             "silent_count": silent_count,
             "stale_count": stale_count,
             "average_dps": avg_dps,
-            "top_candidates": candidates[:10],
+            "top_candidates": top_return_candidates,
             "widget": widget,
         }
 

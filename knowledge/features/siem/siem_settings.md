@@ -1,22 +1,35 @@
 ---
 id: feature.siem.siem_settings
-title: "SIEM Global Settings & Managed Domains"
+title: SIEM Global Settings & Managed Domains
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - siem.managed_domains.get
-  - pipeline.search
-  - pipeline.get
-  - siem.agent_settings.get
-  - siem.risk_config.get
-  - siem.tenant.get
+- siem.managed_domains.get
+- pipeline.search
+- pipeline.get
+- siem.agent_settings.get
+- siem.risk_config.get
+- siem.tenant.get
 mcp_tools:
-  - get_agent_settings
-  - get_entity_risk_config
-  - get_log_processing_pipeline
-  - get_managed_domain_settings
-  - get_tenant_instance
-  - search_log_processing_pipelines
+- get_agent_settings
+- get_entity_risk_config
+- get_log_processing_pipeline
+- get_managed_domain_settings
+- get_tenant_instance
+- search_log_processing_pipelines
+status: stable
+description: SIEM Global Settings & Managed Domains (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SIEM Global Settings & Managed Domains

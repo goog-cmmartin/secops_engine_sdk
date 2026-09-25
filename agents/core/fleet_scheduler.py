@@ -6,11 +6,33 @@ and integration with Evidence Fabric and Collaborative Chat Streams.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import json
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from agents.core.base_adk_agent import BaseSecOpsAdkAgent
-from agents.core.evidence_store import EvidenceFabricStore
+from agents.core.communication_router import CommunicationRouter, get_communication_router
+from agents.core.evidence_store import EvidenceFabricStore, normalize_doc_id
+from agents.core.knowledge_store import BaseKnowledgeStore, get_knowledge_store
+from agents.core.lifecycle import SOCLifecycleManager
+from agents.core.work_queue import BaseWorkQueue
+from engine.domain import (
+    AuthorityTier,
+    CommunicationClass,
+    CommunicationPolicy,
+    IssueGovernance,
+    IssueProblem,
+    IssueRouting,
+    IssueSeverity,
+    Observation,
+    ObserverRef,
+    OperationalPlane,
+    SOCIssue,
+    SubjectRef,
+    VerificationProof,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +75,8 @@ DEFAULT_AGENT_SCHEDULES: Dict[str, Dict[str, Any]] = {
         "lookback_days": 90,
         "stream": "detections",
         "topic": "decay-review",
-        "action": "run_decay_synchronization",
-        "description": "Daily 90-day detection telemetry aggregation and DPS rule decay audit",
+        "action": "audit_rules",
+        "description": "Daily 24h unified detection repository health, decay, conflict, and embedding patrol",
     },
     "@identity-governor": {
         "agent_handle": "@identity-governor",
@@ -74,6 +96,26 @@ DEFAULT_AGENT_SCHEDULES: Dict[str, Dict[str, Any]] = {
         "action": "audit_tenant_posture",
         "description": "Daily Chronicle SIEM, SOAR, RBAC, and SOC topography configuration baseline and drift audit",
     },
+    "@playbook-decay-agent": {
+        "agent_handle": "@playbook-decay-agent",
+        "enabled": True,
+        "interval_hours": 12,
+        "lookback_days": 30,
+        "stream": "soar",
+        "topic": "playbook-health",
+        "action": "audit_playbook_decay",
+        "description": "12-hourly SOAR playbook resilience scoring, execution failure rates, and topology decay patrol",
+    },
+    "@timestamp-integrity-agent": {
+        "agent_handle": "@timestamp-integrity-agent",
+        "enabled": True,
+        "interval_hours": 12,
+        "days": 7,
+        "stream": "ingestion",
+        "topic": "timestamp-integrity",
+        "action": "audit_timestamp_integrity",
+        "description": "12-hourly ingestion timestamp delta auditing, clock drift tracking, and telemetry hygiene patrol",
+    },
 }
 
 
@@ -86,11 +128,19 @@ class FleetScheduler:
         evidence_store: Optional[EvidenceFabricStore] = None,
         chat_store: Optional[Any] = None,
         poll_interval_seconds: int = 30,
+        lifecycle_manager: Optional[SOCLifecycleManager] = None,
+        work_queue: Optional[BaseWorkQueue] = None,
+        communication_router: Optional[CommunicationRouter] = None,
+        knowledge_store: Optional[BaseKnowledgeStore] = None,
     ):
         self.fleet = fleet
         self.evidence_store = evidence_store
         self.chat_store = chat_store
         self.poll_interval_seconds = poll_interval_seconds
+        self.lifecycle_manager = lifecycle_manager
+        self.work_queue = work_queue
+        self.communication_router = communication_router or get_communication_router(work_queue=self.work_queue, chat_store=self.chat_store)
+        self.knowledge_store = knowledge_store or get_knowledge_store()
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._schedules: Dict[str, Dict[str, Any]] = {}
@@ -99,6 +149,7 @@ class FleetScheduler:
         self._total_patrols_run: int = 0
         self._patrol_history: List[Dict[str, Any]] = []
         self._load_all_schedules()
+
 
     def _load_all_schedules(self) -> None:
         """Loads agent schedules from Evidence Fabric or applies default settings."""
@@ -228,7 +279,6 @@ class FleetScheduler:
 
         created_bead_ids: List[str] = []
         action = sched.get("action")
-        timestamp = int(datetime.now(timezone.utc).timestamp())
 
         try:
             # 1. Feed Health Anomalies
@@ -241,7 +291,8 @@ class FleetScheduler:
                         feed_id = str(f.get("feed_id", "feed"))
                         feed_name = f.get("feed_name") or feed_id
                         log_type = f.get("log_type", "UNKNOWN")
-                        todo_id = f"todo_feed_{feed_id[:16]}_{timestamp}"
+                        clean_feed = normalize_doc_id(feed_id[:16])
+                        todo_id = f"todo_feed_{clean_feed}_active"
                         task = {
                             "todo_id": todo_id,
                             "title": f"Remediate Ingestion Transport Failure on Feed: {feed_name} ({log_type})",
@@ -256,7 +307,7 @@ class FleetScheduler:
                             "rationale": f"Deacon feed patrol observed status={status}, latency={p95}h, anomaly={f.get('anomaly_description')}",
                             "created_at": start_time,
                         }
-                        self.evidence_store.save_todo(todo_id, task)
+                        self.evidence_store.upsert_todo(todo_id, task)
                         created_bead_ids.append(todo_id)
 
             # 2. Parser Normalization Drops & Errors
@@ -266,9 +317,12 @@ class FleetScheduler:
                     status = str(f.get("status", "")).upper()
                     drop_code = f.get("drop_reason_code")
                     unparsed = f.get("unparsed_log_count") or f.get("unparsed_count") or 0
+                    log_type = str(f.get("log_type", "UNKNOWN"))
+                    clean_log = normalize_doc_id(log_type.lower())
+                    issue_id = f"SOC-DATA-PARSER-{clean_log.upper()}"
+
                     if status == "FAILED" or drop_code or unparsed > 0:
-                        log_type = str(f.get("log_type", "UNKNOWN"))
-                        todo_id = f"todo_parser_{log_type.lower()}_{timestamp}"
+                        todo_id = f"todo_parser_{clean_log}_active"
                         task = {
                             "todo_id": todo_id,
                             "title": f"Diagnose Parser Normalization Drops on {log_type}",
@@ -283,8 +337,79 @@ class FleetScheduler:
                             "rationale": f"Deacon parser patrol observed status={status}, drop_reason={drop_code}, unparsed={unparsed}",
                             "created_at": start_time,
                         }
-                        self.evidence_store.save_todo(todo_id, task)
+                        if self.evidence_store:
+                            self.evidence_store.upsert_todo(todo_id, task)
                         created_bead_ids.append(todo_id)
+
+                        # Emit evidenced SOCIssue to Work Queue & Git Materializer
+                        if self.lifecycle_manager:
+                            try:
+                                issue = SOCIssue(
+                                    id=issue_id,
+                                    type="parser_drop_spike",
+                                    plane=OperationalPlane.DATA.value,
+                                    severity=IssueSeverity.HIGH.value if status == "FAILED" else IssueSeverity.MEDIUM.value,
+                                    problem=IssueProblem(
+                                        title=f"Elevated Parser Normalization Drops on {log_type}",
+                                        observed_state={
+                                            "log_type": log_type,
+                                            "status": status,
+                                            "drop_reason_code": drop_code,
+                                            "unparsed_count": unparsed,
+                                        },
+                                        desired_state={
+                                            "status": "HEALTHY",
+                                            "drop_reason_code": None,
+                                            "unparsed_count": 0,
+                                        },
+                                        affected_objects=[log_type],
+                                    ),
+                                    routing=IssueRouting(
+                                        requires_capabilities={
+                                            "parser.audit_health": 1,
+                                            "parser.run": 1,
+                                            "git.proposal.create": 1,
+                                        },
+                                    ),
+                                    governance=IssueGovernance(
+                                        required_authority_tier=AuthorityTier.TIER_2_PEER_REVIEW.value,
+                                        validation_criteria=[
+                                            "cbn_syntax_valid == true",
+                                            "unparsed_count == 0",
+                                        ],
+                                    ),
+                                )
+                                self.lifecycle_manager.open_issue(
+                                    issue=issue,
+                                    deacon_id="deacon.parser_patrol",
+                                    evidence_files={"sample_findings.json": json.dumps(f, indent=2).encode("utf-8")},
+                                    commit=True,
+                                )
+                            except Exception as issue_err:
+                                logger.warning("Failed opening SOCIssue for parser %s: %s", log_type, issue_err)
+
+                    elif status == "HEALTHY" and not drop_code and unparsed == 0:
+                        # Auto-verify and close if an open issue exists and drops are resolved!
+                        if self.lifecycle_manager:
+                            try:
+                                existing = self.lifecycle_manager.work_queue.get_issue(issue_id)
+                                if existing and existing.status in ("APPLIED", "VALIDATING"):
+                                    verification = VerificationProof(
+                                        verifier_actor="deacon.parser_patrol",
+                                        telemetry_proof_query=f"parser.audit_health(log_type='{log_type}')",
+                                        metric_before=str(existing.problem.observed_state),
+                                        metric_after="status=HEALTHY, drop_reason=None, unparsed=0",
+                                        verified_at=datetime.now(timezone.utc).isoformat(),
+                                        success=True,
+                                    )
+                                    self.lifecycle_manager.verify_and_close(
+                                        issue_id=issue_id,
+                                        verification=verification,
+                                        resolution_markdown=f"Deacon parser patrol verified 0 drops and healthy normalization on {log_type}.",
+                                        commit=True,
+                                    )
+                            except Exception as close_err:
+                                logger.warning("Failed verifying/closing SOCIssue %s: %s", issue_id, close_err)
 
             # 3. Alert Fatigue & Noisy Detection Rules
             elif handle == "@detection-tuning-agent" or action == "find_noisy_rules":
@@ -293,7 +418,8 @@ class FleetScheduler:
                     top_rule = rules[0]
                     rule_id = str(top_rule.get("rule_id", "rule"))
                     rule_name = top_rule.get("rule_name") or rule_id
-                    todo_id = f"todo_tuning_{rule_id[:16]}_{timestamp}"
+                    clean_rule = normalize_doc_id(rule_id[:16])
+                    todo_id = f"todo_tuning_{clean_rule}_active"
                     task = {
                         "todo_id": todo_id,
                         "title": f"Synthesize Tuning Exclusion Filter for {rule_name}",
@@ -308,14 +434,14 @@ class FleetScheduler:
                         "rationale": f"Deacon tuning patrol identified {top_rule.get('detection_count')} detections ({top_rule.get('ratio_of_total', 0)*100:.1f}% of volume).",
                         "created_at": start_time,
                     }
-                    self.evidence_store.save_todo(todo_id, task)
+                    self.evidence_store.upsert_todo(todo_id, task)
                     created_bead_ids.append(todo_id)
 
-            # 4. Detection Rule Decay
-            elif handle == "@detection-decay-agent" or action == "run_decay_synchronization":
-                broken_count = result.get("broken_count", 0)
+            # 4. Detection Rule Decay & Unified Repository Audit
+            elif handle == "@detection-decay-agent" or action in ("run_decay_synchronization", "audit_rules"):
+                broken_count = result.get("failing_count", result.get("broken_count", 0))
+                todo_id = "todo_decay_broken_active"
                 if broken_count > 0:
-                    todo_id = f"todo_decay_broken_{timestamp}"
                     task = {
                         "todo_id": todo_id,
                         "title": f"Remediate {broken_count} Broken Detection Rules with Invalid Syntax",
@@ -327,17 +453,42 @@ class FleetScheduler:
                         "priority": "HIGH",
                         "status": "PENDING",
                         "action_prompt": "@detection-decay-agent review broken rules",
-                        "rationale": f"Deacon decay patrol identified {broken_count} broken rules requiring YARA-L remediation.",
+                        "rationale": f"Detection repository patrol identified {broken_count} broken rules requiring YARA-L remediation.",
                         "created_at": start_time,
                     }
-                    self.evidence_store.save_todo(todo_id, task)
+                    self.evidence_store.upsert_todo(todo_id, task)
                     created_bead_ids.append(todo_id)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Detection repository patrol observed 0 broken rules.",
+                    )
+
+                shadowed_count = result.get("shadowed_by_curated_count", 0)
+                shadowed_todo_id = "todo_shadowed_curated_rules"
+                if shadowed_count > 0:
+                    task = {
+                        "todo_id": shadowed_todo_id,
+                        "title": f"Consolidate {shadowed_count} Customer Rules Shadowing Google Curated Rules",
+                        "target_agent": "@rule-conflict-agent",
+                        "target_resource_id": "CHRONICLE_RULES",
+                        "action_type": "consolidate_shadowed_rules",
+                        "stream": "detections",
+                        "topic": "rule-conflicts",
+                        "priority": "MEDIUM",
+                        "status": "PENDING",
+                        "action_prompt": "@rule-conflict-agent consolidate shadowed curated rules",
+                        "rationale": f"Detection repository audit discovered {shadowed_count} customer rules semantically duplicate Google Curated rules.",
+                        "created_at": start_time,
+                    }
+                    self.evidence_store.upsert_todo(shadowed_todo_id, task)
+                    created_bead_ids.append(shadowed_todo_id)
 
             # 5. IAM Privilege Drift
             elif handle == "@identity-governor" or action == "run_identity_drift_audit":
                 drift = result.get("drift", {})
+                todo_id = "todo_iam_drift_active"
                 if drift.get("has_drift"):
-                    todo_id = f"todo_iam_drift_{timestamp}"
                     task = {
                         "todo_id": todo_id,
                         "title": "Remediate GCP IAM Privilege Drift Flagged by Governor",
@@ -352,13 +503,18 @@ class FleetScheduler:
                         "rationale": f"Deacon identity patrol identified IAM privilege drift: {drift.get('summary')}",
                         "created_at": start_time,
                     }
-                    self.evidence_store.save_todo(todo_id, task)
+                    self.evidence_store.upsert_todo(todo_id, task)
                     created_bead_ids.append(todo_id)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Deacon identity patrol confirmed 0 IAM privilege drift.",
+                    )
 
             # 6. Tenant Posture & Configuration Drift
             elif handle == "@tenant-posture-agent" or action == "audit_tenant_posture":
+                todo_id = "todo_posture_drift_active"
                 if result.get("has_drift"):
-                    todo_id = f"todo_posture_drift_{timestamp}"
                     subsystems = result.get("subsystems_drifted", [])
                     subsystems_str = ", ".join(subsystems) if subsystems else "subsystems"
                     task = {
@@ -375,8 +531,68 @@ class FleetScheduler:
                         "rationale": f"Deacon posture patrol identified configuration drift: {result.get('drift_summary') or 'Configuration drift detected against baseline'}",
                         "created_at": start_time,
                     }
-                    self.evidence_store.save_todo(todo_id, task)
+                    self.evidence_store.upsert_todo(todo_id, task)
                     created_bead_ids.append(todo_id)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Deacon posture patrol confirmed configuration matches baseline.",
+                    )
+
+            # 7. Playbook Decay & Automation Resilience
+            elif handle == "@playbook-decay-agent" or action == "audit_playbook_decay":
+                degraded_count = result.get("summary", {}).get("degraded_playbooks_count", 0)
+                todo_id = "todo_playbook_decay_active"
+                if degraded_count > 0:
+                    task = {
+                        "todo_id": todo_id,
+                        "title": f"Triage {degraded_count} Degraded SOAR Playbooks",
+                        "target_agent": "@playbook-decay-agent",
+                        "target_resource_id": "catalog",
+                        "action_type": "playbook_remediation",
+                        "stream": "soar",
+                        "topic": "playbook-health",
+                        "priority": "HIGH",
+                        "status": "PENDING",
+                        "action_prompt": "@playbook-decay-agent audit degraded playbooks",
+                        "rationale": f"Deacon playbook patrol identified {degraded_count} degraded playbooks with resilience score < 70 or failure rate > 20%",
+                        "created_at": start_time,
+                    }
+                    self.evidence_store.upsert_todo(todo_id, task)
+                    created_bead_ids.append(todo_id)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Deacon playbook patrol confirmed 0 degraded playbooks.",
+                    )
+
+            # 8. Telemetry Timestamp Integrity & Clock Skew
+            elif handle == "@timestamp-integrity-agent" or action == "audit_timestamp_integrity":
+                skewed_events = result.get("summary", {}).get("total_skewed_events", 0)
+                new_anomalies = result.get("summary", {}).get("new_anomalies_count", 0)
+                todo_id = "todo_timestamp_integrity_active"
+                if skewed_events > 0 or new_anomalies > 0:
+                    task = {
+                        "todo_id": todo_id,
+                        "title": f"Investigate {skewed_events:,} Future Logs & {new_anomalies} Telemetry Anomalies",
+                        "target_agent": "@timestamp-integrity-agent",
+                        "target_resource_id": "telemetry",
+                        "action_type": "telemetry_remediation",
+                        "stream": "ingestion",
+                        "topic": "timestamp-integrity",
+                        "priority": "HIGH" if skewed_events > 0 else "MEDIUM",
+                        "status": "PENDING",
+                        "action_prompt": "@timestamp-integrity-agent audit",
+                        "rationale": f"Deacon timestamp patrol identified {skewed_events:,} clock-skewed events (Δt < 0) and {new_anomalies} new telemetry delay anomalies.",
+                        "created_at": start_time,
+                    }
+                    self.evidence_store.upsert_todo(todo_id, task)
+                    created_bead_ids.append(todo_id)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Deacon timestamp patrol observed 0 clock-skewed events and 0 latency anomalies.",
+                    )
 
         except Exception as e:
             logger.error("Failed to auto-create patrol beads for %s: %s", handle, e)
@@ -475,25 +691,31 @@ class FleetScheduler:
                 msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
             return msg
 
-        # 4. Detection Decay
-        elif handle == "@detection-decay-agent" or action == "run_decay_synchronization":
-            total = result.get("total_rules", 0)
-            broken = result.get("broken_count", 0)
-            silent = result.get("silent_count", 0)
+        # 4. Detection Decay & Unified Repository Audit
+        elif handle == "@detection-decay-agent" or action in ("run_decay_synchronization", "audit_rules"):
+            total = result.get("total_rules_scanned", result.get("total_rules", 0))
+            broken = result.get("failing_count", result.get("broken_count", 0))
+            silent = result.get("silent_decay_count", result.get("silent_count", 0))
             avg_dps = result.get("average_dps", 0)
+            conflicts = result.get("conflict_count", 0)
+            shadowed = result.get("shadowed_by_curated_count", 0)
+            synced = result.get("embeddings_synced_count", 0)
             lookback = sched.get("lookback_days", 90)
 
-            status_icon = "⚠️" if broken > 0 else "✓"
+            status_icon = "⚠️" if (broken > 0 or shadowed > 0) else "✓"
             msg = (
                 f"🛡️ **Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
                 f"- **Patrol Status**: `{status_icon} COMPLETED`\n"
                 f"- **Trigger**: `{trigger_label}`\n"
                 f"- **Lookback Window**: `{lookback} days`\n"
                 f"- **Audited Rules**: `{total}`\n"
-                f"- **Rule Health**: `Broken: {broken}` | `Silent: {silent}` | `Average DPS: {avg_dps}`\n"
+                f"- **Rule Health**: `Healthy: {result.get('healthy_count', 0)}` | `Broken: {broken}` | `Silent: {silent}`\n"
+                f"- **Repository Hygiene**: `Conflicts (COS≥75): {conflicts}` | `Shadows Curated: {shadowed}` | `Embeddings: {synced}`\n"
             )
             if broken > 0:
-                msg += f"\n⚠️ **Anomaly Alert**: {broken} rules have broken syntax or missing UDM fields."
+                msg += f"\n⚠️ **Anomaly Alert**: {broken} rules have execution failures or invalid syntax."
+            if shadowed > 0:
+                msg += f"\n💡 **Consolidation Advisory**: {shadowed} customer rules duplicate active Google Curated detections."
             if created_beads:
                 bead_list = ", ".join(f"`{b}`" for b in created_beads[:3])
                 msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
@@ -550,6 +772,56 @@ class FleetScheduler:
                 msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
             return msg
 
+        # 7. SOAR Playbook Inventory & Decay Patrol
+        elif handle == "@playbook-decay-agent" or action == "audit_playbook_decay":
+            summary = result.get("summary", {})
+            total_audited = summary.get("total_audited", 0)
+            avg_score = summary.get("average_resilience_score", 0.0)
+            degraded_count = summary.get("degraded_playbooks_count", 0)
+            status_icon = "⚠️" if degraded_count > 0 else "✓"
+
+            msg = (
+                f"⚡ **Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
+                f"- **Patrol Status**: `{status_icon} COMPLETED`\n"
+                f"- **Trigger**: `{trigger_label}`\n"
+                f"- **Playbooks Audited**: `{total_audited}`\n"
+                f"- **Catalog Avg Resilience Score**: `{avg_score}/100`\n"
+                f"- **Degraded Playbooks**: `{degraded_count}`\n"
+            )
+            if degraded_count > 0:
+                msg += f"\n⚠️ **Degraded Playbook Alert**: {degraded_count} playbooks exhibit resilience score < 70 or failure rate > 20%."
+            if created_beads:
+                bead_list = ", ".join(f"`{b}`" for b in created_beads[:3])
+                msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
+            return msg
+
+        # 8. Timestamp Integrity & Clock Skew Patrol
+        elif handle == "@timestamp-integrity-agent" or action == "audit_timestamp_integrity":
+            summary = result.get("summary", {})
+            total_audited = summary.get("total_log_types", 0)
+            new_anomalies = summary.get("new_anomalies_count", 0)
+            previously_known = summary.get("previously_known_count", 0)
+            skewed_events = summary.get("total_skewed_events", 0)
+            delayed_events = summary.get("total_delayed_events", 0)
+            status_icon = "⚠️" if (skewed_events > 0 or new_anomalies > 0) else "✓"
+
+            msg = (
+                f"⚡ **Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
+                f"- **Patrol Status**: `{status_icon} COMPLETED`\n"
+                f"- **Trigger**: `{trigger_label}`\n"
+                f"- **Log Sources Audited**: `{total_audited}`\n"
+                f"- **New Latency Anomalies**: `{new_anomalies}`\n"
+                f"- **Previously Known Anomalies**: `{previously_known}`\n"
+                f"- **Clock Skewed Events (Δt < 0)**: `{skewed_events:,}`\n"
+                f"- **Severe Delays (>2h)**: `{delayed_events:,}`\n"
+            )
+            if skewed_events > 0:
+                msg += f"\n⚠️ **Telemetry Clock Skew Alert**: {skewed_events:,} events were ingested with timestamps claiming to be in the future relative to ingestion."
+            if created_beads:
+                bead_list = ", ".join(f"`{b}`" for b in created_beads[:3])
+                msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
+            return msg
+
         # Generic Fallback
         return (
             f"**Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
@@ -586,6 +858,22 @@ class FleetScheduler:
             elif action == "find_noisy_rules" and hasattr(agent, "find_noisy_rules"):
                 lookback = sched.get("lookback_days", 14)
                 result = agent.find_noisy_rules(lookback_days=lookback, limit=20)
+            elif action == "audit_rules":
+                if hasattr(agent, "engine") and agent.engine and hasattr(agent.engine, "audit_rules"):
+                    rep = agent.engine.audit_rules(
+                        include_curated=sched.get("include_curated", True),
+                        sync_embeddings=sched.get("sync_embeddings", True),
+                        lookback_days=sched.get("lookback_days", 90),
+                    )
+                    result = rep.to_dict()
+                    result["widget"] = {
+                        "type": "rule_audit_card",
+                        "title": "Detection Repository Health Audit",
+                        "data": result,
+                    }
+                elif hasattr(agent, "run_decay_synchronization"):
+                    lookback = sched.get("lookback_days", 90)
+                    result = agent.run_decay_synchronization(lookback_days=lookback)
             elif action == "run_decay_synchronization" and hasattr(agent, "run_decay_synchronization"):
                 lookback = sched.get("lookback_days", 90)
                 result = agent.run_decay_synchronization(lookback_days=lookback)
@@ -593,6 +881,12 @@ class FleetScheduler:
                 result = agent.run_identity_drift_audit()
             elif action == "audit_tenant_posture" and hasattr(agent, "audit_tenant_posture"):
                 result = agent.audit_tenant_posture(snapshot=True)
+            elif action == "audit_playbook_decay":
+                lookback = sched.get("lookback_days", 30)
+                if hasattr(agent, "audit_playbook_decay"):
+                    result = agent.audit_playbook_decay(lookback_days=lookback)
+                elif hasattr(agent, "engine") and agent.engine and hasattr(agent.engine, "audit_playbook_decay"):
+                    result = agent.engine.audit_playbook_decay(lookback_days=lookback)
             elif hasattr(agent, action or ""):
                 method = getattr(agent, action)
                 result = method()
@@ -650,8 +944,35 @@ class FleetScheduler:
                 created_beads=created_beads,
             )
 
-            # Broadcast to collaborative chat store
-            if self.chat_store:
+            # Classify communication priority and build structured Observation
+            comm_class = CommunicationClass.INFORMATIONAL
+            if status in ("ERROR", "FAILED") or any(b.get("severity") == "CRITICAL" for b in created_beads):
+                comm_class = CommunicationClass.URGENT
+            elif created_beads:
+                comm_class = CommunicationClass.OPERATIONAL
+
+            obs = Observation(
+                observation_id=f"obs-{handle.replace('@', '')}-{int(datetime.now(timezone.utc).timestamp())}",
+                subject=SubjectRef(subject_type="subsystem", subject_id=stream),
+                observed_by=ObserverRef(agent=handle, version="1.0.0", action=action or "patrol"),
+                predicate=f"patrol_{action or 'audit'}",
+                value={"status": status, "summary": str(result.get("status") or ""), "created_beads": len(created_beads)},
+                communication_policy=CommunicationPolicy(
+                    urgency=comm_class,
+                    briefing=True,
+                    immediate_notification=(comm_class == CommunicationClass.URGENT),
+                    target_channel=f"#{stream}",
+                ),
+                confidence=1.0,
+                observed_at=start_time,
+                valid_until=(datetime.now(timezone.utc) + timedelta(hours=sched.get("interval_hours", 8) * 2)).isoformat(),
+            )
+
+            # Route observation through central CommunicationRouter
+            self.communication_router.dispatch(obs)
+
+            # Broadcast to collaborative chat store only if operator-forced or if URGENT / OPERATIONAL (no spam for healthy patrols)
+            if self.chat_store and (forced or comm_class in (CommunicationClass.URGENT, CommunicationClass.OPERATIONAL)):
                 self.chat_store.add_message(
                     stream=stream,
                     topic=topic,
@@ -660,6 +981,7 @@ class FleetScheduler:
                     content=content,
                     widget=widget,
                 )
+
 
             # Record in Evidence Fabric
             if self.evidence_store:

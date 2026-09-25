@@ -14,7 +14,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print("=" * 70)
-    print(" Google SecOps Multi-Agent Fleet & Gas Town Proposal Engine")
+    print(" Google SecOps Multi-Agent Fleet & Actions Proposal Engine")
     print("=" * 70)
     print(f" Web UI running at: http://{args.host}:{args.port}")
     print(" Zulip-inspired Stream & Topic collaboration active.")

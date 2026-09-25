@@ -1,28 +1,41 @@
 ---
 id: feature.siem.data_tables
-title: "SIEM Data Tables & Lookup Lists"
+title: SIEM Data Tables & Lookup Lists
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - data_table.list
-  - data_table.get
-  - data_table.create
-  - data_table.patch
-  - data_table.delete
-  - data_table.list_rows
-  - data_table.add_rows
-  - data_table.delete_row
-  - data_table.audit_health
+- data_table.list
+- data_table.get
+- data_table.create
+- data_table.patch
+- data_table.delete
+- data_table.list_rows
+- data_table.add_rows
+- data_table.delete_row
+- data_table.audit_health
 mcp_tools:
-  - add_data_table_rows
-  - audit_data_tables
-  - create_data_table
-  - delete_data_table
-  - delete_data_table_row
-  - get_data_table
-  - list_data_table_rows
-  - list_data_tables
-  - patch_data_table
+- add_data_table_rows
+- audit_data_tables
+- create_data_table
+- delete_data_table
+- delete_data_table_row
+- get_data_table
+- list_data_table_rows
+- list_data_tables
+- patch_data_table
+status: stable
+description: SIEM Data Tables & Lookup Lists (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SIEM Data Tables & Lookup Lists

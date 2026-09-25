@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-21 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-09-25 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**177 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**199 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-09-21 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 28 |
-| primitive | 27 |
-| query | 122 |
-| **total** | **177** |
+| workflow | 39 |
+| primitive | 28 |
+| query | 132 |
+| **total** | **199** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 49 |
-| bounded | 11 |
-| unbounded | 62 |
-| (n/a — workflows/primitive) | 55 |
+| single | 57 |
+| bounded | 12 |
+| unbounded | 63 |
+| (n/a — workflows/primitive) | 67 |
 
 ## Workflows
 
@@ -53,15 +53,26 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `entity.search_udm` | entity | Executes streaming searches across the native UDM entity graph (graph.entity.*). |
 | `event.investigate` | event | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 | `feed.audit_health` | feed | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
+| `feed.timestamp_integrity_audit` | feed | Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief. |
+| `ingestion.labels_and_namespaces.analyze` | ingestion | Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes. |
+| `log_cost.analyze` | log | Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations. |
 | `parser.audit_health` | parser | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
 | `parser.diagnose_unparsed` | parser | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
 | `playbook.audit_health` | playbook | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
+| `playbook.decay_audit` | playbook | Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence. |
+| `rule.audit` | rule | Performs an end-to-end repository audit across custom and curated rules, synchronizing vector embeddings, calculating DPS decay, discovering cross-rule conflicts, and updating Firestore Evidence Fabric. |
 | `rule.audit_health` | rule | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
+| `rule.conflict.audit` | rule | Performs semantic dual-rule YARA-L logic comparison, identifies REDUNDANCY, OVERLAP, CONTRADICTION, or SCOPE GAPS, and computes Conflict Overlap Score (COS: 0-100). |
+| `rule.conflict.batch_audit` | rule | Discovers and ranks semantic rule conflicts across tenant active rules with batch chunking and Evidence Fabric persistence. |
 | `rule.decay.audit` | rule | Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring. |
 | `search.from_entity` | search | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | search | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | search | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
 | `tenant.posture.audit` | siem_settings | Audits tenant configuration posture across root instance, Gemini AI triage, UEBA risk scoring, pipelines, SOAR global settings, and SOC topography. |
+| `tenant.profile.generate` | tenant_profiling | Executes deep tenant cartography across graph, identity, and volume to synthesize an attested tenant telemetry profile. |
+| `tenant.profile.graph_lineage` | tenant_profiling | Executes native GoogleSQL pipe aggregation against live graph table to map entity resolution provenance and longevity. |
+| `tenant.profile.identity_fidelity` | tenant_profiling | Executes native GoogleSQL pipe aggregation against live events to measure distinct user identity density per log type. |
+| `tenant.profile.volume_pareto` | tenant_profiling | Executes native GoogleSQL pipe aggregation against live events to rank log sources by raw ingestion volume. |
 
 ## All capabilities by domain
 
@@ -201,12 +212,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `event.investigate` | workflow | — | `investigate_event` | Retrieves canonical UDM fields and raw log payload with complete provenance. |
 
-### feed  (5: workflow=1, query=4)
+### feed  (7: workflow=2, query=5)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `feed.audit_health` | workflow | — | `audit_feed_health` | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
+| `feed.timestamp_integrity_audit` | workflow | — | `audit_timestamp_integrity` | Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief. |
 | `feed.get` | query | `single` | `get_feed` | Retrieves full configuration details and source parameters for an ingestion feed. |
+| `feed.get_timestamp_integrity` | query | `single` | `get_latest_timestamp_integrity` | Retrieves latest stored timestamp integrity baseline and progression metrics from Evidence Fabric. |
 | `feed.search` | query | `unbounded` | `search_feeds` | Searches, lists, and filters push/pull ingestion feeds across source types and log types. |
 | `feed_schema.list_log_types` | query | `unbounded` | `list_feed_log_type_schemas` | Lists log types supported by a specific feed source with lean payload handling. |
 | `feed_schema.list_sources` | query | `unbounded` | `list_feed_source_type_schemas` | Lists all supported feed source types and collection mechanisms. |
@@ -230,6 +243,15 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `identity.custom_roles.list` | query | `bounded` | `get_chronicle_custom_roles` | Discovers custom GCP IAM roles within the project granting chronicle.* permissions. |
 | `identity.iam.bindings` | query | `bounded` | `get_chronicle_iam_bindings` | Inspects project IAM policy for predefined Chronicle roles and custom role assignments. |
 | `identity.inventory.report` | query | `single` | `fetch_inventory_identity_report` | Retrieves identity access insights and workforce pool assignments from SecOps Inventory. |
+
+### ingestion  (4: workflow=1, query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `ingestion.labels_and_namespaces.analyze` | workflow | — | `analyze_labels_and_namespaces` | Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes. |
+| `ingestion.labels.analyze` | query | `single` | `analyze_ingestion_labels` | Analyzes active ingestion labels across log types via native GoogleSQL, classifying auto-generated vs custom tags. |
+| `ingestion.namespaces.analyze` | query | `single` | `analyze_namespaces` | Analyzes active UDM namespaces and flags potential RFC 1918 overlapping IP collisions across network telemetry. |
+| `ingestion.rbac_alignment.audit` | query | `single` | `audit_data_rbac_alignment` | Audits Data Access Labels against active telemetry tags and namespaces, detecting unreferenced or broken scoping rules. |
 
 ### integration  (4: query=4)
 
@@ -255,13 +277,15 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `job.logs` | query | `unbounded` | `get_job_instance_logs` | Retrieves execution run records and output logs for a job instance. |
 | `job.search` | query | `unbounded` | `search_jobs` | Searches, lists, and filters SOAR scheduled jobs across integrations and execution schedules. |
 
-### log  (3: query=3)
+### log  (5: workflow=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `log_cost.analyze` | workflow | — | `analyze_log_costs` | Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations. |
 | `log.product_sources.stats` | query | `unbounded` | `query_product_source_stats` | Queries product log sources, data ingestion volumes, and active sources in the tenant. |
 | `log.query.validate_query` | query | `bounded` | `validate_raw_log_query` | Validates raw log search query syntax against Chronicle query compiler. |
 | `log.raw_logs.search` | query | `unbounded` | `search_raw_logs` | Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges. |
+| `log_cost.get_latest` | query | `single` | `get_latest_log_costs` | Retrieves the most recent log cost and FinOps analysis report from Evidence Fabric. |
 
 ### marketplace_integration  (4: query=4)
 
@@ -271,6 +295,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `marketplace_integration.diff` | query | `single` | `get_marketplace_integration_diff` | Compares commercial upgrade differences and overrides between installed and target versions. |
 | `marketplace_integration.get` | query | `single` | `get_marketplace_integration` | Retrieves complete integration composite, actions, connectors, jobs, managers, and release notes. |
 | `marketplace_integration.search` | query | `unbounded` | `search_marketplace_integrations` | Discovers, searches, and filters Marketplace Response Integrations across categories and update states. |
+
+### operational_intelligence  (3: query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `soc.briefing.entity_dossier` | query | `single` | `get_composite_entity_dossier` | Synthesizes cross-agent factual assertions, health statuses, linked issues, and knowledge gaps for a specific operational entity. |
+| `soc.briefing.posture_snapshot` | query | `single` | `generate_posture_snapshot` | Compiles complete tenant operational posture, subsystem health indicators, assertion freshness distributions, and surfaced Knowledge Gaps. |
+| `soc.briefing.shift_handover` | query | `single` | `generate_shift_briefing` | Deterministically aggregates work queue deltas, resolved issues, active agent leases, applied changes, and verified healthy baselines into a shift briefing. |
 
 ### parser  (9: workflow=2, primitive=1, query=6)
 
@@ -286,11 +318,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.log_types.list` | query | `unbounded` | `list_log_types` | Discovers and filters supported ingestion log types cataloged in Google SecOps. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (5: workflow=1, query=4)
+### playbook  (6: workflow=2, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `playbook.audit_health` | workflow | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
+| `playbook.decay_audit` | workflow | — | `audit_playbook_decay` | Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence. |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
 | `playbook.instances` | query | `unbounded` | `get_alert_playbook_instances` | Retrieves authoritative per-alert playbook run instances and the executed step DAG. |
@@ -303,22 +336,28 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
 
-### rule  (13: workflow=2, primitive=4, query=7)
+### rule  (19: workflow=5, primitive=5, query=9)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `rule.audit` | workflow | — | `audit_rules` | Performs an end-to-end repository audit across custom and curated rules, synchronizing vector embeddings, calculating DPS decay, discovering cross-rule conflicts, and updating Firestore Evidence Fabric. |
 | `rule.audit_health` | workflow | — | `audit_rule_health` | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
+| `rule.conflict.audit` | workflow | — | `audit_rule_conflicts` | Performs semantic dual-rule YARA-L logic comparison, identifies REDUNDANCY, OVERLAP, CONTRADICTION, or SCOPE GAPS, and computes Conflict Overlap Score (COS: 0-100). |
+| `rule.conflict.batch_audit` | workflow | — | `batch_audit_rule_conflicts` | Discovers and ranks semantic rule conflicts across tenant active rules with batch chunking and Evidence Fabric persistence. |
 | `rule.decay.audit` | workflow | — | `audit_rule_decay` | Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring. |
 | `rule.create` | primitive | — | `create_rule` | Creates a new YARA-L detection rule in Chronicle SIEM. |
 | `rule.delete` | primitive | — | `delete_rule` | Deletes a custom detection rule from Chronicle SIEM. |
 | `rule.deployment.update` | primitive | — | `update_rule_deployment` | Updates deployment properties (enabled, alerting, frequency) of a rule. |
+| `rule.embeddings.sync` | primitive | — | `sync_rule_embeddings` | Batch computes and stores text-embedding-004 vector embeddings for all active tenant rules. |
 | `rule.patch` | primitive | — | `patch_rule` | Updates the YARA-L logic of an existing detection rule. |
 | `rule.decay.telemetry` | query | `bounded` | `get_rule_detection_counts` | Queries 90-day detection count aggregations using authoritative native detection schema. |
 | `rule.deployment.get` | query | `single` | `get_rule_deployment` | Retrieves deployment, frequency, and alerting status of a rule. |
+| `rule.deployment.list` | query | `unbounded` | `list_rule_deployments` | Lists deployment, frequency, and alerting status for all detection rules. |
 | `rule.errors` | query | `unbounded` | `list_rule_errors` | Lists runtime and execution errors across detection rules. |
 | `rule.get` | query | `single` | `get_rule` | Retrieves full details and YARA-L logic of a detection rule. |
 | `rule.list` | query | `unbounded` | `list_rules` | Lists custom YARA-L detection rules in Chronicle SIEM. |
 | `rule.revisions` | query | `unbounded` | `list_rule_revisions` | Lists historical revisions and version history of a detection rule. |
+| `rule.similarity.search` | query | `bounded` | `find_similar_rules` | Finds semantically similar detection rules using 768-d text-embedding-004 vectors and cosine similarity. |
 | `rule.verify` | query | `bounded` | `verify_rule_text` | Validates YARA-L 2.0 rule syntax against the Chronicle compiler. |
 
 ### search  (4: workflow=3, query=1)
@@ -376,3 +415,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `soar.user.search` | query | `unbounded` | `search_soar_users` | Discovers and filters SOAR users and external identity profiles. |
 | `soar.webhook.get` | query | `single` | `get_soar_webhook` | Retrieves complete configuration and schema mapping for a single SOAR event ingestion webhook. |
 | `soar.webhook.search` | query | `unbounded` | `search_soar_webhooks` | Discovers and filters configured SOAR event ingestion webhooks. |
+
+### tenant_profiling  (4: workflow=4)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `tenant.profile.generate` | workflow | — | `generate_tenant_telemetry_profile` | Executes deep tenant cartography across graph, identity, and volume to synthesize an attested tenant telemetry profile. |
+| `tenant.profile.graph_lineage` | workflow | — | `get_entity_graph_lineage` | Executes native GoogleSQL pipe aggregation against live graph table to map entity resolution provenance and longevity. |
+| `tenant.profile.identity_fidelity` | workflow | — | `get_identity_fidelity` | Executes native GoogleSQL pipe aggregation against live events to measure distinct user identity density per log type. |
+| `tenant.profile.volume_pareto` | workflow | — | `get_log_source_volume_pareto` | Executes native GoogleSQL pipe aggregation against live events to rank log sources by raw ingestion volume. |

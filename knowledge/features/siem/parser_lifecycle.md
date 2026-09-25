@@ -1,28 +1,41 @@
 ---
 id: feature.siem.parser_lifecycle
-title: "Log Parsers & CBN Normalization"
+title: Log Parsers & CBN Normalization
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - parser.log_types.list
-  - parser.search
-  - parser.get
-  - parser.run
-  - parser.diagnose_unparsed
-  - parser.extensions.search
-  - parser.extensions.get
-  - parser.log_type_setting.get
-  - parser.audit_health
+- parser.log_types.list
+- parser.search
+- parser.get
+- parser.run
+- parser.diagnose_unparsed
+- parser.extensions.search
+- parser.extensions.get
+- parser.log_type_setting.get
+- parser.audit_health
 mcp_tools:
-  - audit_parser_health
-  - diagnose_unparsed_logs
-  - get_log_type_setting
-  - get_parser
-  - get_parser_extension
-  - list_log_types
-  - run_parser
-  - search_parser_extensions
-  - search_parsers
+- audit_parser_health
+- diagnose_unparsed_logs
+- get_log_type_setting
+- get_parser
+- get_parser_extension
+- list_log_types
+- run_parser
+- search_parser_extensions
+- search_parsers
+status: stable
+description: Log Parsers & CBN Normalization (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Log Parsers & CBN Normalization

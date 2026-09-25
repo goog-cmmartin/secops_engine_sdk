@@ -123,6 +123,22 @@ class PatrolAgentFixture:
             "widget": None,
         }
 
+    def audit_timestamp_integrity(self, days: int = 7, clear_cache: bool = True):
+        return {
+            "status": "SUCCESS",
+            "summary": {
+                "total_log_types": 3,
+                "healthy_count": 2,
+                "new_anomalies_count": 1,
+                "previously_known_count": 0,
+                "resolved_count": 0,
+                "total_skewed_events": 142,
+                "total_delayed_events": 530,
+            },
+            "findings": {},
+            "widget": None,
+        }
+
 
 class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
     """Verifies agent schedule management and periodic Deacon patrol triggers."""
@@ -148,6 +164,8 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 "@detection-decay-agent",
                 "@identity-governor",
                 "@tenant-posture-agent",
+                "@playbook-decay-agent",
+                "@timestamp-integrity-agent",
             ]
             for handle in expected_handles:
                 sched = scheduler.get_schedule(handle)
@@ -160,7 +178,7 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
 
             # Check Deacon Status
             status = scheduler.get_deacon_status()
-            self.assertEqual(status["active_patrols"], 6)
+            self.assertEqual(status["active_patrols"], 8)
             self.assertEqual(status["total_patrols_run"], 0)
             self.assertIn("Active", status["deacon_heartbeat"])
 
@@ -285,6 +303,8 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 "@detection-decay-agent": PatrolAgentFixture("Detection Decay Agent", "@detection-decay-agent"),
                 "@identity-governor": PatrolAgentFixture("Identity Governor", "@identity-governor"),
                 "@tenant-posture-agent": PatrolAgentFixture("Tenant Posture Governor", "@tenant-posture-agent"),
+                "@playbook-decay-agent": PatrolAgentFixture("SOAR Playbook Decay Agent", "@playbook-decay-agent"),
+                "@timestamp-integrity-agent": PatrolAgentFixture("Timestamp Integrity Agent", "@timestamp-integrity-agent"),
             }
 
             scheduler = FleetScheduler(
@@ -296,9 +316,9 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
 
             bulk_res = await scheduler.trigger_patrol_all()
             self.assertEqual(bulk_res["status"], "SUCCESS")
-            self.assertEqual(bulk_res["executed_count"], 6)
-            self.assertEqual(len(bulk_res["results"]), 6)
-            self.assertEqual(bulk_res["deacon_status"]["total_patrols_run"], 6)
+            self.assertEqual(bulk_res["executed_count"], 8)
+            self.assertEqual(len(bulk_res["results"]), 8)
+            self.assertEqual(bulk_res["deacon_status"]["total_patrols_run"], 8)
 
 
 if __name__ == "__main__":

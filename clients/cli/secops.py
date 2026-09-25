@@ -520,6 +520,10 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     feed_list.add_argument("--limit", type=int, default=50, help="Results limit (default: 50)")
     feed_get = feed_sub.add_parser("get", help="Get full feed configuration and source settings")
     feed_get.add_argument("identifier", help="Feed UUID or display name")
+    feed_timestamp = feed_sub.add_parser("timestamp-audit", help="Audit ingestion timestamp deltas, latency bottlenecks, and clock skews")
+    feed_timestamp.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    feed_timestamp.add_argument("--clear-cache", action="store_true", default=True, help="Bypass cache for live freshness (default: True)")
+    feed_timestamp.add_argument("--json", action="store_true", help="Output as JSON")
 
     # Pipelines command
     pipeline_parser = subparsers.add_parser("pipeline", help="Explore Data Processing Pipelines and Bindplane SaaS integrations")
@@ -1021,11 +1025,34 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_errors.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
     rule_errors.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    rule_audit = rule_sub.add_parser("audit", help="Audit all rules, deployment status, and cross-correlate errors")
-    rule_audit.add_argument("--filter", "-f", help="Optional filter expression for listing rules")
-    rule_audit.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_audit = rule_sub.add_parser("audit", help="Unified detection repository health audit across customer & curated rules")
+    rule_audit.add_argument("--no-curated", action="store_true", help="Exclude Google Curated rules from audit")
+    rule_audit.add_argument("--no-sync", action="store_true", help="Skip embedding synchronization before audit")
+    rule_audit.add_argument("--no-conflict-scan", action="store_true", help="Skip cross-rule conflict and shadowing scan")
+    rule_audit.add_argument("--lookback-days", type=int, default=90, help="Telemetry lookback window in days (default: 90)")
+    rule_audit.add_argument("--limit", type=int, default=1000, help="Results limit (default: 1000)")
     rule_audit.add_argument("--out", "-o", help="Optional path to output JSON report file")
     rule_audit.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_conflict = rule_sub.add_parser("conflict-audit", help="Audit detection rule for semantic overlaps, contradictions, redundancies, and compute COS")
+    rule_conflict.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_conflict.add_argument("--limit", type=int, default=6, help="Max similar candidate rules to compare (default: 6)")
+    rule_conflict.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_conflict_batch = rule_sub.add_parser("conflict-batch", help="Batch discover rule conflicts across tenant rules")
+    rule_conflict_batch.add_argument("--limit", type=int, default=50, help="Max rules to scan (default: 50)")
+    rule_conflict_batch.add_argument("--min-cos", type=float, default=45.0, help="Minimum COS score to flag (default: 45.0)")
+    rule_conflict_batch.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_similarity = rule_sub.add_parser("similarity", help="Search semantically similar rules via vector embeddings")
+    rule_similarity.add_argument("rule", help="Rule ID (ru_...) or resource name")
+    rule_similarity.add_argument("--limit", type=int, default=6, help="Results limit (default: 6)")
+    rule_similarity.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_sync_emb = rule_sub.add_parser("sync-embeddings", help="Batch compute and synchronize vector embeddings for active rules")
+    rule_sync_emb.add_argument("--batch-size", type=int, default=50, help="Batch chunk size (default: 50)")
+    rule_sync_emb.add_argument("--force", action="store_true", help="Force refresh existing embeddings")
+    rule_sync_emb.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # Cloud Monitoring command
     mon_parser = subparsers.add_parser("monitoring", help="Query Google Cloud Monitoring time series for Chronicle metrics")
@@ -1047,6 +1074,65 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     mon_health.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
     mon_health.add_argument("--log-type", help="Optional log type filter")
     mon_health.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # FinOps / Cost Optimization command
+    cost_parser = subparsers.add_parser("cost", help="Analyze Chronicle log ingestion telemetry, multi-tier pricing, and FinOps recommendations")
+    cost_sub = cost_parser.add_subparsers(dest="cost_action", required=True)
+
+    cost_analyze = cost_sub.add_parser("analyze", help="Execute live ingestion telemetry analysis and compute FinOps recommendations")
+    cost_analyze.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    cost_analyze.add_argument("--tier", "-t", choices=["STANDARD", "ENTERPRISE", "ENTERPRISE_PLUS"], default="ENTERPRISE", help="Subscription pricing tier (default: ENTERPRISE)")
+    cost_analyze.add_argument("--bloat-threshold", type=int, default=2048, help="Bloat threshold in bytes per event (default: 2048)")
+    cost_analyze.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    cost_latest = cost_sub.add_parser("latest", help="Fetch most recent log cost analysis report from Evidence Fabric")
+    cost_latest.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # Ingestion Labels & Namespaces Hygiene command
+    ingestion_parser = subparsers.add_parser("ingestion-hygiene", help="Audit active Ingestion Labels, UDM Namespaces, and Data RBAC alignment")
+    ingestion_sub = ingestion_parser.add_subparsers(dest="ingestion_action", required=True)
+
+    ing_analyze = ingestion_sub.add_parser("analyze", help="Execute complete telemetry labels, namespaces, and Data RBAC hygiene audit")
+    ing_analyze.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    ing_analyze.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    ing_labels = ingestion_sub.add_parser("labels", help="List active ingestion labels across log types")
+    ing_labels.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    ing_labels.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    ing_ns = ingestion_sub.add_parser("namespaces", help="List active UDM namespaces and inspect RFC 1918 relevance")
+    ing_ns.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    ing_ns.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    ing_rbac = ingestion_sub.add_parser("rbac-check", help="Audit Data Access Labels against active telemetry tags")
+    ing_rbac.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # Tenant Cartography & Telemetry Profiling command
+    cartography_parser = subparsers.add_parser(
+        "cartography", help="Survey tenant data topography, UDM identity fidelity density, and entity graph lineage"
+    )
+    cartography_sub = cartography_parser.add_subparsers(dest="cartography_action", required=True)
+
+    cart_survey = cartography_sub.add_parser("survey", help="Execute complete tenant telemetry survey and generate Attested Computation")
+    cart_survey.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    cart_survey.add_argument("--limit", "-l", type=int, default=20, help="Results limit per dimension (default: 20)")
+    cart_survey.add_argument("--export", "-e", help="Optional markdown output path for Attested Computation")
+    cart_survey.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    cart_id = cartography_sub.add_parser("identity", help="Survey UDM identity fidelity density matrix across log types")
+    cart_id.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    cart_id.add_argument("--limit", "-l", type=int, default=50, help="Display limit (default: 50)")
+    cart_id.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    cart_graph = cartography_sub.add_parser("graph", help="Survey entity graph lineage, vendors, and longevity")
+    cart_graph.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    cart_graph.add_argument("--limit", "-l", type=int, default=50, help="Display limit (default: 50)")
+    cart_graph.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    cart_vol = cartography_sub.add_parser("volume", help="Survey telemetry volume Pareto distribution")
+    cart_vol.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
+    cart_vol.add_argument("--limit", "-l", type=int, default=50, help="Display limit (default: 50)")
+    cart_vol.add_argument("--json", action="store_true", help="Output raw JSON")
 
     args = parser.parse_args()
 
@@ -1174,6 +1260,243 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_runbook_cli(args)
     elif args.command == "monitoring":
         run_monitoring_cli(args)
+    elif args.command == "cost":
+        run_cost_cli(args)
+    elif args.command == "ingestion-hygiene":
+        run_ingestion_hygiene_cli(args)
+    elif args.command == "cartography":
+        run_cartography_cli(args)
+
+
+def run_cartography_cli(args):
+    engine = SecOpsEngine()
+    if args.cartography_action == "survey":
+        print(f"\n[CLI] Surveying tenant telemetry topography (lookback={args.days}d, limit={args.limit})...")
+        profile = engine.generate_tenant_telemetry_profile(days=args.days, limit=args.limit)
+        if getattr(args, "json", False):
+            print(json.dumps(profile.to_dict(), indent=2, default=str))
+            return
+        if getattr(args, "export", None):
+            engine.export_attested_computation_markdown(profile, output_path=args.export)
+            print(f"[CLI] Exported Attested Computation to: {args.export}")
+
+        print("\n" + "=" * 80)
+        print(" GOOGLE SECOPS TENANT TELEMETRY & IDENTITY CARTOGRAPHY")
+        print("=" * 80)
+        print(f"  Summary               : {profile.summary}")
+        print(f"  Profiled At           : {profile.profiled_at}")
+        print(f"  Observation Window    : {profile.observation_window_days} Days")
+        print(f"  Total Events Observed : {profile.total_events_observed:,}")
+        print(f"  Total Graph Entities  : {profile.total_graph_entities_observed:,}")
+        print(f"  Identity Sources      : {len(profile.identity_metrics)}")
+        print(f"  Graph Sources         : {len(profile.graph_sources)}")
+        print(f"  Volume Sources        : {len(profile.volume_metrics)}")
+
+        print("\n[TOP IDENTITY SOURCES (Distinct Principal Users)]")
+        for im in profile.identity_metrics[:5]:
+            print(f"  • {im.log_type:28s} Principal Users: {im.principal_user_id:6,d} | Target Users: {im.target_user_id:6,d}")
+
+        print("\n[TOP GRAPH SOURCES (Entity Count)]")
+        for gs in profile.graph_sources[:5]:
+            print(f"  • {gs.log_type:28s} ({gs.vendor_name or '-'} / {gs.product_name or '-'}): {gs.total_entities:,}")
+
+        print("\n[TOP VOLUME PARETO]")
+        for vm in profile.volume_metrics[:5]:
+            print(f"  • {vm.log_type:28s} Event Count: {vm.event_count:,}")
+
+    elif args.cartography_action == "identity":
+        print(f"\n[CLI] Surveying UDM Identity Fidelity Density Matrix (lookback={args.days}d)...")
+        metrics = engine.get_identity_fidelity(days=args.days, limit=args.limit)
+        if getattr(args, "json", False):
+            print(json.dumps([m.to_dict() for m in metrics], indent=2, default=str))
+            return
+        print(f"\nDiscovered {len(metrics)} active log sources with identity values:")
+        print(f"  {'Log Type':28s} {'Princ User':12s} {'Princ Email':12s} {'Tgt User':10s} {'Tgt Email':10s}")
+        print("  " + "-" * 75)
+        for m in metrics:
+            print(f"  {m.log_type:28s} {m.principal_user_id:12,d} {m.principal_user_email_address:12,d} {m.target_user_id:10,d} {m.target_user_email_address:10,d}")
+
+    elif args.cartography_action == "graph":
+        print(f"\n[CLI] Surveying Entity Graph Lineage & Provenance (lookback={args.days}d)...")
+        sources = engine.get_entity_graph_lineage(days=args.days, limit=args.limit)
+        if getattr(args, "json", False):
+            print(json.dumps([s.to_dict() for s in sources], indent=2, default=str))
+            return
+        print(f"\nDiscovered {len(sources)} entity graph bindings:")
+        print(f"  {'Log Type':25s} {'Source Type':18s} {'Vendor':20s} {'Total Entities':15s}")
+        print("  " + "-" * 80)
+        for s in sources:
+            print(f"  {s.log_type:25s} {s.entity_source:18s} {(s.vendor_name or '-'):20s} {s.total_entities:15,d}")
+
+    elif args.cartography_action == "volume":
+        print(f"\n[CLI] Surveying Telemetry Volume Pareto (lookback={args.days}d)...")
+        volumes = engine.get_log_source_volume_pareto(days=args.days, limit=args.limit)
+        if getattr(args, "json", False):
+            print(json.dumps([v.to_dict() for v in volumes], indent=2, default=str))
+            return
+        print(f"\nDiscovered {len(volumes)} active telemetry log sources:")
+        for idx, v in enumerate(volumes, 1):
+            print(f"  {idx:2d}. {v.log_type:28s} -> {v.event_count:12,d} events")
+
+
+
+def run_ingestion_hygiene_cli(args):
+    engine = SecOpsEngine()
+    if args.ingestion_action == "analyze":
+        print(f"\n[CLI] Analyzing ingestion labels, namespaces, and Data RBAC (lookback={args.days}d)...")
+        report = engine.analyze_labels_and_namespaces(lookback_days=args.days)
+        if getattr(args, "json", False):
+            print(json.dumps(report.to_dict(), indent=2, default=str))
+            return
+
+        print("\n" + "=" * 80)
+        print(" GOOGLE SECOPS INGESTION LABELS & NAMESPACES HYGIENE AUDIT")
+        print("=" * 80)
+        print(f"  Lookback Window          : {report.lookback_window}")
+        print(f"  Total Labelled Events    : {report.total_labelled_events:,}")
+        print(f"  Total Namespaced Events  : {report.total_namespaced_events:,}")
+        print(f"  Untagged Default Events  : {report.total_untagged_events:,}")
+        print(f"  Active Ingestion Labels  : {len(report.active_ingestion_labels)}")
+        print(f"  Active UDM Namespaces    : {len(report.active_namespaces)}")
+        print(f"  Data RBAC Scopes / Labels: {len(report.data_rbac_references)}")
+        print(f"  Hygiene Findings         : {len(report.findings)}")
+        print("-" * 80)
+
+        if report.findings:
+            print("\n=== HYGIENE FINDINGS ===")
+            for idx, f in enumerate(report.findings, 1):
+                print(f"  {idx}. [{f.severity}] {f.title}")
+                print(f"     Category   : {f.category}")
+                print(f"     Description: {f.description}")
+                if f.affected_log_types:
+                    print(f"     Affected Log Types: {', '.join(f.affected_log_types)}")
+                print(f"     Remediation: {f.remediation_guidance}")
+                print()
+
+        print("\n=== ACTIVE INGESTION LABELS ===")
+        print(f"  {'LABEL KEY':30s} {'EVENTS':12s} {'AUTO':6s} {'LOG TYPES':40s}")
+        print("  " + "-" * 90)
+        for lbl in report.active_ingestion_labels[:12]:
+            auto_tag = "YES" if lbl.is_auto_generated else "NO"
+            types_str = ", ".join(lbl.log_types[:4])
+            if len(lbl.log_types) > 4:
+                types_str += f" (+{len(lbl.log_types) - 4} more)"
+            print(f"  {lbl.label_key:30s} {lbl.event_count:12,d} {auto_tag:6s} {types_str:40s}")
+
+        print("\n=== ACTIVE UDM NAMESPACES ===")
+        print(f"  {'NAMESPACE':35s} {'EVENTS':12s} {'RFC1918':8s} {'LOG TYPES':35s}")
+        print("  " + "-" * 90)
+        for ns in report.active_namespaces[:10]:
+            rfc_tag = "YES" if ns.is_network_rfc1918_relevant else "NO"
+            types_str = ", ".join(ns.log_types[:3])
+            if len(ns.log_types) > 3:
+                types_str += f" (+{len(ns.log_types) - 3} more)"
+            print(f"  {ns.namespace:35s} {ns.event_count:12,d} {rfc_tag:8s} {types_str:35s}")
+
+    elif args.ingestion_action == "labels":
+        print(f"\n[CLI] Querying active ingestion labels (lookback={args.days}d)...")
+        labels = engine.analyze_ingestion_labels(lookback_days=args.days)
+        if getattr(args, "json", False):
+            print(json.dumps([l.to_dict() for l in labels], indent=2, default=str))
+            return
+        print(f"\nFound {len(labels)} active ingestion labels:")
+        for l in labels:
+            auto_str = " (auto-generated)" if l.is_auto_generated else ""
+            print(f"  - {l.label_key}: {l.event_count:,} events across {len(l.log_types)} log types{auto_str}")
+
+    elif args.ingestion_action == "namespaces":
+        print(f"\n[CLI] Querying active UDM namespaces (lookback={args.days}d)...")
+        namespaces = engine.analyze_namespaces(lookback_days=args.days)
+        if getattr(args, "json", False):
+            print(json.dumps([n.to_dict() for n in namespaces], indent=2, default=str))
+            return
+        print(f"\nFound {len(namespaces)} active UDM namespaces:")
+        for n in namespaces:
+            rfc_str = " (RFC 1918 network relevant)" if n.is_network_rfc1918_relevant else ""
+            print(f"  - {n.namespace}: {n.event_count:,} events across {len(n.log_types)} log types{rfc_str}")
+
+    elif args.ingestion_action == "rbac-check":
+        print("\n[CLI] Auditing Data RBAC labels against active telemetry tags...")
+        refs = engine.audit_data_rbac_alignment()
+        if getattr(args, "json", False):
+            print(json.dumps([r.to_dict() for r in refs], indent=2, default=str))
+            return
+        print(f"\nAudited {len(refs)} Data Access Labels:")
+        for r in refs:
+            status_symbol = "✓" if r.status == "ACTIVE_MATCH" else "✗"
+            print(f"  [{status_symbol}] {r.display_name} ({r.label_id}) -> {r.status}")
+            if r.extracted_label_keys:
+                print(f"      Referenced Ingestion Labels: {r.extracted_label_keys}")
+            if r.extracted_namespaces:
+                print(f"      Referenced Namespaces: {r.extracted_namespaces}")
+
+
+
+def run_cost_cli(args):
+    engine = SecOpsEngine()
+    if args.cost_action == "analyze":
+        print(f"\n[CLI] Analyzing ingestion cost and FinOps optimization (lookback={args.days}d, tier={args.tier})...")
+        report = engine.analyze_log_costs(
+            lookback_days=args.days,
+            pricing_tier=args.tier,
+            bloat_threshold_bytes=args.bloat_threshold,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(report.to_dict(), indent=2, default=str))
+            return
+
+        print("\n" + "=" * 80)
+        print(" CHRONICLE LOG INGESTION FINOPS & COST OPTIMIZATION REPORT")
+        print("=" * 80)
+        print(f"  Lookback Window          : {report.lookback_window}")
+        print(f"  Total Ingested Events    : {report.total_events:,}")
+        print(f"  Total Ingested Volume    : {report.total_volume_gb:,.2f} GB ({report.total_volume_gib:,.2f} GiB)")
+        print(f"  Monthly Spend (Standard) : ${report.total_projected_monthly_spend_standard:,.2f} / mo")
+        print(f"  Monthly Spend (Enterprise): ${report.total_projected_monthly_spend_enterprise:,.2f} / mo (Selected)")
+        print(f"  Monthly Spend (Ent Plus) : ${report.total_projected_monthly_spend_enterprise_plus:,.2f} / mo")
+        print(f"  Bloated Sources (>2KB)   : {len(report.bloated_sources)}")
+        print(f"  Total Potential Savings  : ${report.total_potential_savings_usd:,.2f} / mo")
+        print("-" * 80)
+
+        print("\n=== TOP INGESTION VOLUME DRIVERS ===")
+        print(f"  {'LOG TYPE':35s} {'EVENTS':12s} {'VOLUME (GB)':14s} {'AVG BYTES/EVT':15s} {'ENTERPRISE $/MO':15s}")
+        print("  " + "-" * 95)
+        for m in report.top_volume_drivers[:10]:
+            bloat_flag = " [BLOATED]" if m.is_bloated else ""
+            print(f"  {m.log_type:35s} {m.event_count:12,d} {m.volume_gb_decimal:14,.2f} {m.avg_event_size_bytes:15,.1f}{bloat_flag} ${m.cost_enterprise:14,.2f}")
+
+        if report.bloated_sources:
+            print(f"\n=== BLOATED LOG SOURCES (> {args.bloat_threshold} bytes/event) ===")
+            print(f"  {'LOG TYPE':35s} {'AVG BYTES':12s} {'EVENTS':12s} {'VOLUME (GB)':12s}")
+            print("  " + "-" * 75)
+            for b in report.bloated_sources[:8]:
+                print(f"  {b.log_type:35s} {b.avg_event_size_bytes:12,.1f} {b.event_count:12,d} {b.volume_gb_decimal:12,.2f}")
+
+        if report.recommendations:
+            print("\n=== FINOPS SAVINGS RECOMMENDATIONS ===")
+            for idx, rec in enumerate(report.recommendations, 1):
+                print(f"  {idx}. [{rec.category}] {rec.title}")
+                print(f"     Target Log Type: {rec.log_type}")
+                print(f"     Projected Monthly Savings: ${rec.potential_monthly_savings_usd:,.2f} / mo ({rec.potential_volume_savings_gb:,.2f} GB/mo)")
+                print(f"     Implementation: {rec.implementation_guidance}")
+                print()
+
+    elif args.cost_action == "latest":
+        latest = engine.get_latest_log_costs(fallback_if_empty=True)
+        if not latest:
+            print("[CLI] No persisted log cost report found in Evidence Fabric.")
+            return
+        if getattr(args, "json", False):
+            print(json.dumps(latest, indent=2, default=str))
+            return
+        print(f"\n=== LATEST LOG COST REPORT ({latest.get('cost_id', 'latest')}) ===")
+        print(f"  Saved At                 : {latest.get('saved_at', '-')}")
+        print(f"  Total Ingested Volume    : {latest.get('total_volume_gb', 0):,.2f} GB")
+        print(f"  Monthly Spend (Enterprise): ${latest.get('total_projected_monthly_spend_enterprise', 0):,.2f} / mo")
+        print(f"  Potential Savings        : ${latest.get('total_potential_savings_usd', 0):,.2f} / mo")
+        print(f"  Recommendations Count    : {len(latest.get('recommendations', []))}")
+
+
 
 
 def run_monitoring_cli(args):
@@ -3441,6 +3764,47 @@ def run_feed_cli(args):
             print(f"Error fetching feed: {e}", file=sys.stderr)
             sys.exit(1)
 
+    elif args.feed_action == "timestamp-audit":
+        days = args.days
+        clear_cache = args.clear_cache
+        print(f"\n[CLI] Auditing Telemetry Timestamp Integrity ({days}-day window, clear_cache={clear_cache})...")
+        try:
+            report = engine.audit_timestamp_integrity(days=days, clear_cache=clear_cache)
+            if getattr(args, "json", False):
+                print(json.dumps(report.to_dict(), indent=2))
+                return
+
+            print(f"\n=== INGESTION TIMESTAMP INTEGRITY & LATENCY AUDIT ({report.days} Days) ===")
+            print(f"  Total Feeds Audited  : {report.total_log_types_audited}")
+            print(f"  Healthy Feeds        : {report.healthy_count}")
+            print(f"  New Anomalies        : {report.new_anomalies_count}")
+            print(f"  Previously Known     : {report.previously_known_count}")
+            print(f"  Resolved Anomalies   : {report.resolved_count}")
+            print(f"  Clock Skews (Δt < 0) : {report.total_skewed_events:,}")
+            print(f"  Severe Delays (>2h)  : {report.total_delayed_events:,}")
+            print()
+            if report.top_skewed_log_types:
+                print("  --- TOP CLOCK SKEW LOG SOURCES (Δt < 0h / NTP Drift) ---")
+                print(f"  {'LOG TYPE':25s} {'TOTAL':12s} {'AVG DELTA':12s} {'Δt < 0h (SKEW)':16s} {'STATE'}")
+                print("  " + "-" * 75)
+                for r in report.top_skewed_log_types[:5]:
+                    print(f"  {r.log_type:25s} {r.total:<12,d} {r.average_difference_minutes:<12.1f} {r.cnt_lt_0_hours:<16,d} {r.progression_state.value}")
+                print()
+            if report.top_delayed_log_types:
+                print("  --- TOP INGESTION DELAY LOG SOURCES (Δt > 2h / Bottlenecks) ---")
+                print(f"  {'LOG TYPE':25s} {'TOTAL':12s} {'AVG DELTA':12s} {'>2h DELAY':16s} {'STATE'}")
+                print("  " + "-" * 75)
+                for r in report.top_delayed_log_types[:5]:
+                    print(f"  {r.log_type:25s} {r.total:<12,d} {r.average_difference_minutes:<12.1f} {r.cnt_gt_2_hours:<16,d} {r.progression_state.value}")
+                print()
+            if report.narrative:
+                print("  --- OPERATIONAL NARRATIVE & ADVISORY ---")
+                print(report.narrative.strip())
+                print()
+        except Exception as e:
+            print(f"Error auditing timestamp integrity: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 def run_pipeline_cli(args):
     engine = SecOpsEngine()
@@ -5646,28 +6010,155 @@ def run_rule_cli(args):
             sys.exit(1)
 
     elif action == "audit":
-        from runbooks.operations.yara_l_rules_audit import (
-            generate_yara_l_rules_audit_report,
-            print_yara_l_rules_audit_console,
-        )
-        print(f"\n[CLI] Running YARA-L detection rules audit (limit={args.limit})...")
+        lookback = getattr(args, "lookback_days", 90)
+        print(f"\n[CLI] Running Unified Detection Repository Audit (lookback_days={lookback})...")
         try:
-            report = generate_yara_l_rules_audit_report(
-                engine=engine,
-                page_size=args.limit,
-                filter_expr=args.filter,
+            report = engine.audit_rules(
+                include_curated=not getattr(args, "no_curated", False),
+                sync_embeddings=not getattr(args, "no_sync", False),
+                lookback_days=lookback,
+                run_conflict_scan=not getattr(args, "no_conflict_scan", False),
+                page_size=getattr(args, "limit", 1000),
             )
             if getattr(args, "json", False):
-                print(json.dumps(report, indent=2, default=str))
+                print(json.dumps(report.to_dict(), indent=2, default=str))
                 return
-            print_yara_l_rules_audit_console(report)
+
+            print(f"\n=== UNIFIED DETECTION REPOSITORY AUDIT REPORT ===")
+            print(f"  Total Rules Scanned   : {report.total_rules_scanned} ({report.customer_rules_count} Customer, {report.curated_rules_count} Curated)")
+            print(f"  Vector Embeddings Sync: {report.embeddings_synced_count} written")
+            print(f"  Healthy Detections    : {report.healthy_count}")
+            print(f"  Silent / Inactive     : {report.silent_decay_count}")
+            print(f"  Execution Failures    : {report.failing_count}")
+            print(f"  Misconfigured Alerting: {report.misconfigured_count}")
+            print(f"  Disabled Rules        : {report.disabled_count}")
+            print(f"  Conflict / Overlaps   : {report.conflict_count}")
+            print(f"  Shadowing Curated     : {report.shadowed_by_curated_count}")
+            print(f"  Total 90d Detections  : {report.total_detections_90d:,}\n")
+
+            if report.findings:
+                alert_findings = [
+                    f for f in report.findings
+                    if (hasattr(f.status, "value") and f.status.value != "HEALTHY")
+                    or f.highest_conflict_cos >= 75.0
+                    or f.shadowed_by_curated_id
+                ]
+                if alert_findings:
+                    print(f"--- ATTENTION REQUIRED ({len(alert_findings)} rules) ---")
+                    print(f"  {'RULE ID':42s} {'STATUS':22s} {'DPS':6s} {'90D DET':8s} {'CONFLICT':10s} {'SHADOWED CURATED'}")
+                    print("  " + "-" * 115)
+                    for f in alert_findings[:40]:
+                        cur_shadow = f.shadowed_by_curated_name[:25] if f.shadowed_by_curated_name else "-"
+                        conf_str = f"{f.highest_conflict_cos:.0f}%" if f.highest_conflict_cos > 0 else "-"
+                        st_val = f.status.value if hasattr(f.status, "value") else str(f.status)
+                        print(f"  {f.rule_id[:40]:42s} {st_val[:20]:22s} {f.dps_score:5.1f} {f.detection_count_90d:8d} {conf_str:10s} {cur_shadow}")
+                        if f.remediation_steps:
+                            for step in f.remediation_steps[:2]:
+                                print(f"    └─ Remediation: {step}")
+                else:
+                    print("  All scanned detection rules are healthy and active.")
+            print()
             if getattr(args, "out", None):
-                with open(args.out, "w", encoding="utf-8") as f:
-                    json.dump(report, f, indent=2, default=str)
-                print(f"[+] Audit report written to {args.out}")
+                with open(args.out, "w", encoding="utf-8") as out_f:
+                    json.dump(report.to_dict(), out_f, indent=2, default=str)
+                print(f"[+] Audit report written to {args.out}\n")
         except Exception as e:
-            print(f"Error executing rules audit: {e}", file=sys.stderr)
+            print(f"Error executing unified rules audit: {e}", file=sys.stderr)
             sys.exit(1)
+
+    elif action == "conflict-audit":
+        print(f"\n[CLI] Auditing rule conflicts and overlaps for '{args.rule}'...")
+        try:
+            res = engine.audit_rule_conflicts(rule_id=args.rule, limit=args.limit)
+            if getattr(args, "json", False):
+                print(json.dumps(res.to_dict(), indent=2, default=str))
+                return
+            print(f"\n=== RULE CONFLICT AUDIT: {res.rule_name} ({res.rule_id}) ===")
+            print(f"  Highest COS Score : {res.highest_cos:.1f} / 100")
+            print(f"  Severity Tier     : {res.severity_tier}")
+            print(f"  Live Deployed     : {res.is_live}")
+            print(f"  Silent Telemetry  : {res.is_silent}")
+            print(f"  Recommendation    : {res.strategic_recommendation}\n")
+            if not res.conflicts:
+                print("  No semantically overlapping rules found.")
+            else:
+                print(f"  {'CANDIDATE SIBLING':40s} {'SIMILARITY':12s} {'CONFLICT TYPE':16s} {'SEV':8s} {'COS':8s}")
+                print("  " + "-" * 90)
+                for p in res.conflicts:
+                    print(f"  {p.similar_rule_name[:38]:40s} {p.similarity_score:12.3f} {p.conflict_type:16s} {p.impact_severity:8s} {p.cos_score:8.1f}")
+                    if p.explanation:
+                        print(f"    ├─ Explanation: {p.explanation}")
+                    if p.consolidation_strategy:
+                        print(f"    └─ Strategy   : {p.consolidation_strategy}")
+            print()
+        except Exception as e:
+            print(f"Error auditing rule conflicts: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "conflict-batch":
+        print(f"\n[CLI] Running batch rule conflict discovery across tenant rules (limit={args.limit})...")
+        try:
+            res = engine.batch_audit_rule_conflicts(limit=args.limit, min_cos=args.min_cos)
+            if getattr(args, "json", False):
+                print(json.dumps(res.to_dict(), indent=2, default=str))
+                return
+            print(f"\n=== BATCH RULE CONFLICT AUDIT REPORT ===")
+            print(f"  Total Rules Scanned   : {res.total_rules_scanned}")
+            print(f"  Total Pairs Evaluated : {res.total_pairs_evaluated}")
+            print(f"  Conflict Breakdown    : {res.conflict_counts}")
+            print(f"  Severity Breakdown    : {res.severity_counts}\n")
+            if not res.highest_cos_rules:
+                print("  No rules exceeded the minimum COS threshold.")
+            else:
+                print(f"  {'RULE ID':35s} {'RULE NAME':35s} {'HIGHEST COS':12s} {'TIER':15s}")
+                print("  " + "-" * 100)
+                for r in res.highest_cos_rules:
+                    print(f"  {r.rule_id[:33]:35s} {r.rule_name[:33]:35s} {r.highest_cos:12.1f} {r.severity_tier:15s}")
+            print()
+        except Exception as e:
+            print(f"Error executing batch rule conflict audit: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "similarity":
+        print(f"\n[CLI] Finding semantically similar rules for '{args.rule}'...")
+        try:
+            res = engine.find_similar_rules(rule_id=args.rule, limit=args.limit)
+            if getattr(args, "json", False):
+                print(json.dumps(res, indent=2, default=str))
+                return
+            print(f"\n=== SIMILAR RULES FOR: {args.rule} ===")
+            if not res:
+                print("  No similar rules found.")
+            else:
+                print(f"  {'RULE ID':35s} {'DISPLAY NAME':35s} {'SIMILARITY':12s}")
+                print("  " + "-" * 85)
+                for r in res:
+                    rid = r.get("rule_id", "-")
+                    name = r.get("rule_name") or r.get("display_name") or "-"
+                    sim = r.get("similarity_score", 0.0)
+                    print(f"  {rid[:33]:35s} {name[:33]:35s} {sim:12.4f}")
+            print()
+        except Exception as e:
+            print(f"Error finding similar rules: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "sync-embeddings":
+        print(f"\n[CLI] Synchronizing rule vector embeddings (batch_size={args.batch_size}, force={args.force})...")
+        try:
+            res = engine.sync_rule_embeddings(batch_size=args.batch_size, force_refresh=args.force)
+            if getattr(args, "json", False):
+                print(json.dumps(res, indent=2, default=str))
+                return
+            print(f"\n=== RULE EMBEDDING SYNCHRONIZATION COMPLETE ===")
+            print(f"  Total Active Rules : {res.get('total_active_rules')}")
+            print(f"  Newly Embedded     : {res.get('embedded_count')}")
+            print(f"  Skipped (Existing) : {res.get('skipped_count')}")
+            print(f"  Batches Committed  : {res.get('batches_written')}")
+            print()
+        except Exception as e:
+            print(f"Error synchronizing rule embeddings: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 
 

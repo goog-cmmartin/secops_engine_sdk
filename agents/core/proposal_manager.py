@@ -48,6 +48,7 @@ class ChangeProposal:
     rejection_reason: Optional[str] = None
     rationale: str = ""
     proposed_diff: str = ""
+    issue_id: Optional[str] = None
     preflight: PreflightProof = field(default_factory=PreflightProof)
     mutation_payload: Dict[str, Any] = field(default_factory=dict)
 
@@ -86,6 +87,7 @@ class ProposalManager:
             "subsystem": proposal.subsystem,
             "target_resource_id": proposal.target_resource_id,
             "action_type": proposal.action_type,
+            "issue_id": proposal.issue_id,
             "status": proposal.status,
             "risk_level": proposal.risk_level,
             "created_at": proposal.created_at,
@@ -148,6 +150,7 @@ class ProposalManager:
             subsystem=frontmatter.get("subsystem", ""),
             target_resource_id=frontmatter.get("target_resource_id", ""),
             action_type=frontmatter.get("action_type", ""),
+            issue_id=frontmatter.get("issue_id"),
             status=frontmatter.get("status", "OPEN"),
             risk_level=frontmatter.get("risk_level", "MEDIUM"),
             created_at=frontmatter.get("created_at", ""),
@@ -239,6 +242,7 @@ class ProposalManager:
         engine: Any,
         merged_by: str = "human-operator",
         inventory_client: Any = None,
+        lifecycle_manager: Any = None,
     ) -> MergeResult:
         """Applies mutation via SecOpsEngine, moves proposal to merged/, and records git commit."""
         open_file = self.open_dir / f"{proposal_id}.md"
@@ -309,6 +313,28 @@ class ProposalManager:
                 except Exception as snap_err:
                     logger.warning("Failed triggering inventory snapshot: %s", snap_err)
 
+            # 6. Optional SOC Lifecycle Integration
+            if proposal.issue_id and lifecycle_manager:
+                try:
+                    from engine.domain import ChangeRecord
+                    change_record = ChangeRecord(
+                        change_id=proposal.id,
+                        issue_id=proposal.issue_id,
+                        proposal_id=proposal.id,
+                        subsystem=proposal.subsystem,
+                        target_resource_id=proposal.target_resource_id,
+                        applied_by=merged_by,
+                        commit_sha=commit_hash or "",
+                        api_response=execution_res if isinstance(execution_res, dict) else {"result": str(execution_res)},
+                    )
+                    lifecycle_manager.apply_change(
+                        issue_id=proposal.issue_id,
+                        change_record=change_record,
+                        commit=False,
+                    )
+                except Exception as lm_err:
+                    logger.warning("Failed recording applied change in lifecycle manager: %s", lm_err)
+
             return MergeResult(
                 proposal_id=proposal_id,
                 success=True,
@@ -332,6 +358,7 @@ class ProposalManager:
         proposal_id: str,
         reason: str,
         rejected_by: str = "human-operator",
+        lifecycle_manager: Any = None,
     ) -> ChangeProposal:
         """Rejects a proposal and moves it to rejected/ directory."""
         open_file = self.open_dir / f"{proposal_id}.md"
@@ -346,6 +373,18 @@ class ProposalManager:
         rejected_file = self.rejected_dir / f"{proposal_id}.md"
         rejected_file.write_text(self._format_markdown(proposal), encoding="utf-8")
         open_file.unlink(missing_ok=True)
+
+        if proposal.issue_id and lifecycle_manager:
+            try:
+                lifecycle_manager.decide_issue(
+                    issue_id=proposal.issue_id,
+                    decision="REJECTED",
+                    approver=rejected_by,
+                    rationale=reason,
+                )
+            except Exception as lm_err:
+                logger.warning("Failed recording proposal rejection in lifecycle manager: %s", lm_err)
+
         return proposal
 
     def _commit_merged_proposal(self, proposal: ChangeProposal) -> Optional[str]:

@@ -174,12 +174,15 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             try:
                 todos = self.evidence_store.list_todos(status="PENDING")
                 for td in todos:
-                    if target_resource_id in td.get("title", "") or target_resource_id in td.get("description", ""):
-                        self.evidence_store.update_todo_status(
-                            todo_id=td["id"],
-                            status="RESOLVED",
-                            resolution=f"Addressed by proposal {proposal.id}: {title}",
-                        )
+                    if target_resource_id in td.get("title", "") or target_resource_id in td.get("description", "") or target_resource_id in td.get("target_resource_id", ""):
+                        tid = td.get("todo_id") or td.get("id")
+                        if tid:
+                            self.evidence_store.update_todo_status(
+                                todo_id=tid,
+                                status="RESOLVED",
+                                proposal_id=proposal.id,
+                                resolution=f"Addressed by proposal {proposal.id}: {title}",
+                            )
             except Exception:
                 pass
 
@@ -233,6 +236,8 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
                 {"name": "Identity Governor", "handle": "@identity-governor", "role": "IAM & Chronicle Access Governance", "subsystem": "identity_governance"},
                 {"name": "GCP Telemetry Agent", "handle": "@gcp-telemetry-agent", "role": "Google Cloud Logging & Monitoring Telemetry Specialist", "subsystem": "gcp_telemetry"},
                 {"name": "Tenant Posture & Configuration Governor", "handle": "@tenant-posture-agent", "role": "Google SecOps Tenant Posture, Baseline & Configuration Governance Specialist", "subsystem": "configuration_governance"},
+                {"name": "SOAR Playbook Decay Agent", "handle": "@playbook-decay-agent", "role": "SOAR Playbook Inventory, Resilience Scoring & Decay Specialist", "subsystem": "soar_playbooks"},
+                {"name": "Timestamp Integrity Agent", "handle": "@timestamp-integrity-agent", "role": "SecOps Telemetry Hygiene & Clock Drift Specialist", "subsystem": "ingestion"},
             ]
         self.executed_tool_calls.append({
             "agent": self.handle,
@@ -492,12 +497,18 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
 
         samples = []
         for s in diag.diagnostics:
+            raw_full = getattr(s, "raw_log", "") or getattr(s, "raw_log_preview", "")
+            raw_preview = getattr(s, "raw_log_preview", "") or raw_full[:300]
+            ts = s.retrieved_at.isoformat() if hasattr(getattr(s, "retrieved_at", None), "isoformat") else str(getattr(s, "retrieved_at", ""))
             samples.append({
-                "raw_log": s.raw_log,
-                "timestamp": s.timestamp,
-                "syntax_error": s.syntax_error,
-                "parsed_event_count": s.parsed_event_count,
-                "error_details": s.error_details,
+                "log_id": getattr(s, "log_id", ""),
+                "raw_log": raw_full,
+                "raw_log_preview": raw_preview,
+                "timestamp": ts,
+                "syntax_error": getattr(s, "error_message", ""),
+                "error_category": getattr(s, "error_category", ""),
+                "parsed_event_count": len(s.raw.get("parsed_events", [])) if isinstance(getattr(s, "raw", None), dict) else 0,
+                "error_details": getattr(s, "error_message", "") or getattr(s, "error_category", ""),
             })
 
         widget = {
@@ -752,13 +763,16 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             try:
                 pending_todos = self.evidence_store.list_todos(status="PENDING")
                 for td in pending_todos:
-                    t_desc = td.get("description", "") + td.get("title", "")
+                    t_desc = f"{td.get('description', '')} {td.get('title', '')} {td.get('target_resource_id', '')}"
                     if proposal_id in t_desc or proposal.target_resource_id in t_desc:
-                        self.evidence_store.update_todo_status(
-                            todo_id=td["id"],
-                            status="RESOLVED",
-                            resolution=f"Empirically verified by {self.handle}: {proposal.preflight.replay_summary}",
-                        )
+                        tid = td.get("todo_id") or td.get("id")
+                        if tid:
+                            self.evidence_store.update_todo_status(
+                                todo_id=tid,
+                                status="RESOLVED",
+                                proposal_id=proposal.id,
+                                resolution=f"Empirically verified by {self.handle}: {proposal.preflight.replay_summary}",
+                            )
             except Exception:
                 pass
 
@@ -1094,11 +1108,23 @@ from engine.workflows.rule_decay import (
         # 1. Fetch 90-day detection telemetry
         telemetry_map = self.engine.get_rule_detection_counts(lookback_days=lookback_days)
 
-        # 2. List rules
+        # 2. Fetch rule deployments for live status and archive filtering
+        deployment_map = {}
+        try:
+            deployments_res = self.engine.list_rule_deployments(page_size=1000)
+            raw_deps = getattr(deployments_res, "deployments", []) or []
+            for d in raw_deps:
+                d_id = getattr(d, "rule_id", "") or (d.name.split("/")[-2] if hasattr(d, "name") and "/" in d.name else "")
+                if d_id:
+                    deployment_map[d_id] = d
+        except Exception as dep_err:
+            pass
+
+        # 3. List rules
         rules_res = self.engine.list_rules(page_size=100, view="FULL")
         rules = getattr(rules_res, "rules", []) or []
 
-        # 3. Process rules, compute DPS, and persist to Evidence Fabric
+        # 4. Process rules, compute DPS, and persist to Evidence Fabric
         candidates = []
         texts_to_embed = []
         rule_ids_to_embed = []
@@ -1117,6 +1143,28 @@ from engine.workflows.rule_decay import (
                 raw_name = getattr(r, "name", "") or (r.get("name") if isinstance(r, dict) else "")
                 if raw_name:
                     r_id = raw_name.split("/")[-1].split("@")[0]
+
+            dep = deployment_map.get(r_id)
+            is_archived = False
+            if dep:
+                is_archived = bool(getattr(dep, "archived", False) or (dep.raw.get("archived", False) if hasattr(dep, "raw") else False))
+            if not is_archived:
+                is_archived = bool(getattr(r, "archived", False) or (r.get("archived", False) if isinstance(r, dict) else False))
+
+            if is_archived:
+                continue
+
+            # Accurate is_live status
+            is_live = False
+            if dep:
+                is_live = bool(
+                    getattr(dep, "enabled", False)
+                    or getattr(dep, "alerting", False)
+                    or getattr(dep, "run_frequency", "") == "LIVE"
+                    or getattr(dep, "execution_state", "") == "ACTIVE"
+                )
+            else:
+                is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
 
             r_name = (
                 getattr(r, "display_name", "")
@@ -1143,6 +1191,7 @@ from engine.workflows.rule_decay import (
                 detection_telemetry_90d=t_data,
                 syntax_verified=syntax_verified,
                 compiler_diagnostics=comp_diags,
+                is_live=is_live,
             )
 
             if "BROKEN_COMPILATION" in flags:
@@ -1152,7 +1201,6 @@ from engine.workflows.rule_decay import (
             if "STALE" in flags:
                 stale_count += 1
 
-            is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
             det_count = t_data.get("count", 0)
 
             state_doc = {
@@ -1191,6 +1239,31 @@ from engine.workflows.rule_decay import (
         candidates.sort(key=lambda x: x["dps_score"], reverse=True)
         avg_dps = round(sum(c["dps_score"] for c in candidates) / len(candidates), 1) if candidates else 0.0
 
+        # Deduplicate top_candidates by display name so top slots highlight distinct rules
+        seen_names = set()
+        top_candidates = []
+        for c in candidates:
+            norm_name = (c.get("rule_name") or "").strip().lower()
+            if norm_name and norm_name not in seen_names:
+                seen_names.add(norm_name)
+                top_candidates.append(c)
+            elif not norm_name:
+                top_candidates.append(c)
+            if len(top_candidates) >= 5:
+                break
+
+        seen_ret_names = set()
+        top_return_candidates = []
+        for c in candidates:
+            norm_name = (c.get("rule_name") or "").strip().lower()
+            if norm_name and norm_name not in seen_ret_names:
+                seen_ret_names.add(norm_name)
+                top_return_candidates.append(c)
+            elif not norm_name:
+                top_return_candidates.append(c)
+            if len(top_return_candidates) >= 10:
+                break
+
         widget = {
             "type": "decay_sync_card",
             "total_rules": len(candidates),
@@ -1198,7 +1271,7 @@ from engine.workflows.rule_decay import (
             "silent_count": silent_count,
             "stale_count": stale_count,
             "average_dps": avg_dps,
-            "top_candidates": candidates[:5],
+            "top_candidates": top_candidates,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.last_widget = widget
@@ -1218,7 +1291,7 @@ from engine.workflows.rule_decay import (
             "silent_count": silent_count,
             "stale_count": stale_count,
             "average_dps": avg_dps,
-            "top_candidates": candidates[:10],
+            "top_candidates": top_return_candidates,
             "widget": widget,
         }
 
@@ -2058,12 +2131,18 @@ from agents.core.proposal_manager import PreflightProof
 
         samples = []
         for s in diag.diagnostics:
+            raw_full = getattr(s, "raw_log", "") or getattr(s, "raw_log_preview", "")
+            raw_preview = getattr(s, "raw_log_preview", "") or raw_full[:300]
+            ts = s.retrieved_at.isoformat() if hasattr(getattr(s, "retrieved_at", None), "isoformat") else str(getattr(s, "retrieved_at", ""))
             samples.append({
-                "raw_log": s.raw_log,
-                "timestamp": s.timestamp,
-                "syntax_error": s.syntax_error,
-                "parsed_event_count": s.parsed_event_count,
-                "error_details": s.error_details,
+                "log_id": getattr(s, "log_id", ""),
+                "raw_log": raw_full,
+                "raw_log_preview": raw_preview,
+                "timestamp": ts,
+                "syntax_error": getattr(s, "error_message", ""),
+                "error_category": getattr(s, "error_category", ""),
+                "parsed_event_count": len(s.raw.get("parsed_events", [])) if isinstance(getattr(s, "raw", None), dict) else 0,
+                "error_details": getattr(s, "error_message", "") or getattr(s, "error_category", ""),
             })
 
         widget = {
@@ -2105,12 +2184,23 @@ from agents.core.proposal_manager import PreflightProof
             parser_cbn=parser_cbn,
         )
 
+        first_entry = res.entries[0] if (hasattr(res, "entries") and res.entries) else None
+        is_success = getattr(first_entry, "is_success", getattr(res, "success_count", 0) > 0 if hasattr(res, "success_count") else False)
+        all_parsed = []
+        if hasattr(res, "entries"):
+            for e in res.entries:
+                all_parsed.extend(getattr(e, "parsed_events", []))
+        elif hasattr(res, "parsed_events") and res.parsed_events:
+            all_parsed = res.parsed_events
+
+        err_msg = getattr(first_entry, "error_message", None) if first_entry else getattr(res, "error_message", None)
+
         return {
-            "status": "SUCCESS" if res.success else "FAILED",
-            "success": res.success,
-            "parsed_events_count": len(res.parsed_events) if res.parsed_events else 0,
-            "parsed_events": res.parsed_events,
-            "error_message": res.error_message,
+            "status": "SUCCESS" if is_success else "FAILED",
+            "success": is_success,
+            "parsed_events_count": len(all_parsed),
+            "parsed_events": all_parsed,
+            "error_message": err_msg,
         }
 
     def submit_parser_proposal(
@@ -2120,6 +2210,7 @@ from agents.core.proposal_manager import PreflightProof
         rationale: str,
         proposed_diff: str,
         patched_cbn_snippet: str,
+        issue_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Submits a formal Human-In-The-Loop proposal to Gas Town .proposals/ for CBN parser or extension patch."""
         preflight = PreflightProof(
@@ -2138,6 +2229,7 @@ from agents.core.proposal_manager import PreflightProof
                 "cbn_snippet": patched_cbn_snippet,
             },
             preflight=preflight,
+            issue_id=issue_id,
         )
 
         return {
@@ -2145,6 +2237,7 @@ from agents.core.proposal_manager import PreflightProof
             "proposal_id": proposal.id,
             "title": proposal.title,
             "target_resource_id": log_type,
+            "issue_id": issue_id,
         }
 '''
 
@@ -2806,6 +2899,384 @@ from agents.core.evidence_store import compute_tenant_subsystem_hashes, diff_ten
         return results
 '''
 
+    elif key == "playbook_decay":
+        custom_imports = """from datetime import datetime, timezone
+import json
+import logging
+from typing import Any, Dict, List, Optional
+"""
+        custom_binds = (
+            "        self._tools[\"audit_playbook_decay\"] = self.audit_playbook_decay\n"
+            "        self._tools[\"get_playbook_decay_report\"] = self.get_playbook_decay_report\n"
+            "        self._tools[\"list_playbook_reports\"] = self.list_playbook_reports\n"
+        )
+        custom_methods = '''
+    def audit_playbook_decay(
+        self,
+        workflow_identifier: Optional[str] = None,
+        category: Optional[str] = None,
+        lookback_days: int = 30,
+        generate_brief: bool = True,
+        persist: bool = True,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day telemetry, and decay.
+
+        Args:
+            workflow_identifier: Optional specific playbook UUID to audit.
+            category: Optional category filter.
+            lookback_days: Chronicle telemetry evaluation window in days (default: 30).
+            generate_brief: Whether to synthesize the GenAI 4-part architectural brief.
+            persist: Whether to persist reports to Evidence Fabric Firestore soar_playbooks.
+            limit: Maximum playbooks to audit when scanning catalog (default: 20).
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+
+        report = self.engine.audit_playbook_decay(
+            workflow_identifier=workflow_identifier,
+            category=category,
+            lookback_days=lookback_days,
+            generate_brief=generate_brief,
+            persist=persist,
+            limit=limit,
+        )
+
+        self.executed_tool_calls.append({
+            "agent": self.handle,
+            "tool": "audit_playbook_decay",
+            "capability_id": "playbook.decay_audit",
+            "arguments": {
+                "workflow_identifier": workflow_identifier,
+                "category": category,
+                "lookback_days": lookback_days,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        return {
+            "status": "SUCCESS",
+            "summary": report.get("summary", {}),
+            "playbooks": report.get("playbooks", []),
+            "widget": {
+                "type": "playbook_health_card",
+                "title": "SOAR Playbook Resilience & Decay Report",
+                "summary": report.get("summary", {}),
+                "playbooks": report.get("playbooks", []),
+            },
+        }
+
+    def get_playbook_decay_report(self, workflow_identifier: str) -> Dict[str, Any]:
+        """Retrieves a persistent playbook analysis report from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        doc = self.evidence_store.get_playbook_analysis(workflow_identifier)
+        if not doc:
+            return {"status": "NOT_FOUND", "message": f"No audit report found for playbook {workflow_identifier}"}
+        return {"status": "SUCCESS", "report": doc}
+
+    def list_playbook_reports(self, limit: int = 100) -> Dict[str, Any]:
+        """Lists recent playbook decay reports from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        reports = self.evidence_store.list_playbook_analyses(limit=limit)
+        return {"status": "SUCCESS", "count": len(reports), "reports": reports}
+'''
+    elif key in ("timestamp_integrity", "timestamp_integrity_agent"):
+        custom_imports = """from datetime import datetime, timezone
+import json
+import logging
+from typing import Any, Dict, List, Optional
+"""
+        custom_binds = (
+            "        self._tools[\"audit_timestamp_integrity\"] = self.audit_timestamp_integrity\n"
+            "        self._tools[\"get_timestamp_integrity_report\"] = self.get_timestamp_integrity_report\n"
+            "        self._tools[\"list_timestamp_integrity_history\"] = self.list_timestamp_integrity_history\n"
+        )
+        custom_methods = '''
+    def audit_timestamp_integrity(
+        self,
+        days: int = 7,
+        clear_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """Audits telemetry timestamp deltas, clock skews, and pipeline latency.
+
+        Args:
+            days: Telemetry lookback window in days (default: 7).
+            clear_cache: Whether to bypass cache for live telemetry freshness.
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+
+        report = self.engine.audit_timestamp_integrity(
+            days=days,
+            clear_cache=clear_cache,
+        )
+
+        self.executed_tool_calls.append({
+            "agent": self.handle,
+            "tool": "audit_timestamp_integrity",
+            "capability_id": "feed.timestamp_integrity_audit",
+            "arguments": {"days": days, "clear_cache": clear_cache},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        widget = {
+            "type": "timestamp_integrity_card",
+            "title": "Ingestion Timestamp Integrity & Latency Audit",
+            "days": report.days,
+            "summary": {
+                "total_log_types": report.total_log_types_audited,
+                "healthy_count": report.healthy_count,
+                "new_anomalies_count": report.new_anomalies_count,
+                "previously_known_count": report.previously_known_count,
+                "resolved_count": report.resolved_count,
+                "total_skewed_events": report.total_skewed_events,
+                "total_delayed_events": report.total_delayed_events,
+            },
+            "comparative_findings": report.comparative_findings,
+            "top_delayed": [lt.to_dict() for lt in report.top_delayed_log_types[:5]],
+            "top_skewed": [lt.to_dict() for lt in report.top_skewed_log_types[:5]],
+            "narrative": report.narrative,
+        }
+        tracking = None
+        if self.evidence_store:
+            skewed_events = report.total_skewed_events
+            new_anomalies = report.new_anomalies_count
+            todo_id = "todo_timestamp_integrity_active"
+            if skewed_events > 0 or new_anomalies > 0:
+                task = {
+                    "todo_id": todo_id,
+                    "title": f"Investigate {skewed_events:,} Future Logs & {new_anomalies} Telemetry Anomalies",
+                    "target_agent": "@timestamp-integrity-agent",
+                    "target_resource_id": "telemetry",
+                    "action_type": "telemetry_remediation",
+                    "stream": "ingestion",
+                    "topic": "timestamp-integrity",
+                    "priority": "HIGH" if skewed_events > 0 else "MEDIUM",
+                    "status": "PENDING",
+                    "action_prompt": "@timestamp-integrity-agent audit",
+                    "rationale": f"Timestamp integrity audit identified {skewed_events:,} clock-skewed events (Δt < 0) and {new_anomalies} new telemetry delay anomalies.",
+                }
+                upserted_task, is_new = self.evidence_store.upsert_todo(todo_id, task)
+                tracking = {
+                    "todo_id": todo_id,
+                    "is_new": is_new,
+                    "sighting_count": upserted_task.get("sighting_count", 1),
+                    "priority": upserted_task.get("priority", "MEDIUM"),
+                    "status": upserted_task.get("status", "PENDING"),
+                }
+            elif skewed_events == 0 and new_anomalies == 0:
+                resolved = self.evidence_store.resolve_todo(
+                    todo_id,
+                    reason="Timestamp integrity audit confirmed 0 clock-skewed events and 0 latency anomalies."
+                )
+                if resolved:
+                    tracking = {
+                        "todo_id": todo_id,
+                        "status": "RESOLVED",
+                        "auto_resolved": True,
+                    }
+
+        self.last_tracking = tracking
+        widget["tracking"] = tracking
+        self.last_widget = widget
+
+        return {
+            "status": "SUCCESS",
+            "timestamp": report.timestamp,
+            "days": report.days,
+            "summary": {
+                "total_log_types": report.total_log_types_audited,
+                "healthy_count": report.healthy_count,
+                "new_anomalies_count": report.new_anomalies_count,
+                "previously_known_count": report.previously_known_count,
+                "resolved_count": report.resolved_count,
+                "total_skewed_events": report.total_skewed_events,
+                "total_delayed_events": report.total_delayed_events,
+            },
+            "comparative_findings": report.comparative_findings,
+            "log_types": [lt.to_dict() for lt in report.log_types],
+            "top_delayed_log_types": [lt.to_dict() for lt in report.top_delayed_log_types],
+            "top_skewed_log_types": [lt.to_dict() for lt in report.top_skewed_log_types],
+            "narrative": report.narrative,
+            "widget": widget,
+            "tracking": tracking,
+        }
+
+    def get_timestamp_integrity_report(self) -> Dict[str, Any]:
+        """Retrieves the latest stored timestamp integrity baseline from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        doc = self.evidence_store.get_latest_timestamp_integrity()
+        if not doc:
+            return {"status": "NOT_FOUND", "message": "No baseline timestamp integrity report found"}
+        return {"status": "SUCCESS", "report": doc}
+
+    def list_timestamp_integrity_history(self, limit: int = 50) -> Dict[str, Any]:
+        """Lists historical timestamp integrity snapshots from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        history = self.evidence_store.list_timestamp_integrity_history(limit=limit)
+        return {"status": "SUCCESS", "count": len(history), "history": history}
+'''
+
+    elif key in ("rule_conflict", "rule_conflict_agent"):
+        custom_imports = """from datetime import datetime, timezone
+import json
+import logging
+from typing import Any, Dict, List, Optional
+"""
+        custom_binds = (
+            "        self._tools[\"audit_rule_conflicts\"] = self.audit_rule_conflicts\n"
+            "        self._tools[\"batch_audit_rule_conflicts\"] = self.batch_audit_rule_conflicts\n"
+            "        self._tools[\"find_similar_rules\"] = self.find_similar_rules\n"
+            "        self._tools[\"sync_rule_embeddings\"] = self.sync_rule_embeddings\n"
+            "        self._tools[\"get_stored_rule_conflict\"] = self.get_stored_rule_conflict\n"
+            "        self._tools[\"list_stored_rule_conflicts\"] = self.list_stored_rule_conflicts\n"
+        )
+        custom_methods = '''
+    def audit_rule_conflicts(
+        self,
+        rule_id: str,
+        limit: int = 6,
+    ) -> Dict[str, Any]:
+        """Audits detection rule for semantic overlaps, contradictions, redundancies, and computes COS (0-100).
+
+        Args:
+            rule_id: Target rule ID (e.g. 'ru_6cb5b1fe-45a7-47b2-bd74-323e20ec4e31') or resource name.
+            limit: Maximum candidate similar rules to evaluate (default: 6).
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+
+        report = self.engine.audit_rule_conflicts(rule_id=rule_id, limit=limit)
+
+        self.executed_tool_calls.append({
+            "agent": self.handle,
+            "tool": "audit_rule_conflicts",
+            "capability_id": "rule.conflict.audit",
+            "arguments": {"rule_id": rule_id, "limit": limit},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        widget = {
+            "type": "rule_conflict_card",
+            "title": f"Rule Conflict Audit: {report.rule_name}",
+            "rule_id": report.rule_id,
+            "rule_name": report.rule_name,
+            "highest_cos": report.highest_cos,
+            "severity_tier": report.severity_tier,
+            "is_live": report.is_live,
+            "is_silent": report.is_silent,
+            "strategic_recommendation": report.strategic_recommendation,
+            "conflicts": [c.to_dict() for c in report.conflicts],
+        }
+        self.last_widget = widget
+
+        return {
+            "status": "SUCCESS",
+            "rule_id": report.rule_id,
+            "rule_name": report.rule_name,
+            "highest_cos": report.highest_cos,
+            "severity_tier": report.severity_tier,
+            "is_live": report.is_live,
+            "is_silent": report.is_silent,
+            "strategic_recommendation": report.strategic_recommendation,
+            "conflicts": [c.to_dict() for c in report.conflicts],
+            "widget": widget,
+        }
+
+    def batch_audit_rule_conflicts(
+        self,
+        limit: int = 50,
+        batch_size: int = 10,
+        min_cos: float = 45.0,
+    ) -> Dict[str, Any]:
+        """Runs batch rule conflict and overlap discovery across tenant rules.
+
+        Args:
+            limit: Maximum active rules to scan (default: 50).
+            batch_size: Batch size for chunked evaluation (default: 10).
+            min_cos: Minimum COS score to flag in summary (default: 45.0).
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+
+        report = self.engine.batch_audit_rule_conflicts(limit=limit, batch_size=batch_size, min_cos=min_cos)
+
+        self.executed_tool_calls.append({
+            "agent": self.handle,
+            "tool": "batch_audit_rule_conflicts",
+            "capability_id": "rule.conflict.batch_audit",
+            "arguments": {"limit": limit, "batch_size": batch_size, "min_cos": min_cos},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        widget = {
+            "type": "rule_conflict_batch_card",
+            "title": "Tenant Detection Rule Conflict Audit",
+            "total_rules_scanned": report.total_rules_scanned,
+            "total_pairs_evaluated": report.total_pairs_evaluated,
+            "conflict_counts": report.conflict_counts,
+            "severity_counts": report.severity_counts,
+            "highest_cos_rules": [r.to_dict() for r in report.highest_cos_rules],
+        }
+        self.last_widget = widget
+
+        return {
+            "status": "SUCCESS",
+            "total_rules_scanned": report.total_rules_scanned,
+            "total_pairs_evaluated": report.total_pairs_evaluated,
+            "conflict_counts": report.conflict_counts,
+            "severity_counts": report.severity_counts,
+            "highest_cos_rules": [r.to_dict() for r in report.highest_cos_rules],
+            "widget": widget,
+        }
+
+    def find_similar_rules(self, rule_id: str, limit: int = 6) -> Dict[str, Any]:
+        """Finds candidate overlapping or conflicting rules via vector similarity search.
+
+        Args:
+            rule_id: Target rule ID or resource name.
+            limit: Maximum candidate rules to return (default: 6).
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+        results = self.engine.find_similar_rules(rule_id=rule_id, limit=limit)
+        return {"status": "SUCCESS", "count": len(results), "rules": results}
+
+    def sync_rule_embeddings(self, batch_size: int = 50, force: bool = False) -> Dict[str, Any]:
+        """Batch computes and synchronizes vector embeddings for all active tenant rules.
+
+        Args:
+            batch_size: Batch chunk size (default: 50).
+            force: Whether to force refresh existing embeddings.
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+        res = self.engine.sync_rule_embeddings(batch_size=batch_size, force_refresh=force)
+        return {"status": "SUCCESS", **res}
+
+    def get_stored_rule_conflict(self, rule_id: str) -> Dict[str, Any]:
+        """Retrieves a previously stored conflict audit record from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        doc = self.evidence_store.get_rule_conflict(rule_id)
+        if not doc:
+            return {"status": "NOT_FOUND", "message": f"No conflict audit record found for rule {rule_id}"}
+        return {"status": "SUCCESS", "report": doc}
+
+    def list_stored_rule_conflicts(self, min_cos: float = 0.0, limit: int = 50) -> Dict[str, Any]:
+        """Lists historical rule conflict audit records from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        records = self.evidence_store.list_rule_conflicts(min_cos=min_cos, limit=limit)
+        return {"status": "SUCCESS", "count": len(records), "records": records}
+'''
+
+
+
 
     return f'''"""Generated Google ADK 2 Agent: {manifest["name"]}.
 
@@ -2833,6 +3304,8 @@ class {class_name}(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name={manifest["name"]!r},
@@ -2848,6 +3321,8 @@ class {class_name}(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided
@@ -2871,7 +3346,7 @@ def generate_init_module(manifests: List[Dict[str, Any]]) -> str:
         class_name = "".join(part.capitalize() for part in key.split("_")) + "Agent"
         imports.append(f"from agents.generated.{key} import {class_name}")
         classes.append(class_name)
-        fleet_entries.append(f'        "{m["handle"]}": {class_name}(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store),')
+        fleet_entries.append(f'        "{m["handle"]}": {class_name}(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),')
 
     imports_code = "\n".join(imports)
     fleet_code = "\n".join(fleet_entries)
@@ -2898,6 +3373,8 @@ def create_agent_fleet(
     proposal_manager: Optional[ProposalManager] = None,
     inventory_client: Any = None,
     evidence_store: Optional[EvidenceFabricStore] = None,
+    work_queue: Optional[Any] = None,
+    lifecycle_manager: Optional[Any] = None,
 ) -> Dict[str, BaseSecOpsAdkAgent]:
     """Instantiates the complete registered fleet of SecOps ADK 2 agents."""
     fleet: Dict[str, BaseSecOpsAdkAgent] = {{

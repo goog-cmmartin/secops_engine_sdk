@@ -1,38 +1,52 @@
 ---
 id: feature.siem.curated_detections
-title: "Google Curated Detections & Rule Tuning"
+title: Google Curated Detections & Rule Tuning
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - curated_detections.search_rulesets
-  - curated_detections.get_ruleset
-  - curated_detections.get_rule
-  - curated_detections.metrics
-  - curated_detections.set_deployment
-  - curated_detections.audit_health
-  - curated_detections.refinements.list
-  - curated_detections.refinements.test
-  - curated_detections.refinements.create
-  - curated_detections.refinements.delete
-  - curated_detections.tuning.top_noisy_rules
-  - curated_detections.tuning.entity_cardinality
-  - curated_detections.tuning.case_history
-  - curated_detections.tuning.diagnose
+- curated_detections.search_rulesets
+- curated_detections.get_ruleset
+- curated_detections.get_rule
+- curated_detections.metrics
+- curated_detections.set_deployment
+- curated_detections.audit_health
+- curated_detections.refinements.list
+- curated_detections.refinements.test
+- curated_detections.refinements.create
+- curated_detections.refinements.delete
+- curated_detections.tuning.top_noisy_rules
+- curated_detections.tuning.entity_cardinality
+- curated_detections.tuning.case_history
+- curated_detections.tuning.diagnose
 mcp_tools:
-  - analyze_entity_cardinality
-  - audit_curated_detections_health
-  - create_findings_refinement
-  - cross_reference_rule_cases
-  - delete_findings_refinement
-  - find_top_noisy_rules
-  - get_curated_detection_metrics
-  - get_curated_rule
-  - get_curated_ruleset
-  - list_findings_refinements
-  - search_curated_rulesets
-  - set_curated_ruleset_deployment
-  - test_findings_refinement
-  - tune_detection
+- analyze_entity_cardinality
+- audit_curated_detections_health
+- create_findings_refinement
+- cross_reference_rule_cases
+- delete_findings_refinement
+- find_top_noisy_rules
+- get_curated_detection_metrics
+- get_curated_rule
+- get_curated_ruleset
+- list_findings_refinements
+- search_curated_rulesets
+- set_curated_ruleset_deployment
+- test_findings_refinement
+- tune_detection
+status: stable
+description: Google Curated Detections & Rule Tuning (feature reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Google Curated Detections & Rule Tuning

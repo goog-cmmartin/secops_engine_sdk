@@ -1,20 +1,33 @@
 ---
 id: feature.siem.data_rbac
-title: "SIEM Data RBAC & Scope Permissions"
+title: SIEM Data RBAC & Scope Permissions
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - data_rbac.scope.search
-  - data_rbac.scope.get
-  - data_rbac.label.search
-  - data_rbac.label.get
-  - data_rbac.environment.search
+- data_rbac.scope.search
+- data_rbac.scope.get
+- data_rbac.label.search
+- data_rbac.label.get
+- data_rbac.environment.search
 mcp_tools:
-  - get_data_access_label
-  - get_data_access_scope
-  - search_data_access_labels
-  - search_data_access_scopes
-  - search_environment_scopes
+- get_data_access_label
+- get_data_access_scope
+- search_data_access_labels
+- search_data_access_scopes
+- search_environment_scopes
+status: stable
+description: SIEM Data RBAC & Scope Permissions (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SIEM Data RBAC & Scope Permissions

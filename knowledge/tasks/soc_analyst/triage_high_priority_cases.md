@@ -1,23 +1,37 @@
 ---
 id: task.soc_analyst.triage_high_priority_cases
-title: "Triage High-Priority Cases and Monitor Playbook Execution"
+title: Triage High-Priority Cases and Monitor Playbook Execution
 type: task
 persona: persona.soc_analyst
 trigger:
-  - scheduled_daily
-  - incident_triggered
+- scheduled_daily
+- incident_triggered
 capabilities_used:
-  - case.search
-  - case.triage
-  - playbook.audit_health
+- case.search
+- case.triage
+- playbook.audit_health
 related_concepts:
-  - concept.soar_case_lifecycle
+- concept.soar_case_lifecycle
 related_features:
-  - feature.soar.case_management
-  - feature.soar.playbooks
+- feature.soar.case_management
+- feature.soar.playbooks
 evaluation_rules:
   sla_warning_time_minutes: 30
   max_failed_playbook_runs: 0
+status: stable
+description: Triage High-Priority Cases and Monitor Playbook Execution (task reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Triage High-Priority Cases and Monitor Playbook Execution

@@ -206,5 +206,37 @@
     "assertions": {
       "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
     }
+  },
+  {
+    "eval_id": "eval-adk-routing-10",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "Can you check if our ingestion labels and UDM namespaces are aligned with Data RBAC?",
+    "expected_behavior": "SecOps Dispatcher must route ingestion labels, namespaces, and Data RBAC tagging to @namespace-label-agent.",
+    "assertions": {
+      "target_agent": "@namespace-label-agent",
+      "prompt_contains_routing": "ingestion labels, UDM namespaces, default untagged telemetry, RFC 1918 overlapping IP collisions, or Data RBAC tagging alignment: recommend/delegate to `@namespace-label-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-ambiguity-05",
+    "category": "ambiguity_guardrails",
+    "agent_handle": "@namespace-label-agent",
+    "input_prompt": "Audit our telemetry labels",
+    "expected_behavior": "Prompt specifies to default to 7 days if lookback window is not specified, or ask for clarification before guessing.",
+    "assertions": {
+      "forbid_id_guessing": true,
+      "prompt_contains_directive": "ask for clarification before guessing"
+    }
+  },
+  {
+    "eval_id": "eval-adk-formatting-05",
+    "category": "formatting_constraints",
+    "agent_handle": "@namespace-label-agent",
+    "input_prompt": "Verify prompt conciseness rules for namespace and label responses",
+    "expected_behavior": "Prompt enforces conciseness constraints with maximum 3 bullet points executive summary.",
+    "assertions": {
+      "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
+    }
   }
 ]

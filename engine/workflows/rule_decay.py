@@ -90,6 +90,7 @@ def calculate_decay_score(
     unpopulated_fields: Optional[List[str]] = None,
     syntax_verified: bool = True,
     compiler_diagnostics: Optional[List[str]] = None,
+    is_live: Optional[bool] = None,
 ) -> Tuple[int, List[str], str, int]:
     """Computes the Decay Prioritization Score (DPS: 0-100) and operational classification.
 
@@ -107,6 +108,7 @@ def calculate_decay_score(
         unpopulated_fields: List of UDM fields in the rule with 0 observed events in telemetry.
         syntax_verified: Whether the rule text passed live Chronicle compilation.
         compiler_diagnostics: Optional list of compiler diagnostic messages.
+        is_live: Optional explicit boolean flag indicating if rule is live/enabled in production.
 
     Returns:
         Tuple of (dps_score, decay_flags, recommendation, days_stale).
@@ -128,13 +130,15 @@ def calculate_decay_score(
         flags.append("BROKEN_COMPILATION")
 
     # 2. Operational / Live status check
-    is_live = False
-    if hasattr(rule_detail, "live_mode_enabled"):
-        is_live = bool(rule_detail.live_mode_enabled)
-    elif hasattr(rule_detail, "deployment_state"):
-        is_live = str(rule_detail.deployment_state).upper() in ("LIVE", "ENABLED")
-    elif isinstance(rule_detail, dict):
-        is_live = bool(rule_detail.get("live_mode_enabled") or rule_detail.get("liveModeEnabled") or rule_detail.get("deployment_state") == "LIVE")
+    if is_live is None:
+        if hasattr(rule_detail, "live_mode_enabled"):
+            is_live = bool(rule_detail.live_mode_enabled)
+        elif hasattr(rule_detail, "deployment_state"):
+            is_live = str(rule_detail.deployment_state).upper() in ("LIVE", "ENABLED")
+        elif isinstance(rule_detail, dict):
+            is_live = bool(rule_detail.get("live_mode_enabled") or rule_detail.get("liveModeEnabled") or rule_detail.get("deployment_state") == "LIVE")
+        else:
+            is_live = False
 
     operational_weight = 30 if is_live else 0
 
@@ -422,6 +426,27 @@ class AuditRuleDecayWorkflow:
         telemetry_wf = QueryRuleDetectionCountsWorkflow(self.adapter)
         telemetry_map = telemetry_wf.execute(lookback_days=lookback_days)
 
+        deployment_map: Dict[str, Any] = {}
+        if not rule_id:
+            try:
+                deployments_res = self.adapter.list_rule_deployments(page_size=1000)
+                raw_deps = deployments_res.get("ruleDeployments", []) if isinstance(deployments_res, dict) else getattr(deployments_res, "deployments", [])
+                for d in raw_deps:
+                    d_name = getattr(d, "name", "") or (d.get("name", "") if isinstance(d, dict) else "")
+                    parts = d_name.split("/")
+                    if len(parts) >= 2 and parts[-1] == "deployment":
+                        deployment_map[parts[-2]] = d
+                    elif d_name:
+                        deployment_map[d_name.split("/")[-1]] = d
+            except Exception as dep_err:
+                logger.debug("Could not pre-fetch rule deployments for decay audit: %s", dep_err)
+        else:
+            try:
+                dep_res = self.adapter.get_rule_deployment(rule_id)
+                deployment_map[rule_id.split("/")[-1]] = dep_res
+            except Exception as dep_err:
+                logger.debug("Could not fetch deployment for rule %s: %s", rule_id, dep_err)
+
         target_rules: List[Any] = []
         if rule_id:
             try:
@@ -456,6 +481,38 @@ class AuditRuleDecayWorkflow:
                 raw_name = getattr(r, "name", "") or (r.get("name") if isinstance(r, dict) else "")
                 if raw_name:
                     curr_id = raw_name.split("/")[-1].split("@")[0]
+
+            dep = deployment_map.get(curr_id)
+            is_archived = False
+            if dep:
+                is_archived = bool(
+                    getattr(dep, "archived", False)
+                    or (dep.get("archived", False) if isinstance(dep, dict) else False)
+                )
+            if not is_archived:
+                is_archived = bool(
+                    getattr(r, "archived", False)
+                    or (r.get("archived", False) if isinstance(r, dict) else False)
+                )
+
+            if is_archived:
+                continue
+
+            # Determine true live state
+            is_live = False
+            if dep:
+                is_live = bool(
+                    getattr(dep, "enabled", False)
+                    or (dep.get("enabled", False) if isinstance(dep, dict) else False)
+                    or getattr(dep, "alerting", False)
+                    or (dep.get("alerting", False) if isinstance(dep, dict) else False)
+                    or getattr(dep, "run_frequency", "") == "LIVE"
+                    or (dep.get("runFrequency", "") == "LIVE" if isinstance(dep, dict) else False)
+                    or getattr(dep, "execution_state", "") == "ACTIVE"
+                    or (dep.get("executionState", "") == "ACTIVE" if isinstance(dep, dict) else False)
+                )
+            else:
+                is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
 
             curr_name = (
                 getattr(r, "display_name", "")
@@ -498,6 +555,7 @@ class AuditRuleDecayWorkflow:
                 unpopulated_fields=unpopulated,
                 syntax_verified=syntax_verified,
                 compiler_diagnostics=compiler_diags,
+                is_live=is_live,
             )
 
             if "BROKEN_COMPILATION" in flags:
@@ -508,8 +566,6 @@ class AuditRuleDecayWorkflow:
                 stale_count += 1
             if "UNPOPULATED" in flags:
                 unpopulated_count += 1
-
-            is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
 
             assessment = RuleDecayAssessment(
                 rule_id=curr_id,

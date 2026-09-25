@@ -1,38 +1,51 @@
 ---
 id: feature.soar.case_configuration
-title: "SOAR Case Configuration & Tags"
+title: SOAR Case Configuration & Tags
 type: feature
 platform: secops_soar
 sdk_capabilities:
-  - case_config.tag.search
-  - case_config.stage.list
-  - case_config.close_definition.list
-  - case_config.close_parameter.list
-  - case_config.title_settings.get
-  - case_config.view.search
-  - case_config.view.get
-  - case_config.custom_field.search
-  - case_config.custom_field.get
-  - case_config.calculated_field.search
-  - case_config.calculated_field.get
-  - case_config.alert_grouping.rule.search
-  - case_config.alert_grouping.rule.get
-  - case_config.alert_grouping.settings.get
+- case_config.tag.search
+- case_config.stage.list
+- case_config.close_definition.list
+- case_config.close_parameter.list
+- case_config.title_settings.get
+- case_config.view.search
+- case_config.view.get
+- case_config.custom_field.search
+- case_config.custom_field.get
+- case_config.calculated_field.search
+- case_config.calculated_field.get
+- case_config.alert_grouping.rule.search
+- case_config.alert_grouping.rule.get
+- case_config.alert_grouping.settings.get
 mcp_tools:
-  - get_alert_grouping_rule
-  - get_alert_grouping_settings
-  - get_calculated_field
-  - get_case_title_settings
-  - get_case_view
-  - get_custom_field
-  - list_case_close_definitions
-  - list_case_close_dynamic_parameters
-  - list_case_stage_definitions
-  - search_alert_grouping_rules
-  - search_calculated_fields
-  - search_case_tag_definitions
-  - search_case_views
-  - search_custom_fields
+- get_alert_grouping_rule
+- get_alert_grouping_settings
+- get_calculated_field
+- get_case_title_settings
+- get_case_view
+- get_custom_field
+- list_case_close_definitions
+- list_case_close_dynamic_parameters
+- list_case_stage_definitions
+- search_alert_grouping_rules
+- search_calculated_fields
+- search_case_tag_definitions
+- search_case_views
+- search_custom_fields
+status: stable
+description: SOAR Case Configuration & Tags (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOAR Case Configuration & Tags

@@ -27,6 +27,8 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name='YARA-L Optimizer',
@@ -42,6 +44,8 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided
@@ -139,12 +143,15 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
             try:
                 todos = self.evidence_store.list_todos(status="PENDING")
                 for td in todos:
-                    if target_resource_id in td.get("title", "") or target_resource_id in td.get("description", ""):
-                        self.evidence_store.update_todo_status(
-                            todo_id=td["id"],
-                            status="RESOLVED",
-                            resolution=f"Addressed by proposal {proposal.id}: {title}",
-                        )
+                    if target_resource_id in td.get("title", "") or target_resource_id in td.get("description", "") or target_resource_id in td.get("target_resource_id", ""):
+                        tid = td.get("todo_id") or td.get("id")
+                        if tid:
+                            self.evidence_store.update_todo_status(
+                                todo_id=tid,
+                                status="RESOLVED",
+                                proposal_id=proposal.id,
+                                resolution=f"Addressed by proposal {proposal.id}: {title}",
+                            )
             except Exception:
                 pass
 

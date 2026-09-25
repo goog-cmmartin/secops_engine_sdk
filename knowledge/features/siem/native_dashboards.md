@@ -1,18 +1,32 @@
 ---
 id: feature.siem.native_dashboards
-title: "SIEM Native Dashboards & Health Hub Telemetry"
+title: SIEM Native Dashboards & Health Hub Telemetry
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - dashboard.get
-  - dashboard.execute_query
-  - search.udm.stats
+- dashboard.get
+- dashboard.execute_query
+- search.udm.stats
 mcp_tools:
-  - get_dashboard
-  - execute_dashboard_query
-  - search_udm_stats
+- get_dashboard
+- execute_dashboard_query
+- search_udm_stats
 related_concepts:
-  - concept.udm_search_lifecycle
+- concept.udm_search_lifecycle
+status: stable
+description: SIEM Native Dashboards & Health Hub Telemetry (feature reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SIEM Native Dashboards & Health Hub Telemetry

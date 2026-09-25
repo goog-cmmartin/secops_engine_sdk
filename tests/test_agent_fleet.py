@@ -37,7 +37,8 @@ class AgentFleetTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_fleet_contains_twelve_specialized_agents(self):
+    def test_fleet_contains_twenty_specialized_agents(self):
+        self.assertGreaterEqual(len(self.fleet), 20)
         expected_handles = [
             "@secops-dispatcher",
             "@rule-troubleshooter",
@@ -51,11 +52,54 @@ class AgentFleetTest(unittest.TestCase):
             "@sql-analyst",
             "@gcp-telemetry-agent",
             "@tenant-posture-agent",
+            "@playbook-decay-agent",
+            "@timestamp-integrity-agent",
+            "@rule-conflict-agent",
+            "@log-cost-agent",
+            "@raw-log-agent",
+            "@namespace-label-agent",
+            "@tenant-cartographer",
+            "@soc-briefing-agent",
         ]
         for handle in expected_handles:
             self.assertIn(handle, self.fleet)
             agent = self.fleet[handle]
             self.assertIsInstance(agent, BaseSecOpsAdkAgent)
+
+    def test_soc_briefing_agent_tool_bindings(self):
+        agent = self.fleet["@soc-briefing-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("generate_shift_briefing", tool_names)
+        self.assertIn("generate_posture_snapshot", tool_names)
+        self.assertIn("get_composite_entity_dossier", tool_names)
+        self.assertEqual(agent.default_stream, "briefings")
+        self.assertEqual(agent.default_topic, "shift-briefings")
+
+
+    def test_namespace_label_agent_tool_bindings(self):
+        agent = self.fleet["@namespace-label-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("analyze_ingestion_labels", tool_names)
+        self.assertIn("analyze_namespaces", tool_names)
+        self.assertIn("audit_data_rbac_alignment", tool_names)
+        self.assertIn("analyze_labels_and_namespaces", tool_names)
+        self.assertEqual(agent.default_stream, "ingestion")
+        self.assertEqual(agent.default_topic, "namespace-labels")
+
+    def test_raw_log_agent_tool_bindings(self):
+        agent = self.fleet["@raw-log-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("search_raw_logs", tool_names)
+        self.assertIn("validate_raw_log_query", tool_names)
+        self.assertIn("query_product_source_stats", tool_names)
+        self.assertIn("investigate_event", tool_names)
+        self.assertIn("diagnose_unparsed_logs", tool_names)
+        self.assertIn("list_log_types", tool_names)
+        self.assertEqual(agent.default_stream, "ingestion")
+        self.assertEqual(agent.default_topic, "raw-logs")
 
     def test_tenant_posture_agent_tool_bindings(self):
         agent = self.fleet["@tenant-posture-agent"]
@@ -68,6 +112,26 @@ class AgentFleetTest(unittest.TestCase):
         self.assertIn("list_historical_baselines", tool_names)
         self.assertEqual(agent.default_stream, "governance")
         self.assertEqual(agent.default_topic, "tenant-posture")
+
+    def test_playbook_decay_agent_tool_bindings(self):
+        agent = self.fleet["@playbook-decay-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("audit_playbook_decay", tool_names)
+        self.assertIn("get_playbook_decay_report", tool_names)
+        self.assertIn("list_playbook_reports", tool_names)
+        self.assertEqual(agent.default_stream, "soar")
+        self.assertEqual(agent.default_topic, "playbook-health")
+
+    def test_timestamp_integrity_agent_tool_bindings(self):
+        agent = self.fleet["@timestamp-integrity-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("audit_timestamp_integrity", tool_names)
+        self.assertIn("get_timestamp_integrity_report", tool_names)
+        self.assertIn("list_timestamp_integrity_history", tool_names)
+        self.assertEqual(agent.default_stream, "ingestion")
+        self.assertEqual(agent.default_topic, "timestamp-integrity")
 
     def test_gcp_telemetry_agent_tool_bindings(self):
         telem = self.fleet["@gcp-telemetry-agent"]
@@ -174,6 +238,15 @@ class AgentFleetTest(unittest.TestCase):
         last_msg = optimizer._outbox[-1]
         self.assertEqual(last_msg.proposal_id, proposal.id)
         self.assertEqual(last_msg.widget["type"], "hitl_proposal_card")
+
+    def test_afc_fallback_handles_active_chat_session(self):
+        """Verifies that the AFC empty text recovery correctly inspects active_chat_session."""
+        agent = self.fleet["@yaral-optimizer"]
+        import inspect
+        source = inspect.getsource(agent.chat)
+        # Ensure 'chat' is not used as a bare reference in AFC recovery block
+        self.assertNotIn("hasattr(chat,", source)
+        self.assertIn("active_chat_session", source)
 
 
 if __name__ == "__main__":

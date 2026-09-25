@@ -1,0 +1,45 @@
+id: SOC-2026-001842
+issue_id: SOC-2026-001842
+type: parser_normalization_drop
+plane: data
+operational_plane: data
+status: AVAILABLE
+severity: HIGH
+confidence: 1.0
+priority_score: 50
+source:
+  deacon_id: '@feed-health-agent'
+  observed_at: '2026-09-24T16:28:55.993317+00:00'
+  evidence_fabric_uris: []
+  initial_metrics: {}
+problem:
+  title: 'UDM Normalization Degradation: Palo Alto Networks Firewall'
+  description: Ingestion drops exceeded 15% threshold for PAN-OS traffic logs.
+  observed_state:
+    drop_rate_pct: 18.2
+    malformed_records: 1420
+  desired_state:
+    drop_rate_pct: 0.0
+    malformed_records: 0
+  affected_objects:
+  - panos_firewall_parser
+routing:
+  requires_capabilities:
+    c14n_parser_fix: 1
+    parser.verify: 1
+  claimed_by: null
+  claim_timestamp: null
+governance:
+  required_authority_tier: TIER_2_PEER_REVIEW
+  validation_criteria:
+  - drop_rate == 0
+  - peer_review_passed
+  rollback_spec: {}
+lease: null
+attempts: []
+active_proposal_id: null
+applied_change_id: null
+references: {}
+created_at: '2026-09-24T16:28:55.993344+00:00'
+updated_at: '2026-09-24T16:28:55.993374+00:00'
+closed_at: null

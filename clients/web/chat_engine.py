@@ -65,7 +65,7 @@ DEFAULT_STREAMS = [
         "name": "detections",
         "display_name": "Detection Rules & YARA-L",
         "description": "Rule performance, compilation, triage, and optimization proposals",
-        "default_topics": ["rule-proposals", "decay-review", "performance-alerts", "triage"],
+        "default_topics": ["rule-proposals", "decay-review", "rule-conflicts", "performance-alerts", "triage"],
     },
     {
         "id": "ingestion",
@@ -93,7 +93,7 @@ DEFAULT_STREAMS = [
         "name": "soar",
         "display_name": "SOAR & Automation",
         "description": "Playbooks, cases, SLAs, and webhook connectors",
-        "default_topics": ["case-escalations", "playbook-runs"],
+        "default_topics": ["case-escalations", "playbook-runs", "playbook-health"],
     },
     {
         "id": "analytics",
@@ -489,6 +489,8 @@ class AgentDispatcher:
             h_lower = handle.lower()
             if h_lower in ("@decayagent", "@decay-agent", "@detection-decay-agent"):
                 resolved_handle = "@detection-decay-agent"
+            elif h_lower in ("@rule-conflict-agent", "@conflict-agent", "@conflictagent", "@ruleconflictagent", "@rule-conflict", "@ruleconflict", "@ruleconflictagent"):
+                resolved_handle = "@rule-conflict-agent"
             elif h_lower in ("@tuningagent", "@tuning-agent", "@detection-tuning-agent", "@noise-suppression-agent"):
                 resolved_handle = "@detection-tuning-agent"
             elif h_lower in ("@feed-agent", "@feedagent", "@ingestion-doctor"):
@@ -501,6 +503,16 @@ class AgentDispatcher:
                 resolved_handle = "@gcp-telemetry-agent"
             elif h_lower in ("@tenant-posture-agent", "@posture-agent", "@config-governor", "@tenant-baseline-agent", "@postureagent", "@tenantposture"):
                 resolved_handle = "@tenant-posture-agent"
+            elif h_lower in ("@playbook-decay-agent", "@playbook-decay", "@playbook-agent", "@playbookdecay", "@playbook"):
+                resolved_handle = "@playbook-decay-agent"
+            elif h_lower in ("@timestamp-integrity-agent", "@timestamp-agent", "@timestamp", "@ntp-agent", "@clock-skew-agent", "@timestampintegrity"):
+                resolved_handle = "@timestamp-integrity-agent"
+            elif h_lower in ("@log-cost-agent", "@cost-agent", "@log-cost", "@finops-agent", "@cost-optimization-agent", "@logcostagent", "@logcost", "@costagent"):
+                resolved_handle = "@log-cost-agent"
+            elif h_lower in ("@raw-log-agent", "@raw-logs", "@log-search-agent", "@raw-log", "@rawlogs", "@rawlogagent", "@rawlog"):
+                resolved_handle = "@raw-log-agent"
+            elif h_lower in ("@namespace-label-agent", "@namespace-agent", "@ingestion-label-agent", "@label-agent", "@namespacelabelagent", "@namespacelabels", "@namespace", "@ingestion-labels"):
+                resolved_handle = "@namespace-label-agent"
             else:
                 resolved_handle = handle
             agent = self.fleet.get(resolved_handle)
@@ -620,6 +632,18 @@ class AgentDispatcher:
                 "widget": widget,
             }
 
+        # Handle @rule-conflict-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Rule Conflicts)
+        elif agent.handle in ("@rule-conflict-agent", "@RuleConflictAgent", "@conflict-agent", "@RuleConflict"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": agent_msg.content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
         # Handle @detection-tuning-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Noise Suppression)
         elif agent.handle in ("@detection-tuning-agent", "@TuningAgent"):
             agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
@@ -689,6 +713,86 @@ class AgentDispatcher:
             return {
                 "content": agent_msg.content,
                 "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Handle @playbook-decay-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Playbook Decay Audit)
+        elif agent.handle in ("@playbook-decay-agent", "@playbook-decay", "@playbook-agent", "@playbookdecay", "@PlaybookDecayAgent"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": agent_msg.content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Handle @timestamp-integrity-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Timestamp Integrity Audit)
+        elif agent.handle in ("@timestamp-integrity-agent", "@timestamp-agent", "@timestamp", "@ntp-agent", "@clock-skew-agent", "@TimestampIntegrityAgent"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+
+            content = agent_msg.content
+            tracking = getattr(agent, "last_tracking", None)
+            if hasattr(agent, "last_tracking"):
+                agent.last_tracking = None
+
+            if tracking:
+                todo_id = tracking.get("todo_id", "todo_timestamp_integrity_active")
+                prio = tracking.get("priority", "HIGH")
+                sightings = tracking.get("sighting_count", 1)
+                if tracking.get("is_new"):
+                    banner = f"\n\n🚨 **Tracked in Actions**: Created actionable task [`{todo_id}`](#actions) in Triage ({prio} PRIORITY)."
+                elif tracking.get("auto_resolved"):
+                    banner = f"\n\n🟢 **Actions**: Telemetry nominal. Actionable task [`{todo_id}`](#actions) marked **RESOLVED**."
+                elif sightings > 1:
+                    banner = f"\n\nℹ️ **Tracked in Actions**: Corroborated active issue [`{todo_id}`](#actions) in Triage (Sighted {sightings}x, {prio} PRIORITY)."
+                else:
+                    banner = f"\n\nℹ️ **Tracked in Actions**: Active issue [`{todo_id}`](#actions) in Triage ({prio} PRIORITY)."
+                content += banner
+
+            return {
+                "content": content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Handle @log-cost-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & FinOps)
+        elif agent.handle in ("@log-cost-agent", "@cost-agent", "@finops-agent", "@LogCostAgent", "@ingestion-cost-agent"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": agent_msg.content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Handle @raw-log-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Raw Log Search)
+        elif agent.handle in ("@raw-log-agent", "@raw-logs", "@log-search-agent", "@raw-log", "@rawlogs", "@rawlogagent"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": agent_msg.content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Dynamic fallback for any ADK 2 agent with chat method
+        if hasattr(agent, "chat") and callable(agent.chat):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = getattr(agent_msg, "widget", None) or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": getattr(agent_msg, "content", str(agent_msg)),
+                "proposal_id": getattr(agent_msg, "proposal_id", None),
                 "widget": widget,
             }
 

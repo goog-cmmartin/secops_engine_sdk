@@ -1,21 +1,35 @@
 ---
 id: task.ingestion_specialist.manage_bindplane_rollout
-title: "Verify BindPlane Collector Pipeline and Downstream Ingestion Health"
+title: Verify BindPlane Collector Pipeline and Downstream Ingestion Health
 type: task
 persona: persona.ingestion_specialist
 trigger:
-  - on_demand
-  - scheduled_weekly
+- on_demand
+- scheduled_weekly
 capabilities_used:
-  - feed.audit_health
-  - feed.search
+- feed.audit_health
+- feed.search
 related_concepts:
-  - concept.bindplane_telemetry_architecture
+- concept.bindplane_telemetry_architecture
 related_features:
-  - feature.bindplane.agent_fleet
+- feature.bindplane.agent_fleet
 evaluation_rules:
   max_canary_failure_rate_pct: 1.0
   max_latency_hours: 2.0
+status: stable
+description: Verify BindPlane Collector Pipeline and Downstream Ingestion Health (task
+  reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Verify BindPlane Collector Pipeline and Downstream Ingestion Health

@@ -1,18 +1,32 @@
 ---
 id: concept.workforce_identity_federation
-title: "Workforce Identity Pools & SecOps Role Governance"
+title: Workforce Identity Pools & SecOps Role Governance
 type: concept
 applies_to:
-  - gcp
-  - secops_siem
-  - secops_soar
+- gcp
+- secops_siem
+- secops_soar
 related_features:
-  - feature.gcp.workforce_identity
-  - feature.siem.data_rbac
+- feature.gcp.workforce_identity
+- feature.siem.data_rbac
 tags:
-  - iam
-  - federation
-  - access_governance
+- iam
+- federation
+- access_governance
+status: stable
+description: Workforce Identity Pools & SecOps Role Governance (concept reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Workforce Identity Pools & SecOps Role Governance

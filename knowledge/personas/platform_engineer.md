@@ -1,18 +1,31 @@
 ---
 id: persona.platform_engineer
-title: "SecOps & Cloud Platform Engineer"
+title: SecOps & Cloud Platform Engineer
 type: persona
 scope:
-  - secops_siem
-  - secops_soar
-  - bindplane
-  - gcp
+- secops_siem
+- secops_soar
+- bindplane
+- gcp
 authority_level: L2_OPERATIONS
 primary_tasks:
-  - task.platform_engineer.check_udm_search_performance
-  - task.platform_engineer.audit_identity_access
-  - task.platform_engineer.monitor_chronicle_gcp_telemetry
-  - task.platform_engineer.audit_tenant_configuration_posture
+- task.platform_engineer.check_udm_search_performance
+- task.platform_engineer.audit_identity_access
+- task.platform_engineer.monitor_chronicle_gcp_telemetry
+- task.platform_engineer.audit_tenant_configuration_posture
+status: stable
+description: SecOps & Cloud Platform Engineer (persona reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SecOps & Cloud Platform Engineer

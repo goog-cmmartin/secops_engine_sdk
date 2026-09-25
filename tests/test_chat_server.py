@@ -239,6 +239,18 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(replies) >= 1)
         self.assertEqual(replies[0].sender_handle, "@feed-agent")
 
+    async def test_direct_message_dispatch_log_cost_agent(self):
+        user_msg = self.store.add_message(
+            stream="dm",
+            topic="@log-cost-agent",
+            sender_handle="@operator",
+            sender_type="user",
+            content="save me some money",
+        )
+        replies = await self.dispatcher.dispatch(user_msg)
+        self.assertTrue(len(replies) >= 1)
+        self.assertEqual(replies[0].sender_handle, "@log-cost-agent")
+
     async def test_dispatch_tracks_active_job_lifecycle(self):
         user_msg = self.store.add_message(
             stream="detections",
@@ -307,6 +319,8 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         self.assertIn("@secops-dispatcher", handles)
         self.assertIn("@yaral-optimizer", handles)
         self.assertIn("@identity-governor", handles)
+        self.assertIn("@tenant-cartographer", handles)
+        self.assertEqual(len(agents), 19)
 
     def test_post_message_endpoint(self):
         res = self.client.post(

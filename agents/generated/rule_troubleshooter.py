@@ -24,6 +24,8 @@ class RuleTroubleshooterAgent(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name='Rule Troubleshooter',
@@ -39,6 +41,8 @@ class RuleTroubleshooterAgent(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided

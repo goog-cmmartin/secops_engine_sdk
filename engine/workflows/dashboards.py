@@ -252,6 +252,7 @@ class ExecuteDashboardQueryWorkflow:
         dialect: str = "YL2",
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        clear_cache: Optional[bool] = None,
     ) -> DashboardQueryResult:
         """Executes query and returns result."""
         # Adapter already returns normalized DashboardQueryResult
@@ -266,6 +267,7 @@ class ExecuteDashboardQueryWorkflow:
             dialect=dialect,
             start_time=start_time,
             end_time=end_time,
+            clear_cache=clear_cache,
         )
 
 

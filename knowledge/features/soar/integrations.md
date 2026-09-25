@@ -1,18 +1,32 @@
 ---
 id: feature.soar.integrations
-title: "SOAR Connectors & Third-Party Integrations"
+title: SOAR Connectors & Third-Party Integrations
 type: feature
 platform: secops_soar
 sdk_capabilities:
-  - integration.search
-  - integration.get
-  - integration.instances
-  - integration.remote_agents
+- integration.search
+- integration.get
+- integration.instances
+- integration.remote_agents
 mcp_tools:
-  - get_integration
-  - list_integration_instances
-  - list_remote_agents
-  - search_integrations
+- get_integration
+- list_integration_instances
+- list_remote_agents
+- search_integrations
+status: stable
+description: SOAR Connectors & Third-Party Integrations (feature reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOAR Connectors & Third-Party Integrations

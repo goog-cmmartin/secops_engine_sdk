@@ -1,15 +1,29 @@
 ---
 id: persona.ingestion_specialist
-title: "SecOps Ingestion & Telemetry Specialist"
+title: SecOps Ingestion & Telemetry Specialist
 type: persona
 scope:
-  - secops_siem
-  - bindplane
-  - gcp
+- secops_siem
+- bindplane
+- gcp
 authority_level: L2_OPERATIONS
 primary_tasks:
-  - task.ingestion_specialist.audit_feed_health
-  - task.ingestion_specialist.manage_bindplane_rollout
+- task.ingestion_specialist.audit_feed_health
+- task.ingestion_specialist.manage_bindplane_rollout
+status: stable
+description: SecOps Ingestion & Telemetry Specialist (persona reference in Google
+  SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SecOps Ingestion & Telemetry Specialist

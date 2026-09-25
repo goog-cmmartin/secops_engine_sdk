@@ -18,13 +18,20 @@ const state = {
 // --- Initialization ---
 document.addEventListener("DOMContentLoaded", async () => {
   const hash = window.location.hash.replace(/^#/, "");
-  if (hash === "ingestion") {
-    switchView("ingestion");
-  } else if (hash === "gastown" || hash === "board") {
+  if (hash === "dashboards" || hash.startsWith("dashboards") || hash === "ingestion" || hash.startsWith("ingestion")) {
+    switchView("dashboards");
+    const sub = hash.includes("/") ? hash.split("/")[1] : null;
+    if (sub && ["feeds", "parsers", "diagnostics", "finops"].includes(sub)) {
+      switchIngestionSubtab(sub);
+    }
+  } else if (hash === "gastown" || hash === "board" || hash === "actions" || hash === "issues" || hash === "todo" || hash === "todos") {
     switchView("gastown");
   } else if (hash === "library" || hash.startsWith("library")) {
     switchView("library");
+  } else if (hash === "briefings" || hash.startsWith("briefings") || hash === "posture") {
+    switchView("briefings");
   } else if (hash.includes("/")) {
+
     const parts = hash.split("/");
     state.activeStream = parts[0];
     state.activeTopic = parts.slice(1).join("/");
@@ -54,12 +61,15 @@ function setupEventListeners() {
   // Top Navigation Tabs
   const navBtnChat = document.getElementById("navBtnChat");
   const navBtnGastown = document.getElementById("navBtnGastown");
-  const navBtnIngestion = document.getElementById("navBtnIngestion");
+  const navBtnDashboards = document.getElementById("navBtnDashboards") || document.getElementById("navBtnIngestion");
   const navBtnLibrary = document.getElementById("navBtnLibrary");
+  const navBtnBriefings = document.getElementById("navBtnBriefings");
   if (navBtnChat) navBtnChat.addEventListener("click", () => switchView("chat"));
   if (navBtnGastown) navBtnGastown.addEventListener("click", () => switchView("gastown"));
-  if (navBtnIngestion) navBtnIngestion.addEventListener("click", () => switchView("ingestion"));
+  if (navBtnDashboards) navBtnDashboards.addEventListener("click", () => switchView("dashboards"));
   if (navBtnLibrary) navBtnLibrary.addEventListener("click", () => switchView("library"));
+  if (navBtnBriefings) navBtnBriefings.addEventListener("click", () => switchView("briefings"));
+
 
   // Right Drawer Toggles
   const toggleRightDrawerBtn = document.getElementById("toggleRightDrawerBtn");
@@ -85,6 +95,23 @@ function setupEventListeners() {
     clearTopicBtn.addEventListener("click", handleClearTopic);
   }
 
+  const btnTriggerRuleAudit = document.getElementById("btnTriggerRuleAudit");
+  if (btnTriggerRuleAudit) {
+    btnTriggerRuleAudit.addEventListener("click", async () => {
+      btnTriggerRuleAudit.disabled = true;
+      btnTriggerRuleAudit.innerHTML = "<span>⏳ Auditing...</span>";
+      try {
+        await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        await switchTopic("detections", "decay-review");
+      } catch (err) {
+        console.error("Rule audit failed:", err);
+      } finally {
+        btnTriggerRuleAudit.disabled = false;
+        btnTriggerRuleAudit.innerHTML = "<span>🛡️ Audit Rules</span>";
+      }
+    });
+  }
+
   if (btnCloseDrawer) {
     btnCloseDrawer.addEventListener("click", () => {
       state.isRightDrawerOpen = false;
@@ -103,15 +130,49 @@ function setupEventListeners() {
   const dmSectionHeader = document.getElementById("dmSectionHeader");
   const dmToggleIcon = document.getElementById("dmToggleIcon");
   const dmList = document.getElementById("dmList");
+  const dmSearchContainer = document.getElementById("dmSearchContainer");
+  const dmSearchInput = document.getElementById("dmSearchInput");
+  const dmClearFilterBtn = document.getElementById("dmClearFilterBtn");
+
   if (dmSectionHeader && dmList) {
     dmSectionHeader.addEventListener("click", () => {
       dmList.classList.toggle("collapsed");
+      if (dmSearchContainer) dmSearchContainer.classList.toggle("collapsed");
       if (dmToggleIcon) dmToggleIcon.classList.toggle("collapsed");
+    });
+  }
+
+  if (dmSearchInput) {
+    dmSearchInput.addEventListener("input", (e) => {
+      dmSearchQuery = e.target.value || "";
+      if (dmClearFilterBtn) {
+        dmClearFilterBtn.style.display = dmSearchQuery ? "inline-flex" : "none";
+      }
+      renderDirectMessages();
+    });
+    dmSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        dmSearchInput.value = "";
+        dmSearchQuery = "";
+        if (dmClearFilterBtn) dmClearFilterBtn.style.display = "none";
+        renderDirectMessages();
+      }
+    });
+  }
+
+  if (dmClearFilterBtn) {
+    dmClearFilterBtn.addEventListener("click", () => {
+      if (dmSearchInput) dmSearchInput.value = "";
+      dmSearchQuery = "";
+      dmClearFilterBtn.style.display = "none";
+      renderDirectMessages();
+      if (dmSearchInput) dmSearchInput.focus();
     });
   }
 
   // Gas Town Subtabs
   const tabGtKanban = document.getElementById("tabGtKanban");
+  const tabGtWorkQueue = document.getElementById("tabGtWorkQueue");
   const tabGtConvoys = document.getElementById("tabGtConvoys");
   const tabGtRefinery = document.getElementById("tabGtRefinery");
   const tabGtEscalations = document.getElementById("tabGtEscalations");
@@ -119,6 +180,7 @@ function setupEventListeners() {
   const btnRefreshGastown = document.getElementById("btnRefreshGastown");
 
   if (tabGtKanban) tabGtKanban.addEventListener("click", () => switchGastownSubtab("kanban"));
+  if (tabGtWorkQueue) tabGtWorkQueue.addEventListener("click", () => switchGastownSubtab("work_queue"));
   if (tabGtConvoys) tabGtConvoys.addEventListener("click", () => switchGastownSubtab("convoys"));
   if (tabGtRefinery) tabGtRefinery.addEventListener("click", () => switchGastownSubtab("refinery"));
   if (tabGtEscalations) tabGtEscalations.addEventListener("click", () => switchGastownSubtab("escalations"));
@@ -144,18 +206,39 @@ function setupEventListeners() {
   // Dedicated Ingestion Page Actions
   const pageBtnAuditFeeds = document.getElementById("pageBtnAuditFeeds");
   const pageBtnAuditParsers = document.getElementById("pageBtnAuditParsers");
+  const pageBtnAuditRules = document.getElementById("pageBtnAuditRules");
+  const pageBtnAnalyzeCost = document.getElementById("pageBtnAnalyzeCost");
   const pageBtnRefresh = document.getElementById("pageBtnRefresh");
   if (pageBtnAuditFeeds) pageBtnAuditFeeds.addEventListener("click", handleAuditFeedsAction);
   if (pageBtnAuditParsers) pageBtnAuditParsers.addEventListener("click", handleAuditParsersAction);
+  if (pageBtnAuditRules) pageBtnAuditRules.addEventListener("click", handleAuditRulesPageAction);
+  if (pageBtnAnalyzeCost) {
+    pageBtnAnalyzeCost.addEventListener("click", () => {
+      switchIngestionSubtab("finops");
+      fetchFinopsData(true);
+    });
+  }
   if (pageBtnRefresh) pageBtnRefresh.addEventListener("click", () => renderIngestionPage(true));
 
   // Dedicated Ingestion Subpage Tabs
   const tabIngFeeds = document.getElementById("tabIngestionFeeds");
   const tabIngParsers = document.getElementById("tabIngestionParsers");
   const tabIngDiag = document.getElementById("tabIngestionDiagnostics");
+  const tabIngFinOps = document.getElementById("tabIngestionFinOps");
+  const tabIngNsLabels = document.getElementById("tabIngestionNamespaceLabels");
   if (tabIngFeeds) tabIngFeeds.addEventListener("click", () => switchIngestionSubtab("feeds"));
   if (tabIngParsers) tabIngParsers.addEventListener("click", () => switchIngestionSubtab("parsers"));
   if (tabIngDiag) tabIngDiag.addEventListener("click", () => switchIngestionSubtab("diagnostics"));
+  if (tabIngFinOps) tabIngFinOps.addEventListener("click", () => switchIngestionSubtab("finops"));
+  if (tabIngNsLabels) tabIngNsLabels.addEventListener("click", () => switchIngestionSubtab("namespacelabels"));
+
+  // FinOps Action Button
+  const btnRunFinopsAnalysis = document.getElementById("btnRunFinopsAnalysis");
+  if (btnRunFinopsAnalysis) btnRunFinopsAnalysis.addEventListener("click", () => fetchFinopsData(true));
+
+  // Namespace & Labels Audit Action Button
+  const btnRunNsLabelsAudit = document.getElementById("btnRunNsLabelsAudit");
+  if (btnRunNsLabelsAudit) btnRunNsLabelsAudit.addEventListener("click", () => fetchNamespaceLabelsData());
 
   // Chat CTA buttons on Ingestion tables
   const btnChatFeed = document.getElementById("btnChatFeedAgent");
@@ -168,6 +251,18 @@ function setupEventListeners() {
   if (btnChatParser) {
     btnChatParser.addEventListener("click", () => {
       switchTopicAndChat("ingestion", "parser-drops", "@parser-doctor audit parsers");
+    });
+  }
+  const btnChatLogCost = document.getElementById("btnChatLogCostAgent");
+  if (btnChatLogCost) {
+    btnChatLogCost.addEventListener("click", () => {
+      switchTopicAndChat("ingestion", "finops", "@log-cost-agent analyze log costs");
+    });
+  }
+  const btnChatNamespaceAgent = document.getElementById("btnChatNamespaceAgent");
+  if (btnChatNamespaceAgent) {
+    btnChatNamespaceAgent.addEventListener("click", () => {
+      switchTopicAndChat("ingestion", "namespace-labels", "@namespace-label-agent audit telemetry labels and namespaces");
     });
   }
 
@@ -184,11 +279,15 @@ function setupEventListeners() {
   // URL Hash Navigation
   const handleHashRouting = () => {
     const hash = window.location.hash.replace(/^#/, "");
-    if (hash === "ingestion") {
-      switchView("ingestion");
+    if (hash === "dashboards" || hash.startsWith("dashboards") || hash === "ingestion" || hash.startsWith("ingestion")) {
+      switchView("dashboards");
+      const sub = hash.includes("/") ? hash.split("/")[1] : null;
+      if (sub && ["feeds", "parsers", "diagnostics", "finops", "namespacelabels"].includes(sub)) {
+        switchIngestionSubtab(sub);
+      }
       return;
     }
-    if (hash === "gastown" || hash === "board") {
+    if (hash === "gastown" || hash === "board" || hash === "actions" || hash === "issues" || hash === "todo" || hash === "todos") {
       switchView("gastown");
       return;
     }
@@ -441,6 +540,11 @@ async function switchTopic(stream, topic) {
     document.getElementById("composerInput").placeholder = `Message #${stream} > ${topic}... (@agent to mention)`;
   }
 
+  const btnAuditHeader = document.getElementById("btnTriggerRuleAudit");
+  if (btnAuditHeader) {
+    btnAuditHeader.style.display = (stream === "detections") ? "inline-flex" : "none";
+  }
+
   renderStreams();
   renderDirectMessages();
   await loadMessages(stream, topic);
@@ -496,12 +600,65 @@ function renderStreams() {
   });
 }
 
+let dmSearchQuery = "";
+
 function renderDirectMessages() {
   const container = document.getElementById("dmList");
   if (!container) return;
   container.innerHTML = "";
 
-  state.agents.forEach((a) => {
+  const query = (dmSearchQuery || "").trim().toLowerCase();
+  const countBadge = document.getElementById("dmCountBadge");
+
+  const totalCount = Array.isArray(state.agents) ? state.agents.length : 0;
+  const filtered = (state.agents || []).filter((a) => {
+    if (!query) return true;
+    const handle = (a.handle || "").toLowerCase();
+    const name = (a.name || "").toLowerCase();
+    const role = (a.role || "").toLowerCase();
+    const desc = (a.description || "").toLowerCase();
+    const subsystem = (a.subsystem || "").toLowerCase();
+    const tools = (a.capabilities || []).some((c) => c.toLowerCase().includes(query));
+    return (
+      handle.includes(query) ||
+      name.includes(query) ||
+      role.includes(query) ||
+      desc.includes(query) ||
+      subsystem.includes(query) ||
+      tools
+    );
+  });
+
+  if (countBadge) {
+    countBadge.textContent = query ? `${filtered.length}/${totalCount}` : `${totalCount}`;
+  }
+
+  if (filtered.length === 0) {
+    const emptyRow = document.createElement("div");
+    emptyRow.style.padding = "12px 8px";
+    emptyRow.style.textAlign = "center";
+    emptyRow.style.fontSize = "11.5px";
+    emptyRow.style.color = "var(--text-dim)";
+    emptyRow.innerHTML = `
+      <div>No agents matching "<strong>${escapeHtml(query)}</strong>"</div>
+      <button id="dmResetSearchBtn" style="margin-top:6px; background:none; border:none; color:var(--accent-blue); font-size:11px; cursor:pointer; text-decoration:underline;">Clear filter</button>
+    `;
+    container.appendChild(emptyRow);
+    const resetBtn = document.getElementById("dmResetSearchBtn");
+    if (resetBtn) {
+      resetBtn.addEventListener("click", () => {
+        const searchInput = document.getElementById("dmSearchInput");
+        if (searchInput) searchInput.value = "";
+        dmSearchQuery = "";
+        const clearBtn = document.getElementById("dmClearFilterBtn");
+        if (clearBtn) clearBtn.style.display = "none";
+        renderDirectMessages();
+      });
+    }
+    return;
+  }
+
+  filtered.forEach((a) => {
     const isDmActive = state.activeStream === "dm" && state.activeTopic === a.handle;
     const row = document.createElement("div");
     row.className = `dm-item ${isDmActive ? "active" : ""}`;
@@ -510,7 +667,10 @@ function renderDirectMessages() {
         <div class="dm-avatar">${renderAvatar("agent", a.handle)}</div>
         <span class="dm-status-dot"></span>
       </div>
-      <div class="dm-handle" title="${a.role}">${a.handle}</div>
+      <div class="dm-info-wrap" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
+        <div class="dm-handle" title="${escapeHtml(a.role || a.name || a.handle)}">${escapeHtml(a.handle)}</div>
+        ${query ? `<div style="font-size:10px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.role || a.name || "")}</div>` : ""}
+      </div>
     `;
     row.addEventListener("click", () => {
       switchTopic("dm", a.handle);
@@ -521,6 +681,14 @@ function renderDirectMessages() {
 
 function renderAgents() {
   renderDirectMessages();
+  const fleetTag = document.getElementById("fleetStatusTag");
+  if (fleetTag && Array.isArray(state.agents) && state.agents.length > 0) {
+    fleetTag.textContent = `${state.agents.length} Agents Active`;
+  }
+  const gtFleet = document.getElementById("gtFleetOnline");
+  if (gtFleet && Array.isArray(state.agents) && state.agents.length > 0) {
+    gtFleet.textContent = `${state.agents.length} Agents Online`;
+  }
 }
 
 function insertMention(handle) {
@@ -613,6 +781,20 @@ function appendMessageToTimeline(msg) {
     widgetHtml = renderGcpTelemetryWidget(msg.widget);
   } else if (msg.widget && msg.widget.type === "tenant_drift_card") {
     widgetHtml = renderTenantDriftWidget(msg.widget);
+  } else if (msg.widget && msg.widget.type === "playbook_health_card") {
+    widgetHtml = renderPlaybookHealthWidget(msg.widget);
+  } else if (msg.widget && msg.widget.type === "timestamp_integrity_card") {
+    widgetHtml = renderTimestampIntegrityWidget(msg.widget);
+  } else if (msg.widget && msg.widget.type === "rule_conflict_card") {
+    widgetHtml = renderRuleConflictWidget(msg.widget);
+  } else if (msg.widget && msg.widget.type === "rule_conflict_batch_card") {
+    widgetHtml = renderRuleConflictBatchWidget(msg.widget);
+  } else if (msg.widget && msg.widget.type === "rule_audit_card") {
+    widgetHtml = renderRuleAuditCard(msg.widget);
+  } else if (msg.widget && msg.widget.type === "finops_cost_card") {
+    widgetHtml = renderFinopsCostCard(msg.widget);
+  } else if (msg.widget && msg.widget.type === "raw_log_search_card") {
+    widgetHtml = renderRawLogSearchCard(msg.widget);
   }
 
   card.innerHTML = `
@@ -985,12 +1167,17 @@ function renderDecaySyncWidget(widget) {
     const dpsColor = dps >= 70 ? '#f87171' : (dps >= 40 ? '#fbbf24' : '#34d399');
     rowsHtml += `
       <tr style="border-bottom:1px solid rgba(55,65,81,0.4); font-size:11.5px;">
-        <td style="padding:6px 8px; font-weight:600;">${escapeHtml(c.rule_name || c.rule_id)}</td>
+        <td style="padding:6px 8px;">
+          <div style="font-weight:600; color:var(--text-bright, #f8fafc);">${escapeHtml(c.rule_name || c.rule_id)}</div>
+          ${c.rule_id && c.rule_id !== c.rule_name ? `<div style="font-size:10px; font-weight:400; color:#94a3b8; font-family:monospace; margin-top:2px;">${escapeHtml(c.rule_id)}</div>` : ''}
+        </td>
         <td style="padding:6px 8px; text-align:center;">
           <span style="font-weight:700; color:${dpsColor}; background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">${dps}</span>
         </td>
         <td style="padding:6px 8px; text-align:center;">${c.detection_count_90d || 0}</td>
-        <td style="padding:6px 8px; text-align:center;">${c.is_live ? '🟢' : '⚪'}</td>
+        <td style="padding:6px 8px; text-align:center;" title="${c.is_live ? 'Live in production' : 'Not live / disabled'}">
+          <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background-color:${c.is_live ? '#10b981' : '#64748b'}; box-shadow:${c.is_live ? '0 0 6px rgba(16,185,129,0.6)' : 'none'}; vertical-align:middle;"></span>
+        </td>
         <td style="padding:6px 8px; text-align:right;">
           <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:10.5px; cursor:pointer;" onclick="auditRuleInChat('${c.rule_id}')">
             Audit
@@ -1759,6 +1946,865 @@ function renderTenantDriftWidget(widget) {
   `;
 }
 
+function renderPlaybookHealthWidget(widget) {
+  const summary = widget.summary || {};
+  const playbooks = widget.playbooks || [];
+  const totalAudited = summary.total_audited || playbooks.length;
+  const avgScore = summary.average_resilience_score != null ? summary.average_resilience_score : 100;
+  const degradedCount = summary.degraded_playbooks_count || 0;
+  const lookbackDays = summary.lookback_days || 30;
+
+  let catalogBadge = "";
+  let catalogBorder = "#10b981";
+  if (degradedCount > 0) {
+    catalogBadge = `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3);">⚠️ ${degradedCount} DEGRADED PLAYBOOKS</span>`;
+    catalogBorder = "#ef4444";
+  } else {
+    catalogBadge = `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3);">🟢 PLAYBOOK CATALOG HEALTHY</span>`;
+  }
+
+  let playbookCardsHtml = "";
+  if (playbooks.length > 0) {
+    playbookCardsHtml = playbooks.map((pb, idx) => {
+      const score = pb.resilience_score != null ? pb.resilience_score : 100;
+      const grade = pb.resilience_grade || "A";
+      const tel = pb.telemetry || {};
+      const findings = pb.findings || [];
+      const brief = pb.executive_brief || "";
+      const mermaidDag = pb.mermaid_dag || "";
+      const cardId = `pb_card_${idx}_${(pb.workflow_identifier || "id").substring(0, 8)}`;
+
+      let gradeColor = "#10b981";
+      if (grade === "B") gradeColor = "#3b82f6";
+      else if (grade === "C") gradeColor = "#f59e0b";
+      else if (grade === "D") gradeColor = "#fb923c";
+      else if (grade === "F") gradeColor = "#ef4444";
+
+      const failRate = tel.failure_rate_pct != null ? tel.failure_rate_pct : 0.0;
+      const failColor = failRate > 20 ? "#f87171" : (failRate > 0 ? "#fbbf24" : "#34d399");
+
+      let findingsRows = "";
+      if (findings.length > 0) {
+        findingsRows = findings.map(f => {
+          let sevColor = "#93c5fd";
+          if (f.severity === "CRITICAL") sevColor = "#f87171";
+          else if (f.severity === "HIGH") sevColor = "#fb923c";
+          else if (f.severity === "MEDIUM") sevColor = "#fbbf24";
+
+          const affectedStr = f.affected_steps && f.affected_steps.length > 0
+            ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">Steps: <code>${escapeHtml(f.affected_steps.join(", "))}</code></div>`
+            : "";
+
+          return `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05); font-size:11px;">
+              <td style="padding:5px 6px; font-family:var(--font-mono); font-weight:700; color:#c4b5fd;">${escapeHtml(f.rule_id)}</td>
+              <td style="padding:5px 6px; font-weight:700; color:${sevColor};">${escapeHtml(f.severity)}</td>
+              <td style="padding:5px 6px; color:#f1f5f9;">
+                <div style="font-weight:600;">${escapeHtml(f.title)}</div>
+                <div style="color:#94a3b8; font-size:10.5px;">${escapeHtml(f.description)}</div>
+                ${affectedStr}
+              </td>
+              <td style="padding:5px 6px; font-weight:700; color:#f87171; text-align:right;">-${f.deduction} pts</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      return `
+        <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:10px 12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:6px; background:${gradeColor}22; border:1px solid ${gradeColor}66; color:${gradeColor}; font-weight:800; font-size:14px;">
+                ${grade}
+              </span>
+              <div>
+                <div style="font-weight:700; font-size:12.5px; color:#f8fafc;">${escapeHtml(pb.name || "Playbook")}</div>
+                <div style="font-size:10.5px; color:var(--text-muted); display:flex; gap:6px; align-items:center; margin-top:2px;">
+                  <span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size:9.5px; padding:1px 5px;">${escapeHtml(pb.category || "General")}</span>
+                  <span class="badge" style="background:rgba(100,116,139,0.2); color:#cbd5e1; font-size:9.5px; padding:1px 5px;">P${pb.priority ?? 2}</span>
+                  ${pb.is_enabled ? '<span style="color:#34d399;">● Active</span>' : '<span style="color:#64748b;">○ Inactive</span>'}
+                  ${pb.is_debug_mode ? '<span style="color:#f87171; font-weight:700;">[DEBUG MODE]</span>' : ''}
+                </div>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:15px; font-weight:800; color:${gradeColor};">${score}<span style="font-size:11px; color:var(--text-muted);">/100</span></div>
+              <div style="font-size:10px; color:var(--text-muted);">${pb.step_count || 0} steps | ${pb.relation_count || 0} edges</div>
+            </div>
+          </div>
+
+          <!-- 30-Day Telemetry Strip -->
+          <div style="display:flex; gap:8px; margin-bottom:8px; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:4px; font-size:10.5px;">
+            <div style="flex:1;"><span style="color:var(--text-muted);">30d Runs:</span> <b style="color:#f8fafc;">${tel.total_runs || 0}</b></div>
+            <div style="flex:1;"><span style="color:var(--text-muted);">Completed:</span> <b style="color:#34d399;">${tel.completed_runs || 0}</b></div>
+            <div style="flex:1;"><span style="color:var(--text-muted);">Failed:</span> <b style="color:${tel.failed_runs ? '#f87171' : '#34d399'};">${tel.failed_runs || 0}</b></div>
+            <div style="flex:1;"><span style="color:var(--text-muted);">Failure Rate:</span> <b style="color:${failColor};">${failRate}%</b></div>
+            <div style="flex:1;"><span style="color:var(--text-muted);">Avg Dur:</span> <b style="color:#93c5fd;">${tel.avg_duration_seconds || 0}s</b></div>
+          </div>
+
+          <!-- Findings Table -->
+          ${findings.length > 0 ? `
+            <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
+              <thead>
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.08); font-size:10px; color:var(--text-muted); text-align:left;">
+                  <th style="padding:3px 6px;">Rule</th>
+                  <th style="padding:3px 6px;">Severity</th>
+                  <th style="padding:3px 6px;">Finding Details</th>
+                  <th style="padding:3px 6px; text-align:right;">Penalty</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${findingsRows}
+              </tbody>
+            </table>
+          ` : `
+            <div style="font-size:10.5px; color:#34d399; margin-bottom:6px;">✓ Clean static resilience topology. Zero anti-pattern deductions.</div>
+          `}
+
+          <!-- Interactive Expanders: Mermaid Flowchart & Executive Brief -->
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            ${mermaidDag ? `
+              <button onclick="const el=document.getElementById('${cardId}_dag'); el.style.display=el.style.display==='none'?'block':'none';" 
+                      class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+                ⚡ Toggle Flowchart DAG
+              </button>
+            ` : ''}
+            ${brief ? `
+              <button onclick="const el=document.getElementById('${cardId}_brief'); el.style.display=el.style.display==='none'?'block':'none';" 
+                      class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+                📋 View GenAI Brief
+              </button>
+            ` : ''}
+          </div>
+
+          ${mermaidDag ? `
+            <div id="${cardId}_dag" style="display:none; margin-top:8px; padding:8px; background:rgba(0,0,0,0.5); border-radius:4px; border:1px solid rgba(255,255,255,0.1);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:600;">Mermaid.js Flowchart DAG</span>
+                <button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(mermaidDag)}')); showToast('Mermaid DAG copied to clipboard');" 
+                        class="btn btn-secondary" style="font-size:9.5px; padding:2px 6px;">Copy Syntax</button>
+              </div>
+              <pre class="mermaid" style="font-family:var(--font-mono); font-size:10px; color:#93c5fd; white-space:pre-wrap; margin:0; overflow-x:auto;">${escapeHtml(mermaidDag)}</pre>
+            </div>
+          ` : ''}
+
+          ${brief ? `
+            <div id="${cardId}_brief" style="display:none; margin-top:8px; padding:10px 12px; background:rgba(30,41,59,0.7); border-radius:4px; border:1px solid rgba(99,102,241,0.25); font-size:11px; line-height:1.5;">
+              <div style="font-size:10.5px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">Architectural Executive Brief (Gemini)</div>
+              ${formatMarkdown(brief)}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join("");
+  }
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid ${catalogBorder}; margin-top:8px; padding:12px 14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">⚡</span>
+          <span style="font-weight:700; font-size:13px; color:#f3f4f6;">SOAR Playbook Resilience &amp; Decay Audit</span>
+          ${catalogBadge}
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">Window: <code style="color:#93c5fd;">${lookbackDays} Days</code></div>
+      </div>
+
+      <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10.5px; color:var(--text-muted);">Playbooks Audited</div>
+          <div style="font-size:16px; font-weight:700; color:#f8fafc;">${totalAudited}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10.5px; color:var(--text-muted);">Catalog Avg Score</div>
+          <div style="font-size:16px; font-weight:700; color:${avgScore >= 80 ? '#34d399' : (avgScore >= 70 ? '#fbbf24' : '#f87171')};">${avgScore}/100</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10.5px; color:var(--text-muted);">Degraded Playbooks</div>
+          <div style="font-size:16px; font-weight:700; color:${degradedCount > 0 ? '#f87171' : '#34d399'};">${degradedCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10.5px; color:var(--text-muted);">Active Storage</div>
+          <div style="font-size:14px; font-weight:700; color:#a78bfa;">soar_playbooks</div>
+        </div>
+      </div>
+
+      ${playbookCardsHtml}
+    </div>
+  `;
+}
+
+function renderTimestampIntegrityWidget(widget) {
+  const summary = widget.summary || {};
+  const total = summary.total_log_types || 0;
+  const healthy = summary.healthy_count || 0;
+  const newAnomalies = summary.new_anomalies_count || 0;
+  const previouslyKnown = summary.previously_known_count || 0;
+  const resolved = summary.resolved_count || 0;
+  const skewedEvents = summary.total_skewed_events || 0;
+  const delayedEvents = summary.total_delayed_events || 0;
+  const days = widget.days || 7;
+  const topDelayed = widget.top_delayed || [];
+  const topSkewed = widget.top_skewed || [];
+  const narrative = widget.narrative || "";
+
+  let statusBadge = "";
+  let borderLeft = "#10b981";
+  if (skewedEvents > 0) {
+    statusBadge = `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3);">🔴 CLOCK SKEW / NTP ERRORS DETECTED</span>`;
+    borderLeft = "#ef4444";
+  } else if (newAnomalies > 0 || delayedEvents > 0) {
+    statusBadge = `<span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3);">🟡 INGESTION DELAY BOTTLENECK</span>`;
+    borderLeft = "#f59e0b";
+  } else {
+    statusBadge = `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3);">🟢 TELEMETRY TIMESTAMPS OPTIMAL</span>`;
+  }
+
+  // Combined unique rows from top_delayed and top_skewed
+  const seenLts = new Set();
+  const displayRows = [];
+  topSkewed.forEach(r => {
+    if (!seenLts.has(r.log_type)) {
+      seenLts.add(r.log_type);
+      displayRows.push(r);
+    }
+  });
+  topDelayed.forEach(r => {
+    if (!seenLts.has(r.log_type)) {
+      seenLts.add(r.log_type);
+      displayRows.push(r);
+    }
+  });
+
+  let rowsHtml = "";
+  if (displayRows.length > 0) {
+    rowsHtml = displayRows.map(r => {
+      let stateBadge = `<span style="color:#34d399; font-weight:700;">HEALTHY</span>`;
+      if (r.progression_state === "NEW") {
+        stateBadge = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-weight:700;">🔴 NEW</span>`;
+      } else if (r.progression_state === "PREVIOUSLY KNOWN") {
+        stateBadge = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#fbbf24; font-weight:700;">🟡 PREV KNOWN</span>`;
+      } else if (r.progression_state === "RESOLVED") {
+        stateBadge = `<span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; font-weight:700;">🟢 RESOLVED</span>`;
+      }
+
+      const skewColor = r.cnt_lt_0_hours > 0 ? "#f87171" : "#94a3b8";
+      const delayColor = r.cnt_gt_2_hours > 0 ? "#fb923c" : "#94a3b8";
+      const avgColor = r.average_difference_minutes > 60 ? "#fbbf24" : "#34d399";
+
+      return `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05); font-size:11px;">
+          <td style="padding:6px 8px; font-weight:700; font-family:var(--font-mono); color:#f3f4f6;">${escapeHtml(r.log_type)}</td>
+          <td style="padding:6px 8px; color:#cbd5e1; text-align:right;">${(r.total || 0).toLocaleString()}</td>
+          <td style="padding:6px 8px; color:${avgColor}; font-weight:700; text-align:right;">${r.average_difference_minutes}m</td>
+          <td style="padding:6px 8px; color:${skewColor}; font-weight:${r.cnt_lt_0_hours > 0 ? '700' : '400'}; text-align:right;">${(r.cnt_lt_0_hours || 0).toLocaleString()}</td>
+          <td style="padding:6px 8px; color:#94a3b8; text-align:right;">${(r.cnt_0_1_hours || 0).toLocaleString()}</td>
+          <td style="padding:6px 8px; color:#94a3b8; text-align:right;">${(r.cnt_1_2_hours || 0).toLocaleString()}</td>
+          <td style="padding:6px 8px; color:${delayColor}; font-weight:${r.cnt_gt_2_hours > 0 ? '700' : '400'}; text-align:right;">${(r.cnt_gt_2_hours || 0).toLocaleString()}</td>
+          <td style="padding:6px 8px; text-align:center;">${stateBadge}</td>
+        </tr>
+      `;
+    }).join("");
+  } else {
+    rowsHtml = `
+      <tr>
+        <td colspan="8" style="padding:10px; text-align:center; color:#34d399; font-size:11px;">
+          ✨ All active log streams exhibit nominal real-time flow and zero NTP clock drift.
+        </td>
+      </tr>
+    `;
+  }
+
+  const briefId = `ti_brief_${Math.random().toString(36).substring(2, 8)}`;
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid ${borderLeft}; margin-top:8px; padding:12px 14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">⏱️</span>
+          <span style="font-weight:700; font-size:13px; color:#f3f4f6;">Telemetry Ingestion Latency & Clock Drift Audit</span>
+          ${statusBadge}
+        </div>
+        <span style="font-size:11px; color:var(--text-muted);">${days}-Day Window</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap:8px; margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Audited Feeds</div>
+          <div style="font-size:15px; font-weight:700; color:#f3f4f6;">${total}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Healthy</div>
+          <div style="font-size:15px; font-weight:700; color:#34d399;">${healthy}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">New Anomalies</div>
+          <div style="font-size:15px; font-weight:700; color:${newAnomalies > 0 ? '#f87171' : '#cbd5e1'};">${newAnomalies}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Prev Known</div>
+          <div style="font-size:15px; font-weight:700; color:${previouslyKnown > 0 ? '#fbbf24' : '#cbd5e1'};">${previouslyKnown}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Resolved</div>
+          <div style="font-size:15px; font-weight:700; color:#38bdf8;">${resolved}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Clock Skews (Δt&lt;0)</div>
+          <div style="font-size:15px; font-weight:700; color:${skewedEvents > 0 ? '#f87171' : '#34d399'};">${skewedEvents.toLocaleString()}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Delayed (&gt;2h)</div>
+          <div style="font-size:15px; font-weight:700; color:${delayedEvents > 0 ? '#fb923c' : '#34d399'};">${delayedEvents.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:6px; overflow-x:auto; margin-bottom:10px;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-transform:uppercase;">
+              <th style="padding:6px 8px; text-align:left;">Log Type</th>
+              <th style="padding:6px 8px; text-align:right;">Total Logs</th>
+              <th style="padding:6px 8px; text-align:right;">Avg Delay</th>
+              <th style="padding:6px 8px; text-align:right; color:#f87171;">Δt &lt; 0h (NTP)</th>
+              <th style="padding:6px 8px; text-align:right;">0-1h</th>
+              <th style="padding:6px 8px; text-align:right;">1-2h</th>
+              <th style="padding:6px 8px; text-align:right; color:#fb923c;">&gt;2h Delay</th>
+              <th style="padding:6px 8px; text-align:center;">State</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      ${narrative ? `
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button onclick="const el=document.getElementById('${briefId}'); el.style.display=el.style.display==='none'?'block':'none';" 
+                  class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+            📋 Toggle Operational Runbook & Brief
+          </button>
+        </div>
+        <div id="${briefId}" style="display:none; margin-top:8px; padding:10px 12px; background:rgba(30,41,59,0.7); border-radius:4px; border:1px solid rgba(99,102,241,0.25); font-size:11px; line-height:1.5;">
+          <div style="font-size:10.5px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">GenAI Infrastructure Advisory</div>
+          ${formatMarkdown(narrative)}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderRuleConflictWidget(widget) {
+  const cos = typeof widget.highest_cos === "number" ? Math.round(widget.highest_cos) : 0;
+  let cosClass = "dps-low";
+  let cosLabel = "LOW / NO OVERLAP";
+  let borderLeft = "#10b981";
+
+  if (cos >= 75) {
+    cosClass = "dps-high";
+    cosLabel = "CRITICAL OVERLAP";
+    borderLeft = "#ef4444";
+  } else if (cos >= 45) {
+    cosClass = "dps-med";
+    cosLabel = "MODERATE OVERLAP";
+    borderLeft = "#f59e0b";
+  }
+
+  const isLive = !!widget.is_live;
+  const isSilent = !!widget.is_silent;
+  const liveBadge = isLive
+    ? `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3);">🟢 LIVE (ENABLED)</span>`
+    : `<span class="badge" style="background:rgba(156,163,175,0.15); color:#9ca3af; border:1px solid rgba(156,163,175,0.3);">⚪ DISABLED</span>`;
+
+  const silentBadge = isSilent
+    ? `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3);">⚠️ 0 DETECTIONS (90d)</span>`
+    : `<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3);">ACTIVE DETECTIONS</span>`;
+
+  const conflicts = Array.isArray(widget.conflicts) ? widget.conflicts : [];
+
+  let conflictsHtml = "";
+  if (conflicts.length === 0) {
+    conflictsHtml = `<div style="padding:10px; color:var(--text-muted); font-size:12px; font-style:italic;">No semantically overlapping or conflicting rules discovered.</div>`;
+  } else {
+    conflictsHtml = `
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+        <div style="font-size:11.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">
+          Candidate Sibling Rules (${conflicts.length})
+        </div>
+        ${conflicts.map(c => {
+          const cCos = Math.round(c.cos_score || 0);
+          const simPct = ((c.similarity_score || 0) * 100).toFixed(1);
+          let typeBadgeColor = "#a855f7";
+          if (c.conflict_type === "CONTRADICTION") typeBadgeColor = "#ef4444";
+          else if (c.conflict_type === "OVERLAP") typeBadgeColor = "#f59e0b";
+          else if (c.conflict_type === "SCOPE GAPS") typeBadgeColor = "#3b82f6";
+
+          let sevColor = "#9ca3af";
+          if (c.impact_severity === "HIGH") sevColor = "#ef4444";
+          else if (c.impact_severity === "MEDIUM") sevColor = "#f59e0b";
+
+          return `
+            <div style="background:rgba(17,24,39,0.7); border:1px solid rgba(75,85,99,0.4); border-radius:6px; padding:10px 12px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                <div>
+                  <div style="font-weight:700; font-size:12.5px; color:#f3f4f6;">${escapeHtml(c.similar_rule_name || c.similar_rule_id)}</div>
+                  <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${escapeHtml(c.similar_rule_id)}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span class="badge" style="background:${typeBadgeColor}22; color:${typeBadgeColor}; border:1px solid ${typeBadgeColor}44; font-weight:700;">${escapeHtml(c.conflict_type)}</span>
+                  <span class="badge" style="background:${sevColor}22; color:${sevColor}; border:1px solid ${sevColor}44;">${escapeHtml(c.impact_severity)}</span>
+                  <span class="badge" style="background:rgba(99,102,241,0.2); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3); font-weight:700;">${cCos} COS</span>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin:8px 0; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:4px; font-size:11px;">
+                <div><span style="color:var(--text-muted);">Vector Sim:</span> <strong style="color:#60a5fa;">${simPct}%</strong></div>
+                <div><span style="color:var(--text-muted);">Events:</span> <strong style="color:${c.events_overlap ? '#34d399' : '#9ca3af'};">${c.events_overlap ? 'Shared' : 'Distinct'}</strong></div>
+                <div><span style="color:var(--text-muted);">Match:</span> <strong style="color:${c.match_overlap ? '#fbbf24' : '#9ca3af'};">${c.match_overlap ? 'Overlap' : 'None'}</strong></div>
+                <div><span style="color:var(--text-muted);">Condition:</span> <strong style="color:${c.condition_overlap ? '#f87171' : '#9ca3af'};">${c.condition_overlap ? 'Overlap' : 'Distinct'}</strong></div>
+              </div>
+
+              ${c.explanation ? `<div style="font-size:11.5px; color:#d1d5db; margin-bottom:6px; line-height:1.4;">${escapeHtml(c.explanation)}</div>` : ''}
+              ${c.consolidation_strategy ? `
+                <div style="font-size:11px; color:#a7f3d0; background:rgba(16,185,129,0.1); border-left:3px solid #10b981; padding:4px 8px; border-radius:0 4px 4px 0; margin-bottom:8px;">
+                  <strong>Consolidation Strategy:</strong> ${escapeHtml(c.consolidation_strategy)}
+                </div>
+              ` : ''}
+
+              <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                <button onclick="promptRuleConflictAudit('${escapeHtml(c.similar_rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer;">
+                  🔍 Deep Audit Sibling
+                </button>
+                <button onclick="promptRuleConflictConsolidate('${escapeHtml(widget.rule_id)}', '${escapeHtml(c.similar_rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer; font-weight:600;">
+                  ⚡ Propose Consolidation
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="proposal-card status-open" style="border-left: 4px solid ${borderLeft}; padding:14px; margin-top:8px; background:var(--bg-surface); border-radius:6px;">
+      <div class="prop-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">⚖️</span>
+          <span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-weight:700;">RULE CONFLICT AUDIT</span>
+          ${liveBadge}
+          ${silentBadge}
+        </div>
+        <div class="dps-badge ${cosClass}">
+          <span class="dps-number">${cos}</span>
+          <span class="dps-text">/ 100 COS &bull; ${cosLabel}</span>
+        </div>
+      </div>
+
+      <div class="prop-title" style="font-size:14px; font-weight:700; margin-bottom:2px; color:#f9fafb;">
+        ${escapeHtml(widget.rule_name || widget.rule_id)}
+      </div>
+      <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-bottom:10px;">
+        Target Rule ID: ${escapeHtml(widget.rule_id)}
+      </div>
+
+      ${widget.strategic_recommendation ? `
+        <div style="margin-bottom:10px; padding:8px 10px; background:rgba(30,41,59,0.6); border:1px solid rgba(99,102,241,0.25); border-radius:4px; font-size:11.5px; color:#cbd5e1; line-height:1.4;">
+          <strong>Strategic Recommendation:</strong> ${escapeHtml(widget.strategic_recommendation)}
+        </div>
+      ` : ''}
+
+      ${conflictsHtml}
+    </div>
+  `;
+}
+
+function renderRuleConflictBatchWidget(widget) {
+  const totalScanned = widget.total_rules_scanned || 0;
+  const totalPairs = widget.total_pairs_evaluated || 0;
+  const conflictCounts = widget.conflict_counts || {};
+  const severityCounts = widget.severity_counts || {};
+  const highestCosRules = Array.isArray(widget.highest_cos_rules) ? widget.highest_cos_rules : [];
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid #a855f7; margin-top:8px; padding:14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">⚖️</span>
+          <span style="font-weight:700; font-size:13.5px; color:#f3f4f6;">Tenant Detection Rule Conflict Audit</span>
+          <span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4);">BATCH AUDIT</span>
+        </div>
+        <span style="font-size:11px; color:var(--text-muted);">${totalScanned} Rules Scanned &bull; ${totalPairs} Pairs Evaluated</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Critical Overlaps</div>
+          <div style="font-size:16px; font-weight:700; color:#f87171;">${severityCounts['CRITICAL'] || 0}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Moderate Overlaps</div>
+          <div style="font-size:16px; font-weight:700; color:#fbbf24;">${severityCounts['MODERATE'] || 0}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Redundancies</div>
+          <div style="font-size:16px; font-weight:700; color:#c084fc;">${conflictCounts['REDUNDANCY'] || 0}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Contradictions</div>
+          <div style="font-size:16px; font-weight:700; color:#f87171;">${conflictCounts['CONTRADICTION'] || 0}</div>
+        </div>
+      </div>
+
+      ${highestCosRules.length > 0 ? `
+        <div style="font-size:11.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">
+          Highest Conflict Overlap Rules (${highestCosRules.length})
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          ${highestCosRules.map(r => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(17,24,39,0.7); border:1px solid rgba(75,85,99,0.3); border-radius:4px; padding:8px 10px;">
+              <div>
+                <div style="font-weight:600; font-size:12px; color:#f3f4f6;">${escapeHtml(r.rule_name || r.rule_id)}</div>
+                <div style="font-family:var(--font-mono); font-size:10px; color:var(--text-dim);">${escapeHtml(r.rule_id)}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge" style="background:${r.highest_cos >= 75 ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}; color:${r.highest_cos >= 75 ? '#f87171' : '#fbbf24'}; font-weight:700;">
+                  ${Math.round(r.highest_cos)} COS
+                </span>
+                <button onclick="promptRuleConflictAudit('${escapeHtml(r.rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                  Audit
+                </button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function promptRuleConflictAudit(ruleId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@rule-conflict-agent audit rule ${ruleId}`;
+  input.focus();
+}
+
+function promptRuleConflictConsolidate(ruleId, siblingId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@rule-conflict-agent consolidate rule ${ruleId} with ${siblingId} and propose resolution`;
+  input.focus();
+}
+
+function promptRuleDecayInvestigate(ruleId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@detection-decay-agent investigate rule ${ruleId}`;
+  input.focus();
+}
+
+function promptRuleSyntaxFix(ruleId) {
+  const input = document.getElementById("composerInput");
+  if (!input) return;
+  input.value = `@yaral-optimizer diagnose execution errors for rule ${ruleId}`;
+  input.focus();
+}
+
+function renderRuleAuditCard(widget) {
+  const data = widget.data || widget;
+  const totalScanned = data.total_rules_scanned || 0;
+  const customerCount = data.customer_rules_count || 0;
+  const curatedCount = data.curated_rules_count || 0;
+  const healthyCount = data.healthy_count || 0;
+  const silentCount = data.silent_decay_count || 0;
+  const failingCount = data.failing_count || 0;
+  const misconfiguredCount = data.misconfigured_count || 0;
+  const conflictCount = data.conflict_count || 0;
+  const shadowedCuratedCount = data.shadowed_by_curated_count || 0;
+  const embeddingsSynced = data.embeddings_synced_count || 0;
+  const totalDetections = (data.total_detections_90d || 0).toLocaleString();
+  const findings = Array.isArray(data.findings) ? data.findings : [];
+
+  const attentionItems = findings.filter(f => {
+    const st = typeof f.status === "object" ? f.status.value : f.status;
+    return st !== "HEALTHY" || (f.highest_conflict_cos && f.highest_conflict_cos >= 75) || f.shadowed_by_curated_id;
+  });
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid #10b981; margin-top:8px; padding:14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">🛡️</span>
+          <div>
+            <div style="font-weight:700; font-size:14px; color:#f3f4f6;">Detection Repository Health Audit</div>
+            <div style="font-size:11px; color:var(--text-muted);">
+              Tri-Pillar Assessment &bull; Ingestion &amp; Embeddings &bull; Decay Telemetry &bull; Conflict &amp; Shadowing
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); font-weight:700;">
+            ${embeddingsSynced > 0 ? `✨ ${embeddingsSynced} EMBEDDINGS SYNCED` : "EMBEDDINGS READY"}
+          </span>
+          <span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.4); font-weight:700;">
+            ${curatedCount > 0 ? `${curatedCount} CURATED + ${customerCount} CUSTOM` : `${totalScanned} RULES`}
+          </span>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Total Scanned</div>
+          <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalScanned}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Healthy Active</div>
+          <div style="font-size:16px; font-weight:700; color:#34d399;">${healthyCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Silent (0 Det/90d)</div>
+          <div style="font-size:16px; font-weight:700; color:${silentCount > 0 ? '#fbbf24' : '#cbd5e1'};">${silentCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Execution Errors</div>
+          <div style="font-size:16px; font-weight:700; color:${failingCount > 0 ? '#f87171' : '#34d399'};">${failingCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Conflicts (COS≥75)</div>
+          <div style="font-size:16px; font-weight:700; color:${conflictCount > 0 ? '#c084fc' : '#cbd5e1'};">${conflictCount}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Shadows Curated</div>
+          <div style="font-size:16px; font-weight:700; color:${shadowedCuratedCount > 0 ? '#fb923c' : '#34d399'};">${shadowedCuratedCount}</div>
+        </div>
+      </div>
+
+      ${attentionItems.length > 0 ? `
+        <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+          <span>Action Required Rules (${attentionItems.length})</span>
+          <span style="font-size:10px; font-weight:normal; color:var(--text-dim);">Showing prioritized findings</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; max-height:360px; overflow-y:auto;">
+          ${attentionItems.slice(0, 25).map(f => {
+            const st = typeof f.status === "object" ? f.status.value : f.status;
+            let stBadge = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); font-size:10px;">${st}</span>`;
+            if (st === "SILENT_DECAY") {
+              stBadge = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); font-size:10px;">SILENT DECAY</span>`;
+            } else if (st === "MISCONFIGURED_ALERTING") {
+              stBadge = `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:10px;">MISCONFIGURED</span>`;
+            }
+            const isCurated = f.rule_source === "GOOGLE_CURATED" || (f.rule_id && f.rule_id.startsWith("ur_"));
+            const srcBadge = isCurated
+              ? `<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); font-size:9.5px;">CURATED</span>`
+              : `<span class="badge" style="background:rgba(156,163,175,0.15); color:#cbd5e1; border:1px solid rgba(156,163,175,0.3); font-size:9.5px;">CUSTOM</span>`;
+
+            return `
+              <div style="background:rgba(17,24,39,0.7); border:1px solid rgba(75,85,99,0.3); border-radius:4px; padding:8px 10px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      ${srcBadge}
+                      <span style="font-weight:600; font-size:12px; color:#f3f4f6;">${escapeHtml(f.rule_name || f.rule_id)}</span>
+                    </div>
+                    <div style="font-family:var(--font-mono); font-size:10px; color:var(--text-dim); margin-top:1px;">
+                      ${escapeHtml(f.rule_id)} &bull; DPS: <strong>${Math.round(f.dps_score || 0)}</strong> &bull; 90d Det: <strong>${f.detection_count_90d || 0}</strong>
+                    </div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    ${stBadge}
+                    ${f.highest_conflict_cos >= 75 ? `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:10px;">${Math.round(f.highest_conflict_cos)}% COS</span>` : ''}
+                  </div>
+                </div>
+
+                ${f.shadowed_by_curated_id ? `
+                  <div style="margin-top:4px; padding:4px 6px; background:rgba(251,146,60,0.1); border:1px solid rgba(251,146,60,0.3); border-radius:3px; font-size:10.5px; color:#fdba74;">
+                    ⚠️ <strong>Shadows Google Curated Rule:</strong> ${escapeHtml(f.shadowed_by_curated_name || f.shadowed_by_curated_id)} (<code>${escapeHtml(f.shadowed_by_curated_id)}</code>)
+                  </div>
+                ` : ''}
+
+                ${f.remediation_steps && f.remediation_steps.length > 0 ? `
+                  <div style="font-size:10.5px; color:#94a3b8; margin-top:4px;">
+                    💡 ${escapeHtml(f.remediation_steps[0])}
+                  </div>
+                ` : ''}
+
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                  ${f.shadowed_by_curated_id ? `
+                    <button onclick="promptRuleConflictConsolidate('${escapeHtml(f.rule_id)}', '${escapeHtml(f.shadowed_by_curated_id)}')" style="background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.4); color:#fed7aa; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer; font-weight:600;">
+                      ⚡ Retire in Favor of Curated
+                    </button>
+                  ` : ''}
+                  ${f.highest_conflict_cos >= 75 ? `
+                    <button onclick="promptRuleConflictAudit('${escapeHtml(f.rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                      🔍 Inspect Conflict
+                    </button>
+                  ` : ''}
+                  ${st === "SILENT_DECAY" ? `
+                    <button onclick="promptRuleDecayInvestigate('${escapeHtml(f.rule_id)}')" style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#fde68a; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                      📉 Investigate Decay
+                    </button>
+                  ` : ''}
+                  ${st === "EXECUTION_ERROR" ? `
+                    <button onclick="promptRuleSyntaxFix('${escapeHtml(f.rule_id)}')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                      🛠️ Inspect Runtime Error
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      ` : `
+        <div style="text-align:center; padding:12px; color:#34d399; font-size:12px;">
+          ✨ All scanned detection rules are healthy, operational, and free from conflicts.
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function renderFinopsCostCard(widget) {
+  const data = widget.data || widget;
+  const totalVolumeGb = Number(data.total_volume_gb || 0).toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const totalEvents = Number(data.total_events || 0).toLocaleString();
+  const spendEnterprise = Number(data.spend_enterprise || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const savings = Number(data.savings || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const bloatedCount = data.bloated_count || 0;
+  const recsCount = data.recommendations_count || 0;
+  const topDrivers = Array.isArray(data.top_drivers) ? data.top_drivers : [];
+
+  return `
+    <div class="custom-card" style="border-left: 4px solid #10b981; margin-top:8px; padding:14px; background:var(--bg-surface); border-radius:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">💰</span>
+          <div>
+            <div style="font-weight:700; font-size:14px; color:#f3f4f6;">Google SecOps FinOps &amp; Log Sizing Analysis</div>
+            <div style="font-size:11px; color:var(--text-muted);">
+              7-Day Chronicle Telemetry &bull; Multi-Tier Pricing &bull; Upstream Drop &amp; Micro-Tuning
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); font-weight:700;">
+            ${recsCount} RECOMMENDATIONS
+          </span>
+          <span class="badge" style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); font-weight:700;">
+            ${bloatedCount} BLOATED TYPES
+          </span>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Ingested Volume (7d)</div>
+          <div style="font-size:16px; font-weight:700; color:#60a5fa;">${totalVolumeGb} GB</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Total Ingested Events</div>
+          <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalEvents}</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Projected Spend (Enterprise)</div>
+          <div style="font-size:16px; font-weight:700; color:#f87171;">${spendEnterprise}/mo</div>
+        </div>
+        <div class="kpi-card" style="padding:6px 8px; text-align:center;">
+          <div style="font-size:10px; color:var(--text-muted);">Potential Savings</div>
+          <div style="font-size:16px; font-weight:700; color:#34d399;">${savings}/mo</div>
+        </div>
+      </div>
+
+      ${topDrivers.length > 0 ? `
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px;">Top Volume Drivers</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+          ${topDrivers.slice(0, 5).map(d => `
+            <span style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:3px 8px; font-size:11px; font-family:var(--font-mono); color:#e2e8f0;">
+              ${escapeHtml(d.log_type)}: <strong style="color:#60a5fa;">${(d.volume_gb_decimal || d.volume_gb || 0).toFixed(1)} GB</strong> (${(d.pct_total_volume || d.percentage_of_total_volume || 0).toFixed(1)}%)
+            </span>
+          `).join("")}
+        </div>
+      ` : ''}
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+        <button onclick="switchView('ingestion'); switchIngestionSubtab('finops'); fetchFinopsData();" style="background:#059669; border:none; color:white; font-size:11px; font-weight:600; padding:4px 12px; border-radius:4px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+          <span>📊 Open Full FinOps Dashboard</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderRawLogSearchCard(w) {
+  if (!w) return "";
+  const totalMatches = w.total_matches ?? 0;
+  const progress = w.progress ?? 100;
+  const query = w.query || "";
+  const lookbackHours = w.lookback_hours ?? 24;
+  const matches = Array.isArray(w.matches) ? w.matches : [];
+
+  return `
+    <div class="raw-log-search-card" style="margin-top:8px; border:1px solid rgba(59, 130, 246, 0.3); background:rgba(15, 23, 42, 0.65); border-radius:8px; padding:12px; font-family:var(--font-sans);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:14px;">🔎</span>
+          <span style="font-size:12px; font-weight:700; color:#93c5fd; text-transform:uppercase; letter-spacing:0.5px;">Chronicle Raw Log Search</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#93c5fd; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">
+            ${totalMatches} ${totalMatches === 1 ? 'MATCH' : 'MATCHES'}
+          </span>
+          <span style="background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.3); color:#34d399; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">
+            ${progress}% SCANNED
+          </span>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; font-size:11px;">
+        <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:3px 8px; font-family:var(--font-mono); color:#cbd5e1; flex:1; min-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <span style="color:var(--text-muted); font-size:10px;">QUERY:</span> <span style="color:#67e8f9;">${escapeHtml(query || "*")}</span>
+        </div>
+        <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:3px 8px; font-family:var(--font-mono); color:#94a3b8;">
+          <span style="color:var(--text-muted); font-size:10px;">WINDOW:</span> ${lookbackHours}h lookback
+        </div>
+      </div>
+
+      ${matches.length > 0 ? `
+        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px;">Sample Matches (${matches.length})</div>
+        <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
+          ${matches.map((m, idx) => {
+            const snippet = m.snippet || m.raw_text || JSON.stringify(m, null, 2);
+            const id = m.id || m.event_id || `match-${idx}`;
+            const logType = m.log_type || "UNKNOWN_SOURCE";
+            const time = m.ingestion_time || m.timestamp || "";
+            return `
+              <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06); border-radius:4px; padding:6px 8px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:10px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="background:rgba(99, 102, 241, 0.18); border:1px solid rgba(99, 102, 241, 0.35); color:#a5b4fc; font-weight:700; padding:1px 5px; border-radius:3px;">
+                      ${escapeHtml(logType)}
+                    </span>
+                    ${time ? `<span style="color:var(--text-muted);">${escapeHtml(time)}</span>` : ''}
+                  </div>
+                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:9px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
+                    📋 Copy Raw Log
+                  </button>
+                </div>
+                <pre style="margin:0; padding:4px 6px; background:rgba(0,0,0,0.5); border-radius:3px; font-family:var(--font-mono); font-size:10px; color:#e2e8f0; max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(snippet)}</code></pre>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      ` : `
+        <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:8px; text-align:center;">
+          No matching raw log entries found in the specified lookback window.
+        </div>
+      `}
+    </div>
+  `;
+}
+
 async function renderTuningDrawer() {
   const container = document.getElementById("drawerContent");
   container.innerHTML = `
@@ -2015,6 +3061,31 @@ window.handleProposalAction = async function (proposalId, action) {
   }
 };
 
+async function handleDismissTodo(todoId) {
+  const reason = prompt(`Enter dismissal / resolution reason for ${todoId}:`, "Not required at this time");
+  if (reason === null) return;
+
+  try {
+    const res = await fetch(`/api/todos/${encodeURIComponent(todoId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "RESOLVED",
+        resolution: `Dismissed by operator: ${reason}`,
+        resolved_by: "secops-operator"
+      }),
+    });
+    if (!res.ok) {
+      await fetch(`/api/todos/${encodeURIComponent(todoId)}`, { method: "DELETE" });
+    }
+    showToast(`Task ${todoId} dismissed.`, "info");
+    await loadGastownOverview();
+  } catch (err) {
+    showToast("Error dismissing task: " + err, "error");
+  }
+}
+window.handleDismissTodo = handleDismissTodo;
+
 // --- Right Drawer ---
 function switchDrawerTab(tab) {
   state.activeDrawerTab = tab;
@@ -2123,10 +3194,15 @@ async function renderDecayDrawer() {
   container.innerHTML = `
     <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display:flex; flex-direction:column; gap:8px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-weight:700; font-size:12px; color:var(--text-muted); text-transform:uppercase;">Rule Decay Prioritization</span>
-        <button id="btnRunSyncNow" style="background:#4f46e5; border:none; color:white; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px;">
-          <span>🔄 Sync 90d</span>
-        </button>
+        <span style="font-weight:700; font-size:12px; color:var(--text-muted); text-transform:uppercase;">Rule Decay &amp; Health</span>
+        <div style="display:flex; gap:6px;">
+          <button id="btnAuditRulesNow" style="background:#059669; border:none; color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:3px;" title="Unified repository audit across custom and curated rules">
+            <span>🛡️ Audit Rules</span>
+          </button>
+          <button id="btnRunSyncNow" style="background:#4f46e5; border:none; color:white; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:3px;">
+            <span>🔄 Sync 90d</span>
+          </button>
+        </div>
       </div>
       <div style="font-size:11px; color:var(--text-dim); background:rgba(31,41,55,0.4); padding:6px 8px; border-radius:4px;">
         ⏱️ <strong>Schedule:</strong> Daily 24h &bull; <span id="decayNextRun">Next: Evaluating</span>
@@ -2136,6 +3212,24 @@ async function renderDecayDrawer() {
       <div style="text-align:center; padding:20px; color:var(--text-dim); font-size:12px;">Loading decay queue...</div>
     </div>
   `;
+
+  const btnAuditDrawer = document.getElementById("btnAuditRulesNow");
+  if (btnAuditDrawer) {
+    btnAuditDrawer.addEventListener("click", async () => {
+      btnAuditDrawer.innerHTML = "<span>⏳ Auditing...</span>";
+      btnAuditDrawer.disabled = true;
+      try {
+        await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        await switchTopic("detections", "decay-review");
+        renderDecayDrawer();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        btnAuditDrawer.innerHTML = "<span>🛡️ Audit Rules</span>";
+        btnAuditDrawer.disabled = false;
+      }
+    });
+  }
 
   document.getElementById("btnRunSyncNow").addEventListener("click", async () => {
     const btn = document.getElementById("btnRunSyncNow");
@@ -2249,22 +3343,92 @@ function renderProposalsDrawer() {
   });
 }
 
+let drawerFleetFilter = "";
+
 function renderFleetDrawer() {
   const container = document.getElementById("drawerContent");
   container.innerHTML = "";
 
-  state.agents.forEach((a) => {
+  const total = Array.isArray(state.agents) ? state.agents.length : 0;
+  const header = document.createElement("div");
+  header.style.padding = "10px 12px 8px";
+  header.style.borderBottom = "1px solid var(--border-color)";
+  header.innerHTML = `
+    <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+      <span>Fleet Roster</span>
+      <span style="font-size:10px; background:var(--bg-tertiary); padding:1px 6px; border-radius:8px;">${total} Online</span>
+    </div>
+    <input
+      type="text"
+      id="drawerFleetSearchInput"
+      placeholder="Filter fleet roster..."
+      value="${escapeHtml(drawerFleetFilter)}"
+      style="width:100%; box-sizing:border-box; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; padding:4px 8px; font-size:11.5px; color:var(--text-main); outline:none;"
+    />
+  `;
+  container.appendChild(header);
+
+  const searchInput = header.querySelector("#drawerFleetSearchInput");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      drawerFleetFilter = e.target.value || "";
+      renderFleetDrawerItems();
+    });
+  }
+
+  const listContainer = document.createElement("div");
+  listContainer.id = "drawerFleetItemsContainer";
+  container.appendChild(listContainer);
+
+  renderFleetDrawerItems();
+}
+
+function renderFleetDrawerItems() {
+  const listContainer = document.getElementById("drawerFleetItemsContainer");
+  if (!listContainer) return;
+  listContainer.innerHTML = "";
+
+  const query = (drawerFleetFilter || "").trim().toLowerCase();
+  const filtered = (state.agents || []).filter((a) => {
+    if (!query) return true;
+    const handle = (a.handle || "").toLowerCase();
+    const name = (a.name || "").toLowerCase();
+    const role = (a.role || "").toLowerCase();
+    const desc = (a.description || "").toLowerCase();
+    const subsystem = (a.subsystem || "").toLowerCase();
+    const tools = (a.capabilities || []).some((c) => c.toLowerCase().includes(query));
+    return (
+      handle.includes(query) ||
+      name.includes(query) ||
+      role.includes(query) ||
+      desc.includes(query) ||
+      subsystem.includes(query) ||
+      tools
+    );
+  });
+
+  if (filtered.length === 0) {
+    listContainer.innerHTML = `
+      <div style="text-align:center; padding:24px 12px; color:var(--text-dim); font-size:12px;">
+        No agents found matching "${escapeHtml(query)}".
+      </div>
+    `;
+    return;
+  }
+
+  filtered.forEach((a) => {
     const item = document.createElement("div");
     item.className = "drawer-proposal-item";
     item.innerHTML = `
-      <div style="font-weight:700; font-size:13px; color:var(--accent-blue);">${a.handle}</div>
+      <div style="font-weight:700; font-size:13px; color:var(--accent-blue);">${escapeHtml(a.handle)}</div>
       <div style="font-size:12px; font-weight:600; color:var(--text-main); margin: 2px 0;">${escapeHtml(a.role)}</div>
       <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">${escapeHtml(a.description)}</div>
-      <div style="font-size:10.5px; color:var(--text-dim);">
-        Capabilities Bound: <strong>${a.capabilities.length}</strong> &bull; Model: <code>${a.model}</code>
+      <div style="font-size:10.5px; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center;">
+        <span>Capabilities: <strong>${a.capabilities.length}</strong></span>
+        <span>Subsystem: <code>${escapeHtml(a.subsystem || "general")}</code></span>
       </div>
     `;
-    container.appendChild(item);
+    listContainer.appendChild(item);
   });
 }
 
@@ -2577,6 +3741,12 @@ function getAgentAvatar(handle) {
     "@sql-analyst": "📊",
     "@gcp-telemetry-agent": "📈",
     "@tenant-posture-agent": "🏛️",
+    "@playbook-decay-agent": "📜",
+    "@timestamp-integrity-agent": "⏱️",
+    "@rule-conflict-agent": "⚖️",
+    "@log-cost-agent": "💰",
+    "@raw-log-agent": "🔎",
+    "@namespace-label-agent": "🏷️",
   };
   return map[handle] || "🤖";
 }
@@ -2714,25 +3884,29 @@ function closeMentionDropdown() {
 function switchView(viewName) {
   const navChat = document.getElementById("navBtnChat");
   const navGastown = document.getElementById("navBtnGastown");
-  const navIngestion = document.getElementById("navBtnIngestion");
+  const navDashboards = document.getElementById("navBtnDashboards") || document.getElementById("navBtnIngestion");
   const navLibrary = document.getElementById("navBtnLibrary");
+  const navBriefings = document.getElementById("navBtnBriefings");
   const chatView = document.getElementById("chatView");
   const gastownView = document.getElementById("gastownView");
   const ingestionView = document.getElementById("ingestionView");
   const libraryView = document.getElementById("libraryView");
+  const briefingsView = document.getElementById("briefingsView");
   const sidebarLeft = document.getElementById("sidebarLeft");
   const sidebarRight = document.getElementById("sidebarRight");
   const toggleRightDrawerBtn = document.getElementById("toggleRightDrawerBtn");
 
   if (viewName === "gastown") {
     if (navChat) navChat.classList.remove("active");
-    if (navIngestion) navIngestion.classList.remove("active");
+    if (navDashboards) navDashboards.classList.remove("active");
     if (navLibrary) navLibrary.classList.remove("active");
+    if (navBriefings) navBriefings.classList.remove("active");
     if (navGastown) navGastown.classList.add("active");
 
     if (chatView) chatView.style.display = "none";
     if (ingestionView) ingestionView.style.display = "none";
     if (libraryView) libraryView.style.display = "none";
+    if (briefingsView) briefingsView.style.display = "none";
     if (gastownView) gastownView.style.display = "flex";
 
     if (sidebarLeft) sidebarLeft.style.display = "none";
@@ -2740,21 +3914,24 @@ function switchView(viewName) {
 
     document.body.classList.remove("view-ingestion-active");
     document.body.classList.remove("view-library-active");
+    document.body.classList.remove("view-briefings-active");
     document.body.classList.add("view-gastown-active");
 
-    if (window.location.hash !== "#gastown" && window.location.hash !== "#board") {
-      history.replaceState(null, "", "#gastown");
+    if (window.location.hash !== "#gastown" && window.location.hash !== "#board" && window.location.hash !== "#actions") {
+      history.replaceState(null, "", "#actions");
     }
     loadGastownOverview();
-  } else if (viewName === "ingestion") {
+  } else if (viewName === "dashboards" || viewName === "ingestion") {
     if (navChat) navChat.classList.remove("active");
     if (navGastown) navGastown.classList.remove("active");
     if (navLibrary) navLibrary.classList.remove("active");
-    if (navIngestion) navIngestion.classList.add("active");
+    if (navBriefings) navBriefings.classList.remove("active");
+    if (navDashboards) navDashboards.classList.add("active");
 
     if (chatView) chatView.style.display = "none";
     if (gastownView) gastownView.style.display = "none";
     if (libraryView) libraryView.style.display = "none";
+    if (briefingsView) briefingsView.style.display = "none";
     if (ingestionView) ingestionView.style.display = "flex";
 
     if (sidebarLeft) sidebarLeft.style.display = "none";
@@ -2762,21 +3939,26 @@ function switchView(viewName) {
 
     document.body.classList.remove("view-gastown-active");
     document.body.classList.remove("view-library-active");
+    document.body.classList.remove("view-briefings-active");
     document.body.classList.add("view-ingestion-active");
 
-    if (window.location.hash !== "#ingestion") {
-      history.replaceState(null, "", "#ingestion");
+    const cur = window.location.hash;
+    if (!cur.startsWith("#dashboards") && !cur.startsWith("#ingestion")) {
+      const activeSub = (ingestionData && ingestionData.activeSubtab) || "feeds";
+      history.replaceState(null, "", `#dashboards/${activeSub}`);
     }
     renderIngestionPage();
   } else if (viewName === "library") {
     if (navChat) navChat.classList.remove("active");
     if (navGastown) navGastown.classList.remove("active");
-    if (navIngestion) navIngestion.classList.remove("active");
+    if (navDashboards) navDashboards.classList.remove("active");
+    if (navBriefings) navBriefings.classList.remove("active");
     if (navLibrary) navLibrary.classList.add("active");
 
     if (chatView) chatView.style.display = "none";
     if (gastownView) gastownView.style.display = "none";
     if (ingestionView) ingestionView.style.display = "none";
+    if (briefingsView) briefingsView.style.display = "none";
     if (libraryView) libraryView.style.display = "flex";
 
     if (sidebarLeft) sidebarLeft.style.display = "none";
@@ -2784,22 +3966,50 @@ function switchView(viewName) {
 
     document.body.classList.remove("view-gastown-active");
     document.body.classList.remove("view-ingestion-active");
+    document.body.classList.remove("view-briefings-active");
     document.body.classList.add("view-library-active");
 
     if (!window.location.hash.startsWith("#library")) {
       history.replaceState(null, "", "#library");
     }
     loadAgentLibrary();
+  } else if (viewName === "briefings") {
+    if (navChat) navChat.classList.remove("active");
+    if (navGastown) navGastown.classList.remove("active");
+    if (navDashboards) navDashboards.classList.remove("active");
+    if (navLibrary) navLibrary.classList.remove("active");
+    if (navBriefings) navBriefings.classList.add("active");
+
+    if (chatView) chatView.style.display = "none";
+    if (gastownView) gastownView.style.display = "none";
+    if (ingestionView) ingestionView.style.display = "none";
+    if (libraryView) libraryView.style.display = "none";
+    if (briefingsView) briefingsView.style.display = "flex";
+
+    if (sidebarLeft) sidebarLeft.style.display = "none";
+    if (sidebarRight) sidebarRight.style.display = "none";
+
+    document.body.classList.remove("view-gastown-active");
+    document.body.classList.remove("view-ingestion-active");
+    document.body.classList.remove("view-library-active");
+    document.body.classList.add("view-briefings-active");
+
+    if (!window.location.hash.startsWith("#briefings")) {
+      history.replaceState(null, "", "#briefings");
+    }
+    loadBriefingsView();
   } else {
     // Default: Fleet Chat
     if (navGastown) navGastown.classList.remove("active");
-    if (navIngestion) navIngestion.classList.remove("active");
+    if (navDashboards) navDashboards.classList.remove("active");
     if (navLibrary) navLibrary.classList.remove("active");
+    if (navBriefings) navBriefings.classList.remove("active");
     if (navChat) navChat.classList.add("active");
 
     if (gastownView) gastownView.style.display = "none";
     if (ingestionView) ingestionView.style.display = "none";
     if (libraryView) libraryView.style.display = "none";
+    if (briefingsView) briefingsView.style.display = "none";
     if (chatView) chatView.style.display = "flex";
 
     if (sidebarLeft) sidebarLeft.style.display = "flex";
@@ -2817,12 +4027,14 @@ function switchView(viewName) {
     document.body.classList.remove("view-gastown-active");
     document.body.classList.remove("view-ingestion-active");
     document.body.classList.remove("view-library-active");
+    document.body.classList.remove("view-briefings-active");
 
-    if (window.location.hash === "#ingestion" || window.location.hash === "#gastown" || window.location.hash === "#board" || window.location.hash.startsWith("#library")) {
+    if (window.location.hash === "#ingestion" || window.location.hash === "#dashboards" || window.location.hash === "#gastown" || window.location.hash === "#board" || window.location.hash === "#actions" || window.location.hash.startsWith("#library") || window.location.hash.startsWith("#briefings")) {
       history.replaceState(null, "", `#${state.activeStream}/${state.activeTopic}`);
     }
     scrollToBottom();
   }
+
 }
 
 window.switchTopicAndChat = async function (stream, topic, initialText = "") {
@@ -2843,6 +4055,8 @@ window.switchTopicAndChat = async function (stream, topic, initialText = "") {
 const ingestionData = {
   feeds: [],
   parsers: [],
+  finopsReport: null,
+  nsLabelsReport: null,
   feedFilter: "all",
   parserFilter: "all",
   feedSearch: "",
@@ -2893,17 +4107,297 @@ function switchIngestionSubtab(subtab) {
   const tabFeeds = document.getElementById("tabIngestionFeeds");
   const tabParsers = document.getElementById("tabIngestionParsers");
   const tabDiag = document.getElementById("tabIngestionDiagnostics");
+  const tabFinOps = document.getElementById("tabIngestionFinOps");
+  const tabNsLabels = document.getElementById("tabIngestionNamespaceLabels");
   const secFeeds = document.getElementById("secIngestionFeeds");
   const secParsers = document.getElementById("secIngestionParsers");
   const secDiag = document.getElementById("secIngestionDiagnostics");
+  const secFinOps = document.getElementById("secIngestionFinOps");
+  const secNsLabels = document.getElementById("secIngestionNamespaceLabels");
 
   if (tabFeeds) tabFeeds.classList.toggle("active", subtab === "feeds");
   if (tabParsers) tabParsers.classList.toggle("active", subtab === "parsers");
   if (tabDiag) tabDiag.classList.toggle("active", subtab === "diagnostics");
+  if (tabFinOps) tabFinOps.classList.toggle("active", subtab === "finops");
+  if (tabNsLabels) tabNsLabels.classList.toggle("active", subtab === "namespacelabels");
 
   if (secFeeds) secFeeds.style.display = subtab === "feeds" ? "flex" : "none";
   if (secParsers) secParsers.style.display = subtab === "parsers" ? "flex" : "none";
   if (secDiag) secDiag.style.display = subtab === "diagnostics" ? "flex" : "none";
+  if (secFinOps) secFinOps.style.display = subtab === "finops" ? "flex" : "none";
+  if (secNsLabels) secNsLabels.style.display = subtab === "namespacelabels" ? "flex" : "none";
+
+  if (window.location.hash.startsWith("#dashboards") || window.location.hash.startsWith("#ingestion")) {
+    history.replaceState(null, "", `#dashboards/${subtab}`);
+  }
+
+  if (subtab === "finops" && !ingestionData.finopsReport) {
+    fetchFinopsData(false);
+  }
+  if (subtab === "namespacelabels" && !ingestionData.nsLabelsReport) {
+    fetchNamespaceLabelsData();
+  }
+}
+
+async function fetchFinopsData(forceAnalyze = false) {
+  const tier = (document.getElementById("finopsTierSelect") || {}).value || "ENTERPRISE";
+  const days = (document.getElementById("finopsDaysSelect") || {}).value || "7";
+  const btn = document.getElementById("btnRunFinopsAnalysis");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner-sm"></span> Analyzing...`;
+  }
+
+  try {
+    const url = forceAnalyze 
+      ? `/api/log_cost/analyze?days=${days}&tier=${tier}`
+      : `/api/log_cost/latest`;
+    
+    const res = await fetch(url, {
+      method: forceAnalyze ? "POST" : "GET"
+    });
+    const data = await res.json();
+    if (data.status === "SUCCESS" && data.report) {
+      ingestionData.finopsReport = data.report;
+      renderFinopsSection();
+      showToast("success", `FinOps analysis complete: $${(data.report.total_potential_savings_usd || 0).toFixed(2)}/mo savings identified.`);
+    } else {
+      showToast("error", data.message || "Failed to retrieve FinOps report.");
+    }
+  } catch (err) {
+    console.error("FinOps fetch error:", err);
+    showToast("error", "Error fetching FinOps analysis: " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Analyze Costs</span>
+      `;
+    }
+  }
+}
+
+function renderFinopsSection() {
+  const r = ingestionData.finopsReport;
+  if (!r) return;
+
+  const elVol = document.getElementById("finopsTotalVolume");
+  if (elVol) elVol.textContent = `${(r.total_volume_gb || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1})} GB`;
+  const elVolSub = document.getElementById("finopsVolumeSub");
+  if (elVolSub) elVolSub.textContent = `Total events: ${(r.total_events || 0).toLocaleString()} • ${(r.total_volume_gib || 0).toFixed(1)} GiB`;
+
+  const elSpend = document.getElementById("finopsProjectedSpend");
+  if (elSpend) elSpend.textContent = `$${(r.total_projected_monthly_spend_enterprise || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} / mo`;
+  const elSpendSub = document.getElementById("finopsSpendSub");
+  if (elSpendSub) elSpendSub.textContent = `Standard: $${(r.total_projected_monthly_spend_standard || 0).toFixed(0)} • Ent+: $${(r.total_projected_monthly_spend_enterprise_plus || 0).toFixed(0)}`;
+
+  const elSavings = document.getElementById("finopsPotentialSavings");
+  if (elSavings) elSavings.textContent = `$${(r.total_potential_savings_usd || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} / mo`;
+
+  const elBloated = document.getElementById("finopsBloatedCount");
+  if (elBloated) elBloated.textContent = (r.bloated_sources || []).length;
+  const elBloatedSub = document.getElementById("finopsBloatedSub");
+  if (elBloatedSub) elBloatedSub.textContent = `${(r.bloated_sources || []).length} sources exceed 2 KB/event`;
+
+  const kpiProjectedSpend = document.getElementById("kpiProjectedSpend");
+  if (kpiProjectedSpend) kpiProjectedSpend.textContent = `$${(r.total_projected_monthly_spend_enterprise || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}/mo`;
+
+  // Render Recommendations
+  const recContainer = document.getElementById("finopsRecommendationsList");
+  if (recContainer) {
+    const recs = r.recommendations || [];
+    if (recs.length === 0) {
+      recContainer.innerHTML = `<div style="font-size:12px; color:var(--text-muted);">No optimization recommendations identified for this window.</div>`;
+    } else {
+      recContainer.innerHTML = recs.map((rec, idx) => `
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-badge" style="background:rgba(52,211,153,0.15); color:#34d399; border:1px solid rgba(52,211,153,0.3); font-size:10px;">${escapeHtml(rec.category)}</span>
+              <span style="font-weight:600; font-size:13px; color:#f9fafb;">${escapeHtml(rec.title)}</span>
+            </div>
+            <span style="font-size:12px; font-weight:700; color:#34d399;">+$${(rec.potential_monthly_savings_usd || 0).toFixed(2)}/mo</span>
+          </div>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">
+            Target Log Type: <code style="color:#38bdf8;">${escapeHtml(rec.log_type)}</code> • Estimated Volume Reduction: <strong>${(rec.potential_volume_savings_gb || 0).toFixed(2)} GB/mo</strong>
+          </div>
+          <div style="font-size:11px; background:rgba(0,0,0,0.25); border-radius:4px; padding:6px 8px; color:var(--text-dim); font-family:monospace; white-space:pre-wrap;">${escapeHtml(rec.implementation_guidance || rec.description)}</div>
+          <div style="margin-top:8px; display:flex; justify-content:flex-end;">
+            <button class="btn btn-sm btn-ghost" style="font-size:11px; padding:2px 8px;" onclick="switchTopicAndChat('ingestion', 'finops', '@log-cost-agent optimize ${escapeHtml(rec.log_type)} via ${escapeHtml(rec.category)}')">
+              Apply via @log-cost-agent
+            </button>
+          </div>
+        </div>
+      `).join("");
+    }
+  }
+
+  // Render Volume Drivers Table
+  const tableBody = document.getElementById("finopsDriversTableBody");
+  if (tableBody) {
+    const drivers = r.top_volume_drivers || [];
+    if (drivers.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="7" class="table-loading">No volume driver metrics available.</td></tr>`;
+    } else {
+      tableBody.innerHTML = drivers.map(d => {
+        const isBloated = d.is_bloated;
+        const bloatBadge = isBloated 
+          ? `<span class="status-badge status-WARN" style="font-size:10px;">BLOATED (>2KB)</span>`
+          : `<span class="status-badge status-HEALTHY" style="font-size:10px;">OPTIMAL</span>`;
+        return `
+          <tr>
+            <td style="font-weight:600; color:#f8fafc;"><code style="color:#38bdf8; font-size:11.5px;">${escapeHtml(d.log_type)}</code></td>
+            <td>${(d.event_count || 0).toLocaleString()}</td>
+            <td>${(d.volume_gb_decimal || 0).toFixed(2)} GB</td>
+            <td>${(d.avg_event_size_bytes || 0).toFixed(1)} B</td>
+            <td>${bloatBadge}</td>
+            <td style="font-weight:600; color:#fbbf24;">$${(d.cost_enterprise || 0).toFixed(2)}/mo</td>
+            <td>
+              <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'finops', '@log-cost-agent analyze log source ${escapeHtml(d.log_type)}')">
+                Inspect
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+  }
+}
+
+async function fetchNamespaceLabelsData() {
+  const days = (document.getElementById("nsLabelsDaysSelect") || {}).value || "7";
+  const btn = document.getElementById("btnRunNsLabelsAudit");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner-sm"></span> Auditing...`;
+  }
+
+  try {
+    const res = await fetch(`/api/ingestion/labels-and-namespaces?lookback_days=${days}`);
+    const data = await res.json();
+    if (data.status === "SUCCESS" && data.report) {
+      ingestionData.nsLabelsReport = data.report;
+      renderNamespaceLabelsSection();
+    } else {
+      console.warn("Failed to audit labels and namespaces:", data.message);
+    }
+  } catch (err) {
+    console.error("Error fetching labels & namespaces report:", err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> <span>Audit Hygiene</span>`;
+    }
+  }
+}
+
+function renderNamespaceLabelsSection() {
+  const report = ingestionData.nsLabelsReport;
+  if (!report) return;
+
+  const totalLabelledEl = document.getElementById("nsTotalLabelledEvents");
+  const activeLabelsCountEl = document.getElementById("nsActiveLabelsCount");
+  const totalNamespacedEl = document.getElementById("nsTotalNamespacedEvents");
+  const activeNamespacesCountEl = document.getElementById("nsActiveNamespacesCount");
+  const totalUntaggedEl = document.getElementById("nsTotalUntaggedEvents");
+  const rbacStatusEl = document.getElementById("nsRbacAlignmentStatus");
+  const rbacCountEl = document.getElementById("nsRbacLabelCount");
+
+  const activeLabels = report.active_ingestion_labels || [];
+  const activeNs = report.active_namespaces || [];
+  const rbacRefs = report.data_rbac_references || [];
+  const findings = report.findings || [];
+
+  if (totalLabelledEl) totalLabelledEl.textContent = (report.total_labelled_events || 0).toLocaleString();
+  if (activeLabelsCountEl) activeLabelsCountEl.textContent = `${activeLabels.length} active tag keys`;
+  if (totalNamespacedEl) totalNamespacedEl.textContent = (report.total_namespaced_events || 0).toLocaleString();
+  if (activeNamespacesCountEl) activeNamespacesCountEl.textContent = `${activeNs.length} active namespaces`;
+  if (totalUntaggedEl) totalUntaggedEl.textContent = (report.total_untagged_events || 0).toLocaleString();
+
+  const rbacMatches = rbacRefs.filter(r => r.status === "ACTIVE_MATCH").length;
+  if (rbacStatusEl) {
+    if (rbacRefs.length === 0) {
+      rbacStatusEl.textContent = "NO LABELS";
+      rbacStatusEl.style.color = "#9ca3af";
+    } else if (rbacMatches === rbacRefs.length) {
+      rbacStatusEl.textContent = "ALIGNED (100%)";
+      rbacStatusEl.style.color = "#34d399";
+    } else {
+      rbacStatusEl.textContent = `${rbacMatches}/${rbacRefs.length} ALIGNED`;
+      rbacStatusEl.style.color = "#fbbf24";
+    }
+  }
+  if (rbacCountEl) rbacCountEl.textContent = `${rbacRefs.length} Data Access Labels`;
+
+  const findingsList = document.getElementById("nsLabelsFindingsList");
+  if (findingsList) {
+    if (findings.length === 0) {
+      findingsList.innerHTML = `<div style="font-size:12px; color:#34d399;">✓ No hygiene or Data RBAC tagging deficiencies identified.</div>`;
+    } else {
+      findingsList.innerHTML = findings.map(f => {
+        const sevClass = f.severity === "HIGH" ? "status-FAILED" : (f.severity === "MEDIUM" ? "status-WARN" : "status-HEALTHY");
+        const typesBadge = f.affected_log_types && f.affected_log_types.length
+          ? `<div style="margin-top:4px; font-size:11px; color:#9ca3af;">Affected log types: <code>${escapeHtml(f.affected_log_types.join(", "))}</code></div>`
+          : "";
+        return `
+          <div style="background:var(--bg-table-header); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:700; font-size:12.5px; color:#f3f4f6;">${escapeHtml(f.title)}</span>
+              <span class="status-badge ${sevClass}" style="font-size:10px;">${escapeHtml(f.severity)}</span>
+            </div>
+            <div style="font-size:11.5px; color:#cbd5e1; margin-top:4px;">${escapeHtml(f.description)}</div>
+            ${typesBadge}
+            <div style="font-size:11px; color:#38bdf8; margin-top:6px;"><strong>Remediation:</strong> ${escapeHtml(f.remediation_guidance)}</div>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  const labelsTableBody = document.getElementById("ingestionLabelsTableBody");
+  if (labelsTableBody) {
+    if (activeLabels.length === 0) {
+      labelsTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No active ingestion labels found.</td></tr>`;
+    } else {
+      labelsTableBody.innerHTML = activeLabels.map(l => {
+        const typeBadge = l.is_auto_generated
+          ? `<span class="status-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; font-size:10px;">AUTO</span>`
+          : `<span class="status-badge" style="background:rgba(156,163,175,0.15); color:#9ca3af; font-size:10px;">CUSTOM</span>`;
+        const logTypesStr = (l.log_types || []).slice(0, 3).join(", ") + ((l.log_types || []).length > 3 ? ` (+${l.log_types.length - 3})` : "");
+        return `
+          <tr>
+            <td style="font-weight:600;"><code style="color:#e2e8f0; font-size:11.5px;">${escapeHtml(l.label_key)}</code></td>
+            <td>${(l.event_count || 0).toLocaleString()}</td>
+            <td>${typeBadge}</td>
+            <td style="font-size:11px; color:#9ca3af;">${escapeHtml(logTypesStr)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  }
+
+  const nsTableBody = document.getElementById("udmNamespacesTableBody");
+  if (nsTableBody) {
+    if (activeNs.length === 0) {
+      nsTableBody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No active UDM namespaces found.</td></tr>`;
+    } else {
+      nsTableBody.innerHTML = activeNs.map(n => {
+        const rfcBadge = n.is_network_rfc1918_relevant
+          ? `<span class="status-badge status-WARN" style="font-size:10px;">RFC 1918</span>`
+          : `<span class="status-badge status-HEALTHY" style="font-size:10px;">STANDARD</span>`;
+        const logTypesStr = (n.log_types || []).slice(0, 3).join(", ") + ((n.log_types || []).length > 3 ? ` (+${n.log_types.length - 3})` : "");
+        return `
+          <tr>
+            <td style="font-weight:600;"><code style="color:#818cf8; font-size:11.5px;">${escapeHtml(n.namespace)}</code></td>
+            <td>${(n.event_count || 0).toLocaleString()}</td>
+            <td>${rfcBadge}</td>
+            <td style="font-size:11px; color:#9ca3af;">${escapeHtml(logTypesStr)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  }
 }
 
 async function renderIngestionPage(forceRefresh = false) {
@@ -2943,6 +4437,21 @@ async function renderIngestionPage(forceRefresh = false) {
 
     const elDropCodes = document.getElementById("kpiDropCodes");
     if (elDropCodes) elDropCodes.textContent = dropCodes;
+
+    // Fetch latest log cost report for Spend KPI card
+    fetch('/api/log_cost/latest')
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === "SUCCESS" && data.report) {
+          ingestionData.finopsReport = data.report;
+          const elSpend = document.getElementById("kpiProjectedSpend");
+          if (elSpend) elSpend.textContent = `$${(data.report.total_projected_monthly_spend_enterprise || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}/mo`;
+          if (ingestionData.activeSubtab === "finops") {
+            renderFinopsSection();
+          }
+        }
+      })
+      .catch(() => {});
 
     renderFeedsTable();
     renderParsersTable();
@@ -3133,6 +4642,45 @@ async function handleAuditParsersAction() {
   }
 }
 
+async function handleAuditRulesPageAction() {
+  const btn = document.getElementById("pageBtnAuditRules");
+  const banner = document.getElementById("ingestionStatusBanner");
+  if (!btn) return;
+
+  btn.disabled = true;
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = `<svg class="btn-svg spinner" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span class="btn-text">Auditing Rules...</span>`;
+
+  if (banner) {
+    banner.style.display = "flex";
+    banner.innerHTML = `<span>Evaluating unified detection repository health across custom &amp; curated rules...</span>`;
+  }
+
+  try {
+    const res = await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&run_conflict_scan=true", { method: "POST" });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const report = await res.json();
+    showToast("success", `Rule audit completed! ${report.total_rules_scanned || 0} rules evaluated.`);
+    if (banner) {
+      banner.innerHTML = `
+        <span><strong>Rule Repository Audit Completed:</strong> Evaluated ${report.total_rules_scanned || 0} rules (${report.healthy_count || 0} healthy, ${report.silent_decay_count || 0} silent, ${report.failing_count || 0} errors). Results posted to <strong>#detections &gt; decay-review</strong>.</span>
+        <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('detections', 'decay-review')">View in Chat →</button>
+      `;
+    }
+  } catch (err) {
+    console.error("Rule audit failed:", err);
+    showToast("error", `Rule audit failed: ${err.message}`);
+    if (banner) {
+      banner.innerHTML = `<span style="color:#f87171;"><strong>Rule Audit Failed:</strong> ${escapeHtml(err.message)}</span>`;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
 async function handleRunLabDiagnose() {
   const logType = (document.getElementById("labLogTypeInput").value || "").trim();
   const lookback = parseInt(document.getElementById("labLookbackInput").value || "168", 10);
@@ -3267,14 +4815,18 @@ function renderGastownHeader() {
   const escalationCount = summary.escalation_count ?? 1;
 
   const statPolecats = document.getElementById("gtStatPolecats");
+  const statFleetOnline = document.getElementById("gtFleetOnline");
   const statHooks = document.getElementById("gtStatHooks");
   const statWork = document.getElementById("gtStatWork");
+  const statLeases = document.getElementById("gtStatLeases");
   const statConvoys = document.getElementById("gtStatConvoys");
   const statEscalations = document.getElementById("gtStatEscalations");
 
   if (statPolecats) statPolecats.textContent = polecatCount;
+  if (statFleetOnline) statFleetOnline.textContent = `${polecatCount} Agents Online`;
   if (statHooks) statHooks.textContent = hookCount;
   if (statWork) statWork.textContent = issueCount;
+  if (statLeases) statLeases.textContent = summary.soc_leases_active ?? 0;
   if (statConvoys) statConvoys.textContent = convoyCount;
   if (statEscalations) statEscalations.textContent = escalationCount;
 
@@ -3303,6 +4855,7 @@ function switchGastownSubtab(subtabName) {
 
   const tabs = [
     { id: "tabGtKanban", sec: "secGtKanban", name: "kanban" },
+    { id: "tabGtWorkQueue", sec: "secGtWorkQueue", name: "work_queue" },
     { id: "tabGtConvoys", sec: "secGtConvoys", name: "convoys" },
     { id: "tabGtRefinery", sec: "secGtRefinery", name: "refinery" },
     { id: "tabGtEscalations", sec: "secGtEscalations", name: "escalations" },
@@ -3333,6 +4886,9 @@ function renderGastownCurrentSubtab() {
     case "kanban":
       renderGastownKanban();
       break;
+    case "work_queue":
+      renderGastownWorkQueue();
+      break;
     case "convoys":
       renderGastownConvoys();
       break;
@@ -3348,20 +4904,52 @@ function renderGastownCurrentSubtab() {
   }
 }
 
+function renderSocKanbanCard(iss) {
+  const id = escapeHtml(iss.issue_id);
+  const title = escapeHtml(iss.problem?.title || iss.title || "Operational Issue");
+  const target = escapeHtml(iss.problem?.target_resource_id || "Resource");
+  const sev = (iss.problem?.severity || "MEDIUM").toUpperCase();
+  const sevClass = (sev === "CRITICAL" || sev === "HIGH") ? "badge-risk-high" : (sev === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
+  const plane = (iss.operational_plane || "data").toUpperCase();
+  const holder = iss.lease?.holder_agent || "unassigned";
+
+  return `
+    <div class="kanban-card" onclick="viewSocIssueDetail('${id}')" style="border-left: 3px solid #6366f1;">
+      <div class="kanban-card-head">
+        <span class="kanban-card-id" style="color:#a5b4fc;">${id}</span>
+        <div style="display:flex; align-items:center; gap:4px;">
+          <span class="kanban-card-badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:9.5px;">${plane}</span>
+          <span class="kanban-card-badge ${sevClass}">${sev}</span>
+        </div>
+      </div>
+      <div class="kanban-card-title">${title}</div>
+      <div class="kanban-card-target">${target}</div>
+      <div class="kanban-card-footer">
+        <span class="kanban-card-author">${getAgentAvatarSvg(holder, 13)} ${holder}</span>
+        <button class="kanban-card-action-btn" onclick="event.stopPropagation(); viewSocIssueDetail('${id}')">Ledger 📜</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderGastownKanban() {
   const proposals = gastownState.proposals || [];
   const overview = gastownState.overview || {};
+  const socIssues = overview.soc_issues || [];
 
   // Col 1: Triage / Backlog
   const colTriage = document.getElementById("cardsColTriage");
   const countColTriage = document.getElementById("countColTriage");
   const triageItems = overview.todos_pending || [];
-  if (countColTriage) countColTriage.textContent = triageItems.length;
+  const socTriage = socIssues.filter(i => i.status === "AVAILABLE" || i.status === "OBSERVED");
+  const totalTriage = triageItems.length + socTriage.length;
+  if (countColTriage) countColTriage.textContent = totalTriage;
   if (colTriage) {
-    if (triageItems.length === 0) {
+    if (totalTriage === 0) {
       colTriage.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No pending triage items.</div>`;
     } else {
-      colTriage.innerHTML = triageItems.map((item) => {
+      const socCards = socTriage.map(renderSocKanbanCard).join("");
+      const todoCards = triageItems.map((item) => {
         const id = item.todo_id || item.id || "TODO";
         const priority = (item.priority || "MEDIUM").toUpperCase();
         const badgeClass = priority === "HIGH" || priority === "CRITICAL" ? "badge-risk-high" : (priority === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
@@ -3370,21 +4958,31 @@ function renderGastownKanban() {
         const stream = item.stream || "detections";
         const topic = item.topic || "decay-review";
         const prompt = item.action_prompt || `${author} audit rule ${target}`;
+        const sightingBadge = (item.sighting_count && item.sighting_count > 1)
+          ? `<span class="kanban-card-badge badge-sighting" title="Corroborated across ${item.sighting_count} patrol audits">👁️ ${item.sighting_count}x</span>`
+          : "";
         return `
           <div class="kanban-card">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${id}</span>
-              <span class="kanban-card-badge ${badgeClass}">${priority} PRIORITY</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${sightingBadge}
+                <span class="kanban-card-badge ${badgeClass}">${priority} PRIORITY</span>
+              </div>
             </div>
             <div class="kanban-card-title">${escapeHtml(item.title || "Remediation Task")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
-              <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Triage</button>
+              <div style="display:flex; gap:6px;">
+                <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Triage</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo('${id}')" title="Dismiss or resolve this task">Dismiss</button>
+              </div>
             </div>
           </div>
         `;
       }).join("");
+      colTriage.innerHTML = socCards + todoCards;
     }
   }
 
@@ -3392,12 +4990,15 @@ function renderGastownKanban() {
   const colProgress = document.getElementById("cardsColProgress");
   const countColProgress = document.getElementById("countColProgress");
   const progressItems = overview.todos_in_progress || [];
-  if (countColProgress) countColProgress.textContent = progressItems.length;
+  const socProgress = socIssues.filter(i => i.status === "LEASED" || i.status === "CLAIMED" || i.status === "EXECUTING");
+  const totalProgress = progressItems.length + socProgress.length;
+  if (countColProgress) countColProgress.textContent = totalProgress;
   if (colProgress) {
-    if (progressItems.length === 0) {
+    if (totalProgress === 0) {
       colProgress.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No active agent tasks in progress.</div>`;
     } else {
-      colProgress.innerHTML = progressItems.map((item) => {
+      const socCards = socProgress.map(renderSocKanbanCard).join("");
+      const todoCards = progressItems.map((item) => {
         const id = item.todo_id || item.id || "WORK";
         const priority = (item.priority || "MEDIUM").toUpperCase();
         const badgeClass = priority === "HIGH" || priority === "CRITICAL" ? "badge-risk-high" : (priority === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
@@ -3406,34 +5007,47 @@ function renderGastownKanban() {
         const stream = item.stream || "detections";
         const topic = item.topic || "tuning-review";
         const prompt = item.action_prompt || `${author} tune rule ${target}`;
+        const sightingBadge = (item.sighting_count && item.sighting_count > 1)
+          ? `<span class="kanban-card-badge badge-sighting" title="Corroborated across ${item.sighting_count} patrol audits">👁️ ${item.sighting_count}x</span>`
+          : "";
         return `
           <div class="kanban-card">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${id}</span>
-              <span class="kanban-card-badge ${badgeClass}">ACTIVE</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${sightingBadge}
+                <span class="kanban-card-badge ${badgeClass}">ACTIVE</span>
+              </div>
             </div>
             <div class="kanban-card-title">${escapeHtml(item.title || "Optimization Task")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
-              <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Inspect</button>
+              <div style="display:flex; gap:6px;">
+                <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Inspect</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo('${id}')" title="Dismiss or resolve this task">Dismiss</button>
+              </div>
             </div>
           </div>
         `;
       }).join("");
+      colProgress.innerHTML = socCards + todoCards;
     }
   }
 
-  // Col 3: HITL Review (Proposals)
+  // Col 3: HITL Review (Proposals & Validations)
   const colReview = document.getElementById("cardsColReview");
   const countColReview = document.getElementById("countColReview");
   const openProposals = proposals.filter((p) => p.status === "OPEN");
-  if (countColReview) countColReview.textContent = openProposals.length;
+  const socReview = socIssues.filter(i => i.status === "VALIDATING");
+  const totalReview = openProposals.length + socReview.length;
+  if (countColReview) countColReview.textContent = totalReview;
   if (colReview) {
-    if (openProposals.length === 0) {
+    if (totalReview === 0) {
       colReview.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No pending proposals awaiting review.</div>`;
     } else {
-      colReview.innerHTML = openProposals.map((p) => {
+      const socCards = socReview.map(renderSocKanbanCard).join("");
+      const propCards = openProposals.map((p) => {
         const riskClass = p.risk_level === "CRITICAL" ? "badge-risk-high" : (p.risk_level === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
@@ -3453,6 +5067,7 @@ function renderGastownKanban() {
           </div>
         `;
       }).join("");
+      colReview.innerHTML = socCards + propCards;
     }
   }
 
@@ -3460,12 +5075,15 @@ function renderGastownKanban() {
   const colMerged = document.getElementById("cardsColMerged");
   const countColMerged = document.getElementById("countColMerged");
   const closedProposals = proposals.filter((p) => p.status === "MERGED" || p.status === "APPLIED" || p.status === "CLOSED" || p.status === "REJECTED");
-  if (countColMerged) countColMerged.textContent = closedProposals.length;
+  const socMerged = socIssues.filter(i => i.status === "APPROVED" || i.status === "APPLIED" || i.status === "CLOSED" || i.status === "VERIFIED");
+  const totalMerged = closedProposals.length + socMerged.length;
+  if (countColMerged) countColMerged.textContent = totalMerged;
   if (colMerged) {
-    if (closedProposals.length === 0) {
+    if (totalMerged === 0) {
       colMerged.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No applied proposals yet.</div>`;
     } else {
-      colMerged.innerHTML = closedProposals.map((p) => {
+      const socCards = socMerged.map(renderSocKanbanCard).join("");
+      const propCards = closedProposals.map((p) => {
         const isMerged = p.status === "MERGED" || p.status === "APPLIED";
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
@@ -3484,6 +5102,7 @@ function renderGastownKanban() {
           </div>
         `;
       }).join("");
+      colMerged.innerHTML = socCards + propCards;
     }
   }
 }
@@ -3746,6 +5365,9 @@ async function renderGastownPatrols() {
       "@identity-governor": { icon: "🔑", name: "Identity Governor", desc: "Audits GCP IAM roles, detects privilege escalation drift, and reconciles unsanctioned permissions." },
       "@gcp-telemetry-agent": { icon: "📈", name: "GCP Telemetry Agent", desc: "Correlates Cloud Monitoring ingestion & API metrics with Cloud Logging audit and error logs." },
       "@tenant-posture-agent": { icon: "🏛️", name: "Tenant Posture Governor", desc: "Audits SIEM/SOAR configuration baselines, tracks cryptographic fingerprints, and detects configuration drift." },
+      "@playbook-decay-agent": { icon: "📜", name: "SOAR Playbook Decay Agent", desc: "Audits SOAR playbooks against a 100-point resilience model, 30-day failure rates, and synthesizes Mermaid DAGs." },
+      "@timestamp-integrity-agent": { icon: "⏱️", name: "Timestamp Integrity Agent", desc: "Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0)." },
+      "@rule-conflict-agent": { icon: "⚖️", name: "Rule Conflict & Overlap Agent", desc: "Detects semantic rule overlap, contradiction, and redundancy with COS scoring (0-100) and consolidation proposals." },
     };
 
     if (schedules.length === 0) {
@@ -3841,6 +5463,343 @@ async function renderGastownPatrols() {
 }
 window.renderGastownPatrols = renderGastownPatrols;
 
+// ====================================================================
+// SOC Operating System: Work Queue, Leases & Git Durability Ledger
+// ====================================================================
+
+async function renderGastownWorkQueue() {
+  const issuesTableBody = document.getElementById("gtSocIssuesTableBody");
+  const workersTableBody = document.getElementById("gtSocWorkersTableBody");
+  const planeFilter = document.getElementById("socFilterPlane")?.value || "";
+  const statusFilter = document.getElementById("socFilterStatus")?.value || "";
+
+  if (issuesTableBody) {
+    issuesTableBody.innerHTML = `<tr><td colspan="9" class="table-loading">Refreshing coordination work queue...</td></tr>`;
+  }
+  if (workersTableBody) {
+    workersTableBody.innerHTML = `<tr><td colspan="6" class="table-loading">Refreshing worker capability profiles...</td></tr>`;
+  }
+
+  try {
+    let url = "/api/soc/issues?limit=100";
+    if (planeFilter) url += `&plane=${encodeURIComponent(planeFilter)}`;
+    if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
+
+    const [issuesRes, workersRes] = await Promise.all([
+      fetch(url),
+      fetch("/api/soc/workers?active_only=false")
+    ]);
+
+    const issues = issuesRes.ok ? await issuesRes.json() : [];
+    const workers = workersRes.ok ? await workersRes.json() : [];
+
+    // Render Issues Table
+    if (issuesTableBody) {
+      if (issues.length === 0) {
+        issuesTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:24px; color:var(--text-muted);">No SOC issues match the active filter.</td></tr>`;
+      } else {
+        const nowSec = Date.now() / 1000;
+        issuesTableBody.innerHTML = issues.map((iss) => {
+          const id = escapeHtml(iss.issue_id || iss.id);
+          const plane = escapeHtml(iss.operational_plane || iss.plane || "data");
+          const title = escapeHtml(iss.problem?.title || iss.title || "Operational Issue");
+          const target = escapeHtml((iss.problem?.affected_objects && iss.problem.affected_objects.length > 0) ? iss.problem.affected_objects.join(", ") : (iss.problem?.target_resource_id || "Resource"));
+          const sev = (iss.problem?.severity || iss.severity || "MEDIUM").toUpperCase();
+          const status = (iss.status || "AVAILABLE").toUpperCase();
+          const authority = escapeHtml(iss.governance?.required_authority_tier || iss.governance?.authority_tier || "TIER_1_AUTONOMOUS");
+
+          // Badges
+          const sevClass = (sev === "CRITICAL" || sev === "HIGH") ? "badge-risk-high" : (sev === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
+          let statusBadgeClass = "badge-blue";
+          if (status === "AVAILABLE") statusBadgeClass = "badge-gray";
+          else if (status === "LEASED" || status === "CLAIMED") statusBadgeClass = "badge-yellow";
+          else if (status === "VALIDATING") statusBadgeClass = "badge-purple";
+          else if (status === "APPROVED" || status === "APPLIED") statusBadgeClass = "badge-green";
+          else if (status === "VERIFIED" || status === "CLOSED") statusBadgeClass = "badge-teal";
+
+          // Lease Owner & Expiry
+          let ownerHtml = `<span style="color:var(--text-dim); font-style:italic;">Unassigned</span>`;
+          let expiresHtml = `<span style="color:var(--text-dim);">-</span>`;
+          if (iss.lease && (iss.lease.holder_agent || iss.lease.owner)) {
+            const holder = iss.lease.holder_agent || iss.lease.owner;
+            ownerHtml = `<span style="font-weight:600; color:var(--text-bright); display:flex; align-items:center; gap:4px;">${getAgentAvatarSvg(holder, 14)} ${escapeHtml(holder)}</span>`;
+            let expSec = iss.lease.expires_at;
+            if (typeof expSec === "string") {
+              expSec = new Date(expSec).getTime() / 1000;
+            }
+            const rem = Math.max(0, Math.floor((expSec || nowSec) - nowSec));
+            if (rem > 0) {
+              expiresHtml = `<span style="color:#34d399; font-family:var(--font-mono); font-size:11.5px; font-weight:600;">${rem}s left</span>`;
+            } else {
+              expiresHtml = `<span style="color:#f87171; font-family:var(--font-mono); font-size:11.5px; font-weight:600;">EXPIRED</span>`;
+            }
+          }
+
+          // Action buttons
+          let actionButtons = `
+            <button class="btn btn-xs btn-secondary" onclick="viewSocIssueDetail('${id}')" title="Inspect durable Git ledger & events">Ledger</button>
+          `;
+          if (status === "AVAILABLE" || (iss.lease && Math.max(0, Math.floor(iss.lease.expires_at - nowSec)) === 0)) {
+            actionButtons += `
+              <button class="btn btn-xs btn-primary" onclick="handleClaimSocIssue('${id}')" title="Claim lease for autonomous worker">Claim</button>
+            `;
+          } else if (status === "LEASED" || status === "CLAIMED") {
+            actionButtons += `
+              <button class="btn btn-xs btn-outline" onclick="handleReleaseSocIssue('${id}')" title="Release lease back to pool">Release</button>
+            `;
+          }
+          if (status === "VALIDATING" || status === "LEASED") {
+            actionButtons += `
+              <button class="btn btn-xs btn-success" onclick="handleDecideSocIssue('${id}', 'APPROVED')" title="Approve issue change">Approve</button>
+            `;
+          }
+
+          return `
+            <tr>
+              <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" onclick="viewSocIssueDetail('${id}')">${id}</td>
+              <td><span class="badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:10px; font-weight:700;">${plane.toUpperCase()}</span></td>
+              <td>
+                <div style="font-weight:600; color:var(--text-bright); font-size:12.5px;">${title}</div>
+                <div style="font-size:11px; color:var(--text-dim); font-family:var(--font-mono); margin-top:2px;">${target}</div>
+              </td>
+              <td><span class="kanban-card-badge ${sevClass}" style="font-size:10px;">${sev}</span></td>
+              <td><span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${status}</span></td>
+              <td>${ownerHtml}</td>
+              <td>${expiresHtml}</td>
+              <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${authority}</td>
+              <td><div style="display:flex; gap:4px;">${actionButtons}</div></td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    // Render Workers Table
+    if (workersTableBody) {
+      if (workers.length === 0) {
+        workersTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">No workers registered in coordination plane.</td></tr>`;
+      } else {
+        workersTableBody.innerHTML = workers.map((w) => {
+          const handle = escapeHtml(w.agent_handle || "@agent");
+          const authority = escapeHtml(w.max_authority_tier || "TIER_1_AUTONOMOUS");
+          const planeList = w.operational_planes || w.supported_planes || [];
+          const planes = planeList.map(p => `<span class="badge" style="background:rgba(59,130,246,0.12); color:#93c5fd; font-size:10px; margin-right:3px;">${escapeHtml(p)}</span>`).join("");
+          const rawCaps = Array.isArray(w.capabilities) ? w.capabilities : Object.keys(w.capabilities || {});
+          const caps = rawCaps.slice(0, 8).map(c => `<span class="tag-chip" style="font-size:10px; padding:2px 6px; margin:2px; display:inline-block; background:rgba(255,255,255,0.06); border-radius:3px; font-family:var(--font-mono);">${escapeHtml(c)}</span>`).join("") + (rawCaps.length > 8 ? `<span style="font-size:10px; color:var(--text-dim); margin-left:4px;">+${rawCaps.length - 8} more</span>` : "");
+          const maxLeases = w.max_concurrent_leases ?? 3;
+
+          return `
+            <tr>
+              <td>
+                <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:var(--text-bright);">
+                  ${getAgentAvatarSvg(w.agent_handle, 16)}
+                  <span>${handle}</span>
+                </div>
+              </td>
+              <td style="font-family:var(--font-mono); font-size:11.5px; color:#cbd5e1;">${authority}</td>
+              <td>${planes || '<span style="color:var(--text-dim);">-</span>'}</td>
+              <td><div style="max-width:340px; display:flex; flex-wrap:wrap;">${caps || '<span style="color:var(--text-dim);">-</span>'}</div></td>
+              <td style="font-family:var(--font-mono); font-weight:600; color:#cbd5e1;">${maxLeases}</td>
+              <td><span class="badge badge-green" style="font-size:10px; font-weight:700;">READY</span></td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to render SOC work queue:", err);
+    if (issuesTableBody) {
+      issuesTableBody.innerHTML = `<tr><td colspan="9" style="color:#f87171; padding:16px;">Failed to load SOC work queue: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+window.renderGastownWorkQueue = renderGastownWorkQueue;
+
+async function viewSocIssueDetail(issueId) {
+  const modal = document.getElementById("modalSocIssue");
+  const titleEl = document.getElementById("modalSocIssueTitle");
+  const bodyEl = document.getElementById("modalSocIssueBody");
+  if (!modal || !bodyEl) return;
+
+  if (titleEl) titleEl.textContent = `SOC Issue: ${issueId}`;
+  bodyEl.innerHTML = `<div style="text-align:center; padding:32px; color:var(--text-muted);">Loading Git evidence ledger & state transitions for ${escapeHtml(issueId)}...</div>`;
+  modal.style.display = "flex";
+
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}`);
+    if (!res.ok) {
+      bodyEl.innerHTML = `<div style="color:#f87171; padding:16px;">Failed to load issue details (${res.status})</div>`;
+      return;
+    }
+    const iss = await res.json();
+    const prob = iss.problem || {};
+    const rout = iss.routing || {};
+    const gov = iss.governance || {};
+    const lease = iss.lease || null;
+    const events = iss.materialized_events || [];
+    const resolution = iss.resolution_markdown || "";
+
+    // Build timeline HTML
+    let eventsHtml = `<div style="color:var(--text-dim); font-size:12px; padding:8px;">No durability events recorded in Git ledger yet.</div>`;
+    if (events.length > 0) {
+      eventsHtml = events.map((ev, idx) => {
+        const evName = escapeHtml(ev.transition || `Event ${idx + 1}`);
+        const actor = escapeHtml(ev.actor || "system");
+        const ts = escapeHtml(ev.timestamp || "-");
+        const meta = ev.metadata ? `<pre style="margin:4px 0 0; background:rgba(0,0,0,0.3); padding:6px; border-radius:4px; font-size:10.5px; max-height:100px; overflow-y:auto;">${escapeHtml(JSON.stringify(ev.metadata, null, 2))}</pre>` : "";
+        const evidenceRefs = (ev.evidence_references && ev.evidence_references.length > 0)
+          ? `<div style="margin-top:4px; font-size:11px; color:#93c5fd;">📎 Evidence: ${ev.evidence_references.map(r => `<code>${escapeHtml(r)}</code>`).join(", ")}</div>`
+          : "";
+
+        return `
+          <div style="border-left: 2px solid #6366f1; padding: 6px 0 10px 14px; position: relative; margin-left: 6px;">
+            <div style="position: absolute; left: -6px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: #6366f1;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:700; color:var(--text-bright); font-size:12px;">${evName}</span>
+              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${ts}</span>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+              Actor: <span style="font-weight:600; color:#e2e8f0;">${actor}</span>
+            </div>
+            ${evidenceRefs}
+            ${meta}
+          </div>
+        `;
+      }).join("");
+    }
+
+    let resolutionHtml = "";
+    if (resolution) {
+      resolutionHtml = `
+        <div style="margin-top:16px; background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:12px;">
+          <h4 style="font-size:12px; font-weight:700; color:#34d399; margin:0 0 6px; display:flex; align-items:center; gap:6px;">
+            <span>✅ Resolution Proof &amp; Verification</span>
+          </h4>
+          <div style="font-size:12px; color:#e2e8f0; line-height:1.5; white-space:pre-wrap;">${escapeHtml(resolution)}</div>
+        </div>
+      `;
+    }
+
+    bodyEl.innerHTML = `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:16px;">
+        <div style="background:var(--bg-secondary); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="font-size:11px; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Issue Problem &amp; Target</div>
+          <div style="font-size:13px; font-weight:700; color:var(--text-bright); margin-top:4px;">${escapeHtml(prob.title || iss.title || "-")}</div>
+          <div style="font-size:11.5px; font-family:var(--font-mono); color:#cbd5e1; margin-top:4px;">Target: ${escapeHtml((prob.affected_objects && prob.affected_objects.length > 0) ? prob.affected_objects.join(", ") : (prob.target_resource_id || "-"))}</div>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">Severity: <span style="font-weight:700;">${escapeHtml(prob.severity || iss.severity || "MEDIUM")}</span> &bull; Plane: <span style="font-weight:700;">${escapeHtml(iss.operational_plane || iss.plane || "data")}</span></div>
+        </div>
+
+        <div style="background:var(--bg-secondary); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+          <div style="font-size:11px; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Routing &amp; Governance</div>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">Required Capabilities: <span style="font-family:var(--font-mono); color:#93c5fd;">${escapeHtml((Array.isArray(rout.requires_capabilities) ? rout.requires_capabilities : Object.keys(rout.requires_capabilities || {})).join(", ") || "None")}</span></div>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">Authority: <span style="font-family:var(--font-mono); color:#fbbf24;">${escapeHtml(gov.required_authority_tier || gov.authority_tier || "TIER_1_AUTONOMOUS")}</span></div>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">Status: <span style="font-weight:700; color:var(--text-bright);">${escapeHtml(iss.status || "AVAILABLE")}</span></div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg-secondary); padding:12px; border-radius:6px; border:1px solid var(--border-subtle); margin-bottom:16px;">
+        <h4 style="font-size:12px; font-weight:700; color:var(--text-bright); margin:0 0 10px; display:flex; align-items:center; gap:6px;">
+          <span>📜 Git Append-Only Evidence Ledger (Durability Boundaries)</span>
+        </h4>
+        <div style="padding-left:4px;">${eventsHtml}</div>
+      </div>
+
+      ${resolutionHtml}
+    `;
+
+    // Modal footer actions
+    const footerEl = document.getElementById("modalSocIssueFooter");
+    if (footerEl) {
+      let footerBtns = `<button class="btn btn-secondary" onclick="closeSocIssueModal()">Close</button>`;
+      if (iss.status === "AVAILABLE") {
+        footerBtns += `<button class="btn btn-primary" onclick="handleClaimSocIssue('${issueId}')">Claim Issue</button>`;
+      } else if (iss.status === "LEASED" || iss.status === "VALIDATING") {
+        footerBtns += `
+          <button class="btn btn-danger" onclick="handleDecideSocIssue('${issueId}', 'REJECTED')">Reject</button>
+          <button class="btn btn-success" onclick="handleDecideSocIssue('${issueId}', 'APPROVED')">Approve Decision</button>
+        `;
+      }
+      footerEl.innerHTML = footerBtns;
+    }
+  } catch (err) {
+    bodyEl.innerHTML = `<div style="color:#f87171; padding:16px;">Error inspecting issue: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.viewSocIssueDetail = viewSocIssueDetail;
+
+function closeSocIssueModal() {
+  const modal = document.getElementById("modalSocIssue");
+  if (modal) modal.style.display = "none";
+}
+window.closeSocIssueModal = closeSocIssueModal;
+
+async function handleClaimSocIssue(issueId) {
+  const handle = prompt("Enter worker agent handle to claim this issue:", "@parser-doctor");
+  if (!handle) return;
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_handle: handle.trim(), duration_seconds: 300 }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Acquired lease on ${issueId} for ${handle}`, "success");
+      closeSocIssueModal();
+      await renderGastownWorkQueue();
+    } else {
+      showToast(`Claim failed: ${data.detail || data.error}`, "error");
+    }
+  } catch (err) {
+    showToast(`Claim error: ${err.message}`, "error");
+  }
+}
+window.handleClaimSocIssue = handleClaimSocIssue;
+
+async function handleReleaseSocIssue(issueId) {
+  if (!confirm(`Release lease on ${issueId} back to available queue?`)) return;
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/release`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Lease on ${issueId} released`, "success");
+      await renderGastownWorkQueue();
+    } else {
+      showToast(`Release failed: ${data.detail || data.error}`, "error");
+    }
+  } catch (err) {
+    showToast(`Release error: ${err.message}`, "error");
+  }
+}
+window.handleReleaseSocIssue = handleReleaseSocIssue;
+
+async function handleDecideSocIssue(issueId, decision) {
+  const rationale = prompt(`Enter rationale for ${decision} decision on ${issueId}:`, "Approved by operator via SOC operating console");
+  if (rationale === null) return;
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, approver: "secops-operator", rationale }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Recorded ${decision} on ${issueId}`, "success");
+      closeSocIssueModal();
+      await renderGastownWorkQueue();
+    } else {
+      showToast(`Decision failed: ${data.detail || data.error}`, "error");
+    }
+  } catch (err) {
+    showToast(`Decision error: ${err.message}`, "error");
+  }
+}
+window.handleDecideSocIssue = handleDecideSocIssue;
+
 async function triggerGastownPatrolAll() {
   const btn = document.getElementById("btnTriggerPatrolAll");
   const headerBtn = document.getElementById("btnHeaderPatrolAll");
@@ -3900,6 +5859,12 @@ function getAgentAvatarSvg(handle, size = 16) {
     "@sql-analyst": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
     "@gcp-telemetry-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
     "@tenant-posture-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 10a2 2 0 1 1-2-2"/><path d="M19 10a2 2 0 1 1-2-2"/></svg>`,
+    "@playbook-decay-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><polyline points="10 8 13 11 16 8"/></svg>`,
+    "@timestamp-integrity-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+    "@rule-conflict-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>`,
+    "@log-cost-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
+    "@raw-log-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="11.5" cy="14.5" r="2.5"/><line x1="13.5" y1="16.5" x2="16" y2="19"/></svg>`,
+    "@namespace-label-agent": `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`,
   };
   return svgs[handle] || `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>`;
 }
@@ -3971,13 +5936,31 @@ function renderAgentLibraryList() {
   const container = document.getElementById("agentLibraryList");
   if (!container) return;
 
+  const libBadge = document.getElementById("libraryAgentCountBadge");
+  if (libBadge && Array.isArray(libraryState.agents) && libraryState.agents.length > 0) {
+    libBadge.textContent = `${libraryState.agents.length} Active Agents`;
+  }
+
   const query = libraryState.searchQuery;
-  const filter = libraryState.activeSubsystemFilter.toLowerCase();
+  const filter = (libraryState.activeSubsystemFilter || "all").toLowerCase();
 
   const filtered = libraryState.agents.filter((a) => {
     // Subsystem filter
-    if (filter !== "all" && (a.subsystem || "").toLowerCase() !== filter) {
-      return false;
+    if (filter !== "all") {
+      const sub = (a.subsystem || "").toLowerCase();
+      const match =
+        sub === filter ||
+        sub.includes(filter) ||
+        (filter === "detections" && (sub.includes("detection") || sub.includes("rule"))) ||
+        (filter === "ingestion" && (sub.includes("ingestion") || sub.includes("telemetry") || sub.includes("replay"))) ||
+        (filter === "identity" && sub.includes("identity")) ||
+        (filter === "analytics" && (sub.includes("analytics") || sub.includes("sql"))) ||
+        (filter === "cartography" && (sub.includes("cartography") || sub.includes("survey"))) ||
+        (filter === "governance" && (sub.includes("governance") || sub.includes("posture"))) ||
+        (filter === "soar" && sub.includes("soar"));
+      if (!match) {
+        return false;
+      }
     }
     // Search query filter
     if (query) {
@@ -3985,8 +5968,9 @@ function renderAgentLibraryList() {
       const matchHandle = (a.handle || "").toLowerCase().includes(query);
       const matchRole = (a.role || "").toLowerCase().includes(query);
       const matchDesc = (a.description || "").toLowerCase().includes(query);
+      const matchSubsystem = (a.subsystem || "").toLowerCase().includes(query);
       const matchTools = (a.capabilities || []).some((c) => c.toLowerCase().includes(query));
-      if (!matchName && !matchHandle && !matchRole && !matchDesc && !matchTools) {
+      if (!matchName && !matchHandle && !matchRole && !matchDesc && !matchSubsystem && !matchTools) {
         return false;
       }
     }
@@ -3994,9 +5978,12 @@ function renderAgentLibraryList() {
   });
 
   if (filtered.length === 0) {
+    const filterDesc = query
+      ? `matching "${escapeHtml(query)}"`
+      : `in category "${escapeHtml(libraryState.activeSubsystemFilter)}"`;
     container.innerHTML = `
       <div style="padding: 24px 12px; text-align: center; color: #64748b; font-size: 12px;">
-        No agents found matching "${escapeHtml(query)}".
+        No agents found ${filterDesc}.
       </div>
     `;
     return;
@@ -4047,6 +6034,14 @@ function renderAgentLibraryList() {
       selectAgentInLibrary(handle);
     });
   });
+
+  // If currently selected agent is not among filtered agents, auto-select first filtered agent
+  if (filtered.length > 0) {
+    const isSelectedVisible = filtered.some((a) => a.handle === libraryState.selectedAgentHandle);
+    if (!isSelectedVisible) {
+      selectAgentInLibrary(filtered[0].handle);
+    }
+  }
 }
 
 function selectAgentInLibrary(handle) {
@@ -4326,5 +6321,313 @@ window.openAgentInLibrary = function (handle) {
   switchView("library");
   selectAgentInLibrary(handle);
 };
+
+// ====================================================================
+// SOC Operational Picture & Shift Briefings Controller
+// ====================================================================
+let currentShiftSlackBlocks = null;
+let briefingsInitialized = false;
+
+function loadBriefingsView() {
+  if (!briefingsInitialized) {
+    briefingsInitialized = true;
+    setupBriefingTabs();
+
+    const lookbackSelect = document.getElementById("shiftWindowSelect");
+    if (lookbackSelect) {
+      lookbackSelect.addEventListener("change", () => {
+        const hours = parseInt(lookbackSelect.value, 10) || 8;
+        loadShiftBriefing(hours);
+      });
+    }
+
+    const btnTrigger = document.getElementById("btnTriggerShiftBrief");
+    if (btnTrigger) {
+      btnTrigger.addEventListener("click", () => triggerShiftBrief());
+    }
+
+    const btnRefresh = document.getElementById("btnRefreshPosture");
+    if (btnRefresh) {
+      btnRefresh.addEventListener("click", () => {
+        loadPostureSnapshot();
+        const hours = parseInt(document.getElementById("shiftWindowSelect")?.value || "8", 10);
+        loadShiftBriefing(hours);
+      });
+    }
+
+    const btnCopyBlocks = document.getElementById("btnCopySlackBlock");
+    if (btnCopyBlocks) {
+      btnCopyBlocks.addEventListener("click", () => copySlackBlocks());
+    }
+
+    const btnFetchDossier = document.getElementById("btnFetchDossier");
+    if (btnFetchDossier) {
+      btnFetchDossier.addEventListener("click", () => {
+        const type = document.getElementById("dossierSubjectType")?.value;
+        const id = document.getElementById("dossierSubjectId")?.value?.trim();
+        if (type && id) {
+          fetchEntityDossier(type, id);
+        } else {
+          showToast("Please enter an Entity Identifier", "warning");
+        }
+      });
+    }
+  }
+
+  const hours = parseInt(document.getElementById("shiftWindowSelect")?.value || "8", 10);
+  loadShiftBriefing(hours);
+  loadPostureSnapshot();
+}
+
+function setupBriefingTabs() {
+  const tabs = [
+    { btn: "tabBtnShiftBrief", pane: "tabContentShiftBrief" },
+    { btn: "tabBtnPostureGaps", pane: "tabContentPostureGaps" },
+    { btn: "tabBtnEntityDossier", pane: "tabContentEntityDossier" }
+  ];
+
+  tabs.forEach(t => {
+    const btnEl = document.getElementById(t.btn);
+    if (!btnEl) return;
+    btnEl.addEventListener("click", () => {
+      tabs.forEach(other => {
+        const ob = document.getElementById(other.btn);
+        const op = document.getElementById(other.pane);
+        if (ob) ob.classList.remove("active");
+        if (op) {
+          op.classList.remove("active");
+          op.style.display = "none";
+        }
+      });
+      btnEl.classList.add("active");
+      const targetPane = document.getElementById(t.pane);
+      if (targetPane) {
+        targetPane.classList.add("active");
+        targetPane.style.display = "block";
+      }
+    });
+  });
+}
+
+async function loadShiftBriefing(hours = 8) {
+  const narrativeBody = document.getElementById("shiftNarrativeBody");
+  if (narrativeBody) {
+    narrativeBody.innerHTML = `<p class="empty-state-muted">Aggregating operational delta across last ${hours} hours...</p>`;
+  }
+
+  try {
+    const res = await fetch(`/api/briefings/shift?hours=${hours}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const briefing = raw.briefing || raw;
+
+
+    currentShiftSlackBlocks = briefing.slack_blocks;
+
+    // Update banner metadata
+    const timeBadge = document.getElementById("shiftTimestampBadge");
+    if (timeBadge) {
+      const s = briefing.start_time ? new Date(briefing.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      const e = briefing.end_time ? new Date(briefing.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      timeBadge.textContent = `${briefing.shift_name || "Shift"} (${s} – ${e})`;
+    }
+
+    // Render 5 delta categories
+    renderDeltaSection("countRequiresAttention", "listRequiresAttention", briefing.requires_attention, "⚠️ No critical issues requiring operator attention.");
+    renderDeltaSection("countChangedSincePrevious", "listChangedSincePrevious", briefing.changed_since_previous, "🔄 No configuration mutations in this shift window.");
+    renderDeltaSection("countAgentWip", "listAgentWip", briefing.agent_work_in_progress, "🤖 No active agent leases or pending proposals.");
+    renderDeltaSection("countHealthy", "listHealthy", briefing.no_action_required, "🛡️ No baseline assertions recorded.");
+    renderDeltaSection("countCarryover", "listCarryover", briefing.carry_over, "⏳ No carry-over issues.");
+
+    // Render markdown narrative
+    if (narrativeBody) {
+      if (typeof marked !== "undefined" && marked.parse) {
+        narrativeBody.innerHTML = marked.parse(briefing.summary_narrative || "*No shift narrative generated.*");
+      } else {
+        narrativeBody.textContent = briefing.summary_narrative || "No narrative";
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load shift briefing:", err);
+    if (narrativeBody) {
+      narrativeBody.innerHTML = `<p class="empty-state-muted" style="color:#f87171;">Failed to load shift briefing: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+function renderDeltaSection(countElemId, listElemId, items, emptyText) {
+  const countEl = document.getElementById(countElemId);
+  const listEl = document.getElementById(listElemId);
+  if (!listEl) return;
+
+  const count = Array.isArray(items) ? items.length : 0;
+  if (countEl) countEl.textContent = count;
+
+  if (count === 0) {
+    listEl.innerHTML = `<p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">${escapeHtml(emptyText)}</p>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map(item => {
+    const title = item.title || item.summary || item.headline || item.id || JSON.stringify(item);
+    const id = item.id || item.issue_id || "";
+    const agent = item.agent || item.author || "";
+    const severity = item.severity || item.priority || "";
+    const sevBadge = severity ? `<span style="font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; background:#1e293b; color:#cbd5e1; text-transform:uppercase;">${escapeHtml(severity)}</span>` : "";
+    return `
+      <div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:space-between; gap:6px;">
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+        <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+          ${sevBadge}
+          ${agent ? `<span style="font-size:10px; color:#38bdf8;">@${escapeHtml(agent.replace('@', ''))}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function loadPostureSnapshot() {
+  try {
+    const res = await fetch("/api/briefings/posture");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const snapshot = raw.snapshot || raw;
+
+    // Freshness bar
+    const freshSeg = document.getElementById("freshnessBarFresh");
+    const recentSeg = document.getElementById("freshnessBarRecent");
+    const staleSeg = document.getElementById("freshnessBarStale");
+    const legendEl = document.getElementById("freshnessLegend");
+
+    const counts = snapshot.knowledge_freshness || snapshot.metrics?.assertion_freshness || { fresh_under_1h: 0, recent_1h_to_24h: 0, stale_over_24h: 0 };
+
+    const total = (counts.fresh_under_1h || 0) + (counts.recent_1h_to_24h || 0) + (counts.stale_over_24h || 0);
+
+    if (total > 0) {
+      const fPct = Math.round((counts.fresh_under_1h / total) * 100);
+      const rPct = Math.round((counts.recent_1h_to_24h / total) * 100);
+      const sPct = Math.round((counts.stale_over_24h / total) * 100);
+      if (freshSeg) freshSeg.style.width = `${fPct}%`;
+      if (recentSeg) recentSeg.style.width = `${rPct}%`;
+      if (staleSeg) staleSeg.style.width = `${sPct}%`;
+    }
+    if (legendEl) {
+      legendEl.textContent = `Fresh: ${counts.fresh_under_1h || 0} | Recent: ${counts.recent_1h_to_24h || 0} | Stale: ${counts.stale_over_24h || 0}`;
+    }
+
+    // Knowledge gaps
+    const gaps = snapshot.knowledge_gaps || [];
+    const gapsCountEl = document.getElementById("postureGapsCount");
+    if (gapsCountEl) gapsCountEl.textContent = gaps.length;
+
+    const tbody = document.getElementById("bodyKnowledgeGaps");
+    if (tbody) {
+      if (gaps.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="padding:12px; color:#4ade80; text-align:center;">🛡️ Zero unverified knowledge gaps identified across registered entities.</td></tr>`;
+      } else {
+        tbody.innerHTML = gaps.map(g => `
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:8px 10px; font-family:monospace; color:#cbd5e1;">${escapeHtml(g.gap_id || "-")}</td>
+            <td style="padding:8px 10px; text-transform:uppercase; font-size:11px; color:#94a3b8;">${escapeHtml(g.category || "-")}</td>
+            <td style="padding:8px 10px; font-weight:600; color:#f1f5f9;">${escapeHtml(g.subject || "-")}</td>
+            <td style="padding:8px 10px; color:#cbd5e1;">${escapeHtml(g.description || "-")}</td>
+            <td style="padding:8px 10px;">
+              <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; background:${g.severity === 'high' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}; color:${g.severity === 'high' ? '#f87171' : '#facc15'}; text-transform:uppercase;">
+                ${escapeHtml(g.severity || "medium")}
+              </span>
+            </td>
+            <td style="padding:8px 10px; color:#38bdf8;">@${escapeHtml((g.recommended_agent || "tenant-cartographer").replace('@', ''))}</td>
+          </tr>
+        `).join("");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load posture snapshot:", err);
+  }
+}
+
+async function fetchEntityDossier(subjectType, subjectId) {
+  const container = document.getElementById("dossierResultContainer");
+  if (!container) return;
+  container.style.display = "block";
+  container.innerHTML = `<p class="empty-state-muted">Synthesizing multi-agent dossier for ${escapeHtml(subjectType)}: <code>${escapeHtml(subjectId)}</code>...</p>`;
+
+  try {
+    const res = await fetch(`/api/knowledge/entity/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const dossier = raw.dossier || raw;
+
+
+    const facts = dossier.facts || {};
+    const observers = dossier.contributing_agents || [];
+    const health = dossier.overall_health || "unknown";
+    const healthColor = health === "healthy" ? "#4ade80" : health === "degraded" ? "#facc15" : health === "failing" ? "#f87171" : "#94a3b8";
+    const gaps = dossier.knowledge_gaps || [];
+    const issues = dossier.linked_issues || [];
+
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #1e293b; padding-bottom:10px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:14px; font-weight:700; color:#f1f5f9;">${escapeHtml(subjectId)}</span>
+          <span style="font-size:11px; padding:2px 7px; border-radius:4px; background:#1e293b; color:#94a3b8; text-transform:uppercase;">${escapeHtml(subjectType)}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:11px; text-transform:uppercase; font-weight:700; padding:3px 8px; border-radius:4px; background:rgba(255,255,255,0.05); color:${healthColor};">Health: ${escapeHtml(health)}</span>
+        </div>
+      </div>
+      <div style="font-size:12px; color:#94a3b8; margin-bottom:10px;">
+        <strong>Contributing Observers:</strong> ${observers.map(o => `<span style="color:#38bdf8; margin-right:6px;">@${escapeHtml(o.replace('@', ''))}</span>`).join("") || "None"}
+      </div>
+      ${gaps.length > 0 ? `
+        <div style="margin-top:12px; margin-bottom:12px; padding:10px; background:rgba(234, 179, 8, 0.08); border-left:3px solid #eab308; border-radius:4px;">
+          <h4 style="font-size:11px; font-weight:700; color:#facc15; text-transform:uppercase; margin-bottom:4px;">Entity Knowledge Gaps / Unknowns</h4>
+          <ul style="margin:0; padding-left:16px; font-size:12px; color:#cbd5e1;">
+            ${gaps.map(g => `<li>${escapeHtml(g)}</li>`).join("")}
+          </ul>
+        </div>
+      ` : ""}
+      <div style="margin-top:12px;">
+        <h4 style="font-size:12px; font-weight:700; color:#f1f5f9; text-transform:uppercase; margin-bottom:6px;">Established Facts &amp; Attestations</h4>
+        <pre style="background:#111927; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:11px; color:#cbd5e1; overflow-x:auto;">${escapeHtml(JSON.stringify(facts, null, 2))}</pre>
+      </div>
+    `;
+
+  } catch (err) {
+    console.error("Failed to fetch entity dossier:", err);
+    container.innerHTML = `<p style="color:#f87171; font-size:12px;">Failed to synthesize dossier: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function triggerShiftBrief() {
+  const hours = parseInt(document.getElementById("shiftWindowSelect")?.value || "8", 10);
+  try {
+    showToast(`Triggering shift handover brief across last ${hours}h...`, "info");
+    const res = await fetch(`/api/briefings/trigger?hours=${hours}`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    showToast("Shift brief computed and broadcast to #briefings/shift-briefings!", "success");
+    await loadShiftBriefing(hours);
+  } catch (err) {
+    console.error("Failed to trigger shift brief:", err);
+    showToast(`Failed to trigger briefing: ${err.message}`, "error");
+  }
+}
+
+function copySlackBlocks() {
+  if (!currentShiftSlackBlocks) {
+    showToast("No Slack Blocks available to copy", "warning");
+    return;
+  }
+  const payloadStr = JSON.stringify(currentShiftSlackBlocks, null, 2);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(payloadStr).then(
+      () => showToast("Slack Block Kit payload copied to clipboard!", "success"),
+      () => showToast("Failed to copy Slack Blocks to clipboard", "error")
+    );
+  }
+}
+
 
 

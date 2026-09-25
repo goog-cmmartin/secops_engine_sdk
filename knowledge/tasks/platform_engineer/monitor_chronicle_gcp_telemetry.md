@@ -1,22 +1,36 @@
 ---
 id: task.platform_engineer.monitor_chronicle_gcp_telemetry
-title: "Monitor Chronicle GCP Logging and Metrics Telemetry"
+title: Monitor Chronicle GCP Logging and Metrics Telemetry
 type: task
 persona: persona.platform_engineer
 trigger:
-  - scheduled_daily
-  - on_demand
+- scheduled_daily
+- on_demand
 capabilities_used:
-  - gcp_logging.search
-  - gcp_monitoring.time_series
+- gcp_logging.search
+- gcp_monitoring.time_series
 related_concepts:
-  - concept.ingestion_pipeline_topology
+- concept.ingestion_pipeline_topology
 related_features:
-  - feature.gcp.cloud_logging
-  - feature.gcp.cloud_monitoring
+- feature.gcp.cloud_logging
+- feature.gcp.cloud_monitoring
 evaluation_rules:
   warning_ingestion_drop_pct: 20.0
   critical_api_error_pct: 5.0
+status: stable
+description: Monitor Chronicle GCP Logging and Metrics Telemetry (task reference in
+  Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Monitor Chronicle GCP Logging and Metrics Telemetry

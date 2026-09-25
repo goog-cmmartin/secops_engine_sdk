@@ -18,26 +18,95 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import yaml
 
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except (ImportError, AttributeError):
+    genai = None  # type: ignore
+    types = None  # type: ignore
 
 from agents.core.evidence_store import EvidenceFabricStore
+from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.proposal_manager import (
     ChangeProposal,
     PreflightProof,
     ProposalManager,
 )
+from agents.core.work_queue import BaseWorkQueue
+from engine.domain import AgentCapabilityProfile, Lease, SOCIssue
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowCapability
 
 logger = logging.getLogger(__name__)
 
 
+# Model Input Token Ceilings & Safety Limits
+MODEL_TOKEN_LIMITS: Dict[str, int] = {
+    "gemini-3.8-flash": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
+    "gemini-2.0-flash": 1_048_576,
+    "gemini-1.5-flash": 1_048_576,
+    "gemini-1.5-pro": 2_097_152,
+    "gemini-2.5-pro": 2_097_152,
+}
+DEFAULT_MODEL_TOKEN_LIMIT = 1_048_576
+
+# Tool serialization and payload budgets
+MAX_STRING_FIELD_CHARS = 50_000   # ~12,500 tokens max for any single string attribute
+MAX_TOOL_OUTPUT_BYTES = 400_000    # ~100,000 tokens max budget for any single tool output
+MAX_COLLECTION_ITEMS = 25          # Maximum items in an array within tool output before summary truncation
+
+EXCLUDED_SERIALIZATION_KEYS = {
+    "raw",
+    "cbn_raw",
+    "raw_payload",
+    "raw_bytes",
+    "base64_data",
+    "_raw",
+}
+
+
+def get_model_token_limit(model_name: str, client: Optional[Any] = None) -> int:
+    """Discovers the input token limit for the given model, checking API metadata or canonical registry."""
+    clean_model = model_name.split("/")[-1]
+    if client:
+        try:
+            m_info = client.models.get(model=clean_model)
+            if getattr(m_info, "input_token_limit", None):
+                return int(m_info.input_token_limit)
+        except Exception:
+            pass
+    return MODEL_TOKEN_LIMITS.get(clean_model, DEFAULT_MODEL_TOKEN_LIMIT)
+
+
+def count_tokens(client: Optional[Any], model_name: str, contents: Any) -> int:
+    """Counts tokens using the official Gemini tokenizer, with heuristic fallback."""
+    clean_model = model_name.split("/")[-1]
+    if client:
+        try:
+            res = client.models.count_tokens(model=clean_model, contents=contents)
+            if getattr(res, "total_tokens", None) is not None:
+                return int(res.total_tokens)
+        except Exception:
+            pass
+    # Fast heuristic fallback: ~4 characters per token
+    s = contents if isinstance(contents, str) else json.dumps(contents, default=str)
+    return max(1, len(s) // 4)
+
+
 def _serialize_for_llm(obj: Any) -> Any:
-    """Serializes complex SDK and domain objects into JSON-compatible dicts for Gemini."""
+    """Serializes complex SDK and domain objects into JSON-compatible dicts for Gemini with token budget pruning."""
     if obj is None:
         return None
-    if isinstance(obj, (str, int, float, bool)):
+    if isinstance(obj, (int, float, bool)):
+        return obj
+    if isinstance(obj, str):
+        if len(obj) > MAX_STRING_FIELD_CHARS:
+            omitted = len(obj) - MAX_STRING_FIELD_CHARS
+            return obj[:MAX_STRING_FIELD_CHARS] + (
+                f"\n\n[... TRUNCATED: {omitted:,} characters omitted to preserve Gemini token budget. "
+                f"Total size: {len(obj):,} chars. Full content accessible via engine/evidence fabric. ...]"
+            )
         return obj
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
@@ -49,16 +118,65 @@ def _serialize_for_llm(obj: Any) -> Any:
         return {
             k: _serialize_for_llm(v)
             for k, v in obj.__dict__.items()
-            if not k.startswith("_") and k != "raw"
+            if not k.startswith("_") and k not in EXCLUDED_SERIALIZATION_KEYS
         }
     if isinstance(obj, (list, tuple)):
         return [_serialize_for_llm(x) for x in obj]
     if isinstance(obj, dict):
-        d = {str(k): _serialize_for_llm(v) for k, v in obj.items() if k != "raw"}
+        d = {
+            str(k): _serialize_for_llm(v)
+            for k, v in obj.items()
+            if str(k) not in EXCLUDED_SERIALIZATION_KEYS and not str(k).startswith("_")
+        }
         if "text" in d and "rule_text" not in d:
             d["rule_text"] = d["text"]
         return d
     return str(obj)
+
+
+def _sanitize_tool_payload(payload: Any, max_bytes: int = MAX_TOOL_OUTPUT_BYTES) -> Any:
+    """Enforces context-window budget guardrails on tool outputs returned to Gemini AFC."""
+    try:
+        dumped = json.dumps(payload, default=str)
+    except Exception:
+        return payload
+
+    if len(dumped) <= max_bytes:
+        return payload
+
+    # If payload is a list, cap items
+    if isinstance(payload, list) and len(payload) > MAX_COLLECTION_ITEMS:
+        truncated_list = payload[:MAX_COLLECTION_ITEMS]
+        meta_note = {
+            "_budget_truncation_notice": (
+                f"Collection truncated from {len(payload)} to {MAX_COLLECTION_ITEMS} items to satisfy Gemini "
+                f"context budget ({len(dumped):,} bytes exceeded {max_bytes:,} byte budget)."
+            ),
+            "total_items": len(payload),
+            "returned_items": MAX_COLLECTION_ITEMS,
+        }
+        return truncated_list + [meta_note]
+
+    # If payload is a dict, cap nested lists or oversized strings
+    if isinstance(payload, dict):
+        budgeted_dict = {}
+        for k, v in payload.items():
+            if isinstance(v, list) and len(v) > MAX_COLLECTION_ITEMS:
+                budgeted_dict[k] = v[:MAX_COLLECTION_ITEMS] + [{
+                    "_budget_truncation_notice": (
+                        f"Truncated from {len(v)} to {MAX_COLLECTION_ITEMS} items for LLM context budget."
+                    ),
+                    "total_items": len(v),
+                    "returned_items": MAX_COLLECTION_ITEMS,
+                }]
+            elif isinstance(v, str) and len(v) > 20_000:
+                budgeted_dict[k] = v[:20_000] + f"\n[... TRUNCATED {len(v) - 20_000:,} chars for token budget ...]"
+            else:
+                budgeted_dict[k] = v
+        return budgeted_dict
+
+    return payload
+
 
 
 @dataclass
@@ -243,6 +361,8 @@ class BaseSecOpsAdkAgent:
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[BaseWorkQueue] = None,
+        lifecycle_manager: Optional[SOCLifecycleManager] = None,
     ):
         self.name = name
         self.handle = handle
@@ -258,6 +378,8 @@ class BaseSecOpsAdkAgent:
         self.proposal_manager = proposal_manager or ProposalManager()
         self.inventory_client = inventory_client
         self.evidence_store = evidence_store
+        self.work_queue = work_queue
+        self.lifecycle_manager = lifecycle_manager
 
         self._tools: Dict[str, Callable[..., Any]] = {
             "get_task_status": self.get_task_status,
@@ -268,6 +390,74 @@ class BaseSecOpsAdkAgent:
         self.last_submitted_proposal: Optional[Any] = None
         self.skill_catalog = SkillCatalog.get_instance()
         self.last_loaded_skill: Optional[str] = None
+
+    def get_capability_profile(self) -> AgentCapabilityProfile:
+        """Returns the capability profile for this agent."""
+        caps: Dict[str, int] = {}
+        # From bound engine capabilities
+        for cap_id in self._capabilities:
+            caps[cap_id] = 1
+        # From declared class capabilities
+        if hasattr(self, "CAPABILITIES") and isinstance(self.CAPABILITIES, list):
+            for cap_id in self.CAPABILITIES:
+                caps[cap_id] = 1
+        # Builtin tool capabilities
+        for t in self._tools:
+            caps[t] = 1
+        caps["git.proposal.create"] = 1
+
+        plane_map = {
+            "ingestion": "data",
+            "detection": "detection",
+            "soar": "automation",
+            "cost": "platform",
+            "tenant": "governance",
+            "audit": "governance",
+        }
+        plane = plane_map.get(self.subsystem, "platform")
+
+        return AgentCapabilityProfile(
+            agent_handle=self.handle,
+            capabilities=caps,
+            operational_planes=[plane],
+            max_concurrent_leases=3,
+        )
+
+    def register_worker(self) -> bool:
+        """Registers this worker's capability profile with the work queue."""
+        if not self.work_queue:
+            return False
+        profile = self.get_capability_profile()
+        res = self.work_queue.register_worker(profile)
+        return True if res is None or res is True else False
+
+    def find_eligible_issues(self, limit: int = 10) -> List[SOCIssue]:
+        """Finds active unassigned or claimable issues matching this agent's capabilities."""
+        if not self.work_queue:
+            return []
+        profile = self.get_capability_profile()
+        plane = profile.operational_planes[0] if profile.operational_planes else None
+        return self.work_queue.find_eligible_issues(
+            agent_capabilities=profile.capabilities,
+            plane=plane,
+            limit=limit,
+        )
+
+    def claim_work(self, issue_id: str, duration_seconds: int = 300) -> Optional[Lease]:
+        """Acquires a lease on an issue from the work queue."""
+        if self.lifecycle_manager:
+            return self.lifecycle_manager.claim_issue(issue_id, self.handle, duration_seconds=duration_seconds)
+        elif self.work_queue:
+            return self.work_queue.acquire_lease(issue_id, self.handle, duration_seconds=duration_seconds)
+        return None
+
+    def renew_work_lease(self, issue_id: str, duration_seconds: int = 300) -> bool:
+        """Renews an active work lease."""
+        if self.lifecycle_manager:
+            return self.lifecycle_manager.heartbeat(issue_id, self.handle, duration_seconds=duration_seconds)
+        elif self.work_queue:
+            return self.work_queue.renew_lease(issue_id, self.handle, duration_seconds=duration_seconds)
+        return False
 
     def get_task_status(self, task_id: str) -> Dict[str, Any]:
         """Queries the status and details of a remediation task, proposal, or Chronicle rule.
@@ -383,16 +573,93 @@ class BaseSecOpsAdkAgent:
                     except Exception as store_err:
                         logger.debug("Failed updating rule state in Evidence Fabric: %s", store_err)
 
-            return serialized
+            # Auto-create FinOps cost card widget when log_cost.analyze is executed
+            if capability.capability_id == "log_cost.analyze":
+                r_dict = serialized if isinstance(serialized, dict) else (raw_res.to_dict() if hasattr(raw_res, "to_dict") else {})
+                self.last_widget = {
+                    "type": "finops_cost_card",
+                    "total_volume_gb": r_dict.get("total_volume_gb", 0),
+                    "total_volume_gib": r_dict.get("total_volume_gib", 0),
+                    "total_events": r_dict.get("total_events", 0),
+                    "spend_standard": r_dict.get("total_projected_monthly_spend_standard", 0),
+                    "spend_enterprise": r_dict.get("total_projected_monthly_spend_enterprise", 0),
+                    "spend_enterprise_plus": r_dict.get("total_projected_monthly_spend_enterprise_plus", 0),
+                    "savings": r_dict.get("total_potential_savings_usd", 0),
+                    "recommendations_count": len(r_dict.get("recommendations", [])),
+                    "bloated_count": len(r_dict.get("bloated_sources", [])),
+                    "top_drivers": r_dict.get("top_volume_drivers", [])[:5],
+                    "recommendations": r_dict.get("recommendations", [])[:4],
+                }
+
+            # Auto-create raw log search card widget when log.raw_logs.search is executed
+            if capability.capability_id == "log.raw_logs.search":
+                r_dict = serialized if isinstance(serialized, dict) else (raw_res.to_dict() if hasattr(raw_res, "to_dict") else {})
+                matches = r_dict.get("matches", [])
+                self.last_widget = {
+                    "type": "raw_log_search_card",
+                    "total_matches": len(matches),
+                    "progress": r_dict.get("progress", 100),
+                    "query": bound.arguments.get("query", ""),
+                    "lookback_hours": bound.arguments.get("lookback_hours", 24),
+                    "log_types": bound.arguments.get("log_types") or [],
+                    "matches": matches[:10],
+                }
+
+            sanitized_payload = _sanitize_tool_payload(serialized)
+            return sanitized_payload
 
         _tool_wrapper.__signature__ = new_sig
         _tool_wrapper.__name__ = tool_name
         _tool_wrapper.__doc__ = f"{capability.name}\n\n{capability.description}"
+        _tool_wrapper._is_budgeted_tool = True
         self._tools[tool_name] = _tool_wrapper
 
     def get_tools(self) -> List[Callable[..., Any]]:
-        """Returns list of callable tool functions exposed to the ADK 2 model."""
-        return list(self._tools.values())
+        """Returns list of callable tool functions exposed to the ADK 2 model,
+        ensuring every tool return is strictly serialized and budgeted.
+        """
+        budgeted_tools = []
+        for name, fn in self._tools.items():
+            if getattr(fn, "_is_budgeted_tool", False):
+                budgeted_tools.append(fn)
+                continue
+
+            orig_sig = getattr(fn, "__signature__", None) or inspect.signature(fn)
+
+            def make_budgeted_wrapper(func, tool_func_name, sig):
+                def _budgeted_call(*args, **kwargs):
+                    try:
+                        logger.info("Agent %s invoking custom tool %s with %s", self.handle, tool_func_name, kwargs)
+                        if hasattr(self, "status_callback") and self.status_callback:
+                            try:
+                                self.status_callback(f"Executing {tool_func_name}...")
+                            except Exception:
+                                pass
+                        res = func(*args, **kwargs)
+                        serialized = _serialize_for_llm(res)
+                        sanitized = _sanitize_tool_payload(serialized)
+
+                        self.executed_tool_calls.append({
+                            "agent": self.handle,
+                            "tool": tool_func_name,
+                            "capability_id": tool_func_name,
+                            "arguments": {k: str(v) for k, v in kwargs.items()},
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+
+                        return sanitized
+                    except Exception as e:
+                        logger.warning("Error in tool %s: %s", tool_func_name, e)
+                        return {"status": "ERROR", "message": str(e)}
+
+                _budgeted_call.__name__ = tool_func_name
+                _budgeted_call.__signature__ = sig
+                _budgeted_call.__doc__ = func.__doc__
+                _budgeted_call._is_budgeted_tool = True
+                return _budgeted_call
+
+            budgeted_tools.append(make_budgeted_wrapper(fn, name, orig_sig))
+        return budgeted_tools
 
     async def chat(
         self,
@@ -485,11 +752,13 @@ class BaseSecOpsAdkAgent:
 
             response = None
             last_err = None
+            active_chat_session = None
             for client_name, client in clients_to_try:
                 for attempt in range(2):
                     try:
                         chat_session = client.chats.create(model=target_model, config=config)
                         response = await asyncio.to_thread(chat_session.send_message, prompt)
+                        active_chat_session = chat_session
                         break
                     except Exception as call_err:
                         last_err = call_err
@@ -501,18 +770,54 @@ class BaseSecOpsAdkAgent:
                             )
                             await asyncio.sleep(2.0 * (attempt + 1))
                             continue
+                        elif "400" in err_str and ("token count exceeds" in err_str or "maximum number of tokens" in err_str or "1048576" in err_str):
+                            logger.warning(
+                                "Token limit exceeded during reasoning on %s for %s: %s",
+                                client_name, self.handle, call_err
+                            )
+                            limit_val = get_model_token_limit(target_model, client)
+                            fallback_text = (
+                                f"⚠️ **Context Window Budget Exceeded (`{self.handle}`)**\n\n"
+                                f"The data requested during autonomous tool execution exceeded Gemini's maximum context limit of "
+                                f"**{limit_val:,} tokens**.\n\n"
+                                f"**Operational Mitigation:**\n"
+                                f"- The engine has isolated this request to prevent crash loops.\n"
+                                f"- Provide narrower query parameters (e.g. smaller lookback window, specific log types, or rule filters).\n"
+                                f"- Oversized telemetry has been stored in the Evidence Fabric."
+                            )
+                            class _SafeTokenFallbackResponse:
+                                text = fallback_text
+                            response = _SafeTokenFallbackResponse()
+                            break
                         else:
                             break
                 if response is not None:
                     break
 
-            if response is None:
-                raise last_err or RuntimeError("No response returned from model")
-
-            response_text = response.text or "Analysis completed with no additional findings."
-
-            # Append live tool execution provenance and injected skill if invoked
             tools_run_this_turn = self.executed_tool_calls[turn_start_idx:]
+
+            response_text = ""
+            try:
+                response_text = (response.text or "").strip()
+            except Exception:
+                pass
+
+            # If Automatic Function Calling executed tools but returned no text parts,
+            # prompt the chat session for an executive summary of the tool returns.
+            if not response_text and tools_run_this_turn and active_chat_session and hasattr(active_chat_session, "send_message"):
+                try:
+                    logger.info("AFC concluded with no text part. Requesting summary from %s...", self.handle)
+                    summary_res = await asyncio.to_thread(
+                        active_chat_session.send_message,
+                        "Please provide a concise executive summary of your diagnostic findings and conclusions based on the tools executed above."
+                    )
+                    if summary_res and getattr(summary_res, "text", None):
+                        response_text = summary_res.text.strip()
+                except Exception as sum_err:
+                    logger.debug("Failed requesting follow-up synthesis: %s", sum_err)
+
+            if not response_text:
+                response_text = "Analysis completed with no additional findings."
             if tools_run_this_turn or self.last_loaded_skill:
                 trace_lines = []
                 if self.last_loaded_skill:
@@ -584,11 +889,23 @@ class BaseSecOpsAdkAgent:
 
         except Exception as e:
             logger.exception("Agent %s failed during reasoning loop: %s", self.handle, e)
-            error_content = (
-                f"**Execution Error in `{self.handle}`**:\n"
-                f"> {type(e).__name__}: {e}\n\n"
-                f"*Please check the Google SecOps tenant connectivity or prompt parameters.*"
-            )
+            err_str = str(e).lower()
+            if "token count exceeds" in err_str or "maximum number of tokens" in err_str or "1048576" in err_str:
+                limit_val = get_model_token_limit(target_model)
+                error_content = (
+                    f"⚠️ **Context Window Budget Exceeded in `{self.handle}`**\n\n"
+                    f"The data requested from Google SecOps exceeded Gemini's maximum context limit of **{limit_val:,} tokens**.\n\n"
+                    f"**Operational Mitigation:**\n"
+                    f"- The autonomous function call returned an unusually large payload that surpassed the model ceiling.\n"
+                    f"- Scoped query filters have been recommended to fit within context (e.g., shorter lookback window, specific rule/log IDs, or error type filters).\n"
+                    f"- The engine's safety guardrails have recorded this event in the Evidence Fabric."
+                )
+            else:
+                error_content = (
+                    f"**Execution Error in `{self.handle}`**:\n"
+                    f"> {type(e).__name__}: {e}\n\n"
+                    f"*Please check the Google SecOps tenant connectivity or prompt parameters.*"
+                )
             return self.post_message(content=error_content, stream=stream, topic=topic)
 
     def post_message(
@@ -629,6 +946,7 @@ class BaseSecOpsAdkAgent:
         risk_level: str = "MEDIUM",
         stream: Optional[str] = None,
         topic: Optional[str] = None,
+        issue_id: Optional[str] = None,
     ) -> ChangeProposal:
         """Submits a change proposal to Gas Town .proposals/ and notifies the Zulip topic."""
         proof = preflight or PreflightProof()
@@ -644,6 +962,7 @@ class BaseSecOpsAdkAgent:
             proposed_diff=proposed_diff,
             preflight=proof,
             mutation_payload=mutation_payload,
+            issue_id=issue_id,
         )
 
         proposal_id = self.proposal_manager.create_proposal(proposal)
@@ -655,11 +974,14 @@ class BaseSecOpsAdkAgent:
             "status": "OPEN",
             "actions": ["approve_and_merge", "reject", "view_diff"],
         }
+        if issue_id:
+            widget["issue_id"] = issue_id
 
         notice = (
             f"**Change Proposal Submitted**: `{proposal_id}`\n\n"
             f"**Target**: `{target_resource_id}` ({action_type})\n"
-            f"**Rationale**: {rationale}\n\n"
+            + (f"**Linked Issue**: `{issue_id}`\n" if issue_id else "")
+            + f"**Rationale**: {rationale}\n\n"
             f"Pre-flight Verification: Syntax={'PASS' if proof.syntax_verified else 'FAIL'}, "
             f"Replay={'PASS' if proof.replay_verified else 'PENDING'}"
         )
@@ -674,4 +996,20 @@ class BaseSecOpsAdkAgent:
 
         created_proposal = self.proposal_manager.get_proposal(proposal_id)
         self.last_submitted_proposal = created_proposal
+
+        # If linked to an issue and lifecycle_manager is present, record Durability Boundary
+        if issue_id and self.lifecycle_manager:
+            try:
+                self.lifecycle_manager.submit_proposal(
+                    issue_id=issue_id,
+                    proposal_id=proposal_id,
+                    proposal_title=title,
+                    author=self.handle,
+                    diff_text=proposed_diff,
+                    mutation_payload=mutation_payload,
+                    commit=False,
+                )
+            except Exception as e:
+                logger.warning("Failed recording proposal %s in lifecycle manager: %s", proposal_id, e)
+
         return created_proposal

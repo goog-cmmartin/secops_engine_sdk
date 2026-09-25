@@ -1,18 +1,32 @@
 ---
 id: concept.ingestion_pipeline_topology
-title: "Log Ingestion Pipeline Topology & Latency Dynamics"
+title: Log Ingestion Pipeline Topology & Latency Dynamics
 type: concept
 applies_to:
-  - secops_siem
-  - bindplane
-  - gcp
+- secops_siem
+- bindplane
+- gcp
 related_features:
-  - feature.siem.feed_management
-  - feature.siem.parser_lifecycle
+- feature.siem.feed_management
+- feature.siem.parser_lifecycle
 tags:
-  - ingestion
-  - latency
-  - pipelines
+- ingestion
+- latency
+- pipelines
+status: stable
+description: 'Understanding the pipeline topology is essential for isolating latency:
+  1. **Source Generation:** System emits log (`metadata.event_timestamp`). 2. **Collect...'
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Log Ingestion Pipeline Topology & Latency Dynamics

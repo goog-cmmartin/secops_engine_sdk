@@ -1,16 +1,30 @@
 ---
 id: concept.soar_case_lifecycle
-title: "SOAR Case Lifecycle, Alert Grouping & Playbook Execution"
+title: SOAR Case Lifecycle, Alert Grouping & Playbook Execution
 type: concept
 applies_to:
-  - secops_soar
+- secops_soar
 related_features:
-  - feature.soar.case_management
-  - feature.soar.playbooks
+- feature.soar.case_management
+- feature.soar.playbooks
 tags:
-  - soar
-  - cases
-  - playbooks
+- soar
+- cases
+- playbooks
+status: stable
+description: SOAR Case Lifecycle, Alert Grouping & Playbook Execution (concept reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOAR Case Lifecycle, Alert Grouping & Playbook Execution

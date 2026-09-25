@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from engine.domain import (
     RuleCompilationDiagnostic,
     RuleDeployment,
+    RuleDeploymentListResult,
     RuleDetail,
     RuleExecutionError,
     RuleExecutionErrorListResult,
@@ -97,6 +98,8 @@ def _map_rule_deployment(raw: Dict[str, Any]) -> RuleDeployment:
         execution_state=raw.get("executionState", "DEFAULT"),
         enabled=bool(raw.get("enabled", False) or raw.get("executionState") == "ACTIVE" or raw.get("runFrequency") in ("LIVE", "HOURLY", "DAILY")),
         alerting=bool(raw.get("alerting", False)),
+        archived=bool(raw.get("archived", False)),
+        archive_time=raw.get("archiveTime", ""),
         last_alert_status_change_time=raw.get("lastAlertStatusChangeTime", ""),
         display_name=raw.get("displayName", ""),
         raw=raw,
@@ -244,6 +247,30 @@ class ListRuleRevisionsWorkflow:
             revisions=revisions,
             next_page_token=resp.get("nextPageToken"),
             provenance={"count": len(revisions)},
+        )
+
+
+class ListRuleDeploymentsWorkflow:
+    """Workflow to list deployments across all detection rules in Chronicle SIEM."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self._adapter = adapter
+
+    def execute(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+    ) -> RuleDeploymentListResult:
+        resp = self._adapter.list_rule_deployments(
+            page_size=page_size,
+            page_token=page_token,
+        )
+        raw_deps = resp.get("ruleDeployments", [])
+        deployments = [_map_rule_deployment(d) for d in raw_deps]
+        return RuleDeploymentListResult(
+            deployments=deployments,
+            next_page_token=resp.get("nextPageToken"),
+            provenance={"count": len(deployments)},
         )
 
 

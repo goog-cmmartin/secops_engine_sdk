@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from engine.domain import (
     AlertInvestigation,
@@ -42,6 +42,7 @@ from engine.domain import (
     RuleCompilationDiagnostic,
     RuleValidationResult,
     RuleDeployment,
+    RuleDeploymentListResult,
     RuleExecutionError,
     RuleExecutionErrorListResult,
     RuleSummary,
@@ -277,6 +278,9 @@ from engine.domain import (
     ChronicleIamMember,
     ChronicleIamRoleBinding,
     IdentityGovernanceReport,
+    TimestampIntegrityReport,
+    TimestampMetricRow,
+    TimestampProgressionState,
 )
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
 from engine.workflows.alert_investigation import InvestigateAlertWorkflow
@@ -402,6 +406,8 @@ from engine.workflows.playbook import (
     SearchPlaybooksWorkflow,
 )
 from engine.workflows.playbook_health import AuditPlaybookHealthWorkflow
+from engine.workflows.playbook_decay import AuditPlaybookDecayWorkflow
+from engine.workflows.timestamp_integrity import TimestampIntegrityWorkflow
 from engine.workflows.preview_feature import (
     GetPreviewFeatureWorkflow,
     ListPreviewFeaturesWorkflow,
@@ -494,6 +500,7 @@ from engine.workflows.detection_rules import (
     PatchRuleWorkflow,
     DeleteRuleWorkflow,
     ListRuleRevisionsWorkflow,
+    ListRuleDeploymentsWorkflow,
     GetRuleDeploymentWorkflow,
     UpdateRuleDeploymentWorkflow,
     ListRuleErrorsWorkflow,
@@ -510,6 +517,55 @@ from engine.workflows.rule_decay import (
     extract_udm_fields_from_yaral,
 )
 from engine.domain import RuleDecayAssessment, RuleDecayReport
+from engine.workflows.rule_conflict import (
+    AuditRuleConflictWorkflow,
+    BatchAuditRuleConflictsWorkflow,
+    FindSimilarRulesWorkflow,
+    SyncRuleEmbeddingsWorkflow,
+    calculate_conflict_overlap_score,
+    synthesize_rule_summary,
+)
+from engine.domain import (
+    RuleConflictType,
+    ConflictSeverityTier,
+    RuleConflictPair,
+    RuleConflictAuditResult,
+    BatchRuleConflictAuditResult,
+    RuleAuditFinding,
+    RuleAuditReport,
+    RuleSourceType,
+    LogCostAnalysisReport,
+    LogTypeCostMetric,
+    FinOpsRecommendation,
+    LogPricingTier,
+    IngestionLabelMetric,
+    NamespaceMetric,
+    UntaggedTelemetrySummary,
+    DataRbacLabelReference,
+    NamespaceLabelHygieneFinding,
+    NamespaceLabelAnalysisReport,
+    IdentityFidelityMetric,
+    EntityGraphSource,
+    LogSourceVolumeMetric,
+    TenantTelemetryProfile,
+    ShiftBriefing,
+    KnowledgeSnapshot,
+)
+from engine.workflows.rule_audit import AuditRulesWorkflow
+from engine.workflows.log_cost import AnalyzeLogCostWorkflow, GetLatestLogCostWorkflow
+from engine.workflows.namespace_labels import (
+    AnalyzeIngestionLabelsWorkflow,
+    AnalyzeNamespacesWorkflow,
+    AuditDataRbacAlignmentWorkflow,
+    AnalyzeNamespaceLabelsCompositeWorkflow,
+)
+from engine.workflows.tenant_profiling import TenantProfilingWorkflow
+from engine.workflows.briefing_aggregation import (
+    compute_shift_delta,
+    compute_knowledge_snapshot,
+)
+from agents.core.knowledge_store import get_knowledge_store
+
 
 
 def _normalize_case_id(case_id: Union[str, int]) -> str:
@@ -525,12 +581,14 @@ class SecOpsEngine:
         self,
         adapter: Optional[Any] = None,
         custom_registry: Optional[WorkflowRegistry] = None,
+        evidence_store: Optional[Any] = None,
     ):
         if adapter is None:
             from adapters.google_secops import GoogleSecOpsAdapter
             adapter = GoogleSecOpsAdapter()
         self.adapter = adapter
         self.registry = custom_registry or registry
+        self.evidence_store = evidence_store
         self._wf_cache: Dict[str, Any] = {}
 
         # Register default capabilities
@@ -578,6 +636,8 @@ class SecOpsEngine:
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
         "_alert_playbook_instances_wf": lambda e: GetAlertPlaybookInstancesWorkflow(e.adapter),
         "_audit_soar_playbook_health_wf": lambda e: AuditPlaybookHealthWorkflow(e),
+        "_audit_playbook_decay_wf": lambda e: AuditPlaybookDecayWorkflow(e),
+        "_timestamp_integrity_wf": lambda e: TimestampIntegrityWorkflow(e.adapter, getattr(e, "evidence_store", None)),
         "_search_integrations_wf": lambda e: SearchIntegrationsWorkflow(e.adapter),
         "_get_integration_wf": lambda e: GetIntegrationDetailWorkflow(e.adapter),
         "_list_integration_instances_wf": lambda e: ListIntegrationInstancesWorkflow(e.adapter),
@@ -724,6 +784,7 @@ class SecOpsEngine:
         "_patch_rule_wf": lambda e: PatchRuleWorkflow(e.adapter),
         "_delete_rule_wf": lambda e: DeleteRuleWorkflow(e.adapter),
         "_list_rule_revisions_wf": lambda e: ListRuleRevisionsWorkflow(e.adapter),
+        "_list_rule_deployments_wf": lambda e: ListRuleDeploymentsWorkflow(e.adapter),
         "_get_rule_deployment_wf": lambda e: GetRuleDeploymentWorkflow(e.adapter),
         "_update_rule_deployment_wf": lambda e: UpdateRuleDeploymentWorkflow(e.adapter),
         "_list_rule_errors_wf": lambda e: ListRuleErrorsWorkflow(e.adapter),
@@ -733,6 +794,18 @@ class SecOpsEngine:
         "_audit_rule_decay_wf": lambda e: AuditRuleDecayWorkflow(e.adapter),
         "_query_rule_detection_counts_wf": lambda e: QueryRuleDetectionCountsWorkflow(e.adapter),
         "_audit_udm_population_wf": lambda e: AuditUdmFieldPopulationWorkflow(e.adapter),
+        "_audit_rule_conflict_wf": lambda e: AuditRuleConflictWorkflow(e.adapter),
+        "_batch_audit_rule_conflicts_wf": lambda e: BatchAuditRuleConflictsWorkflow(e.adapter),
+        "_find_similar_rules_wf": lambda e: FindSimilarRulesWorkflow(e.adapter),
+        "_sync_rule_embeddings_wf": lambda e: SyncRuleEmbeddingsWorkflow(e.adapter),
+        "_audit_rules_wf": lambda e: AuditRulesWorkflow(e.adapter),
+        "_analyze_log_cost_wf": lambda e: AnalyzeLogCostWorkflow(e.adapter, store=e.evidence_store),
+        "_get_latest_log_cost_wf": lambda e: GetLatestLogCostWorkflow(e.adapter, store=e.evidence_store),
+        "_analyze_ingestion_labels_wf": lambda e: AnalyzeIngestionLabelsWorkflow(e.adapter, store=e.evidence_store),
+        "_analyze_namespaces_wf": lambda e: AnalyzeNamespacesWorkflow(e.adapter, store=e.evidence_store),
+        "_audit_data_rbac_alignment_wf": lambda e: AuditDataRbacAlignmentWorkflow(e.adapter, store=e.evidence_store),
+        "_analyze_namespace_labels_wf": lambda e: AnalyzeNamespaceLabelsCompositeWorkflow(e.adapter, store=e.evidence_store),
+        "_tenant_profiling_wf": lambda e: TenantProfilingWorkflow(e.adapter),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -1211,6 +1284,19 @@ class SecOpsEngine:
                 composed=True,
                 uses=("playbook.search", "dashboard.execute_query"),
                 evidence_path="evidence/playbook/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="playbook.decay_audit",
+                name="SOAR Playbook Inventory & Decay Audit",
+                description="Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence.",
+                category="playbook",
+                handler=self.audit_playbook_decay,
+                mcp_tool_name="audit_playbook_decay",
+                composed=True,
+                uses=("playbook.search", "playbook.get", "dashboard.execute_query"),
+                evidence_path="evidence/playbook/decay_audit",
             )
         )
         self.registry.register(
@@ -1723,6 +1809,33 @@ class SecOpsEngine:
                 composed=True,
                 uses=("feed.search", "dashboard.execute_query"),
                 evidence_path="evidence/feed/audit_health",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="feed.timestamp_integrity_audit",
+                name="Ingestion Timestamp Integrity & Clock Skew Audit",
+                description="Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief.",
+                category="feed",
+                handler=self.audit_timestamp_integrity,
+                mcp_tool_name="audit_timestamp_integrity",
+                composed=True,
+                uses=("dashboard.execute_query",),
+                evidence_path="evidence/feed/timestamp_integrity",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="feed.get_timestamp_integrity",
+                name="Get Latest Ingestion Timestamp Integrity Report",
+                description="Retrieves latest stored timestamp integrity baseline and progression metrics from Evidence Fabric.",
+                category="feed",
+                handler=self.get_latest_timestamp_integrity,
+                mcp_tool_name="get_latest_timestamp_integrity",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/feed/timestamp_integrity_latest",
             )
         )
         self.registry.register(
@@ -2798,6 +2911,18 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="rule.deployment.list",
+                name="List Rule Deployments",
+                description="Lists deployment, frequency, and alerting status for all detection rules.",
+                category="rule",
+                handler=self.list_rule_deployments,
+                mcp_tool_name="list_rule_deployments",
+                composed=False,
+                evidence_path="evidence/rule/deployment/list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="rule.deployment.get",
                 name="Get Rule Deployment",
                 description="Retrieves deployment, frequency, and alerting status of a rule.",
@@ -2874,6 +2999,79 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="rule.conflict.audit",
+                name="Audit Detection Rule Conflicts & Overlaps",
+                description="Performs semantic dual-rule YARA-L logic comparison, identifies REDUNDANCY, OVERLAP, CONTRADICTION, or SCOPE GAPS, and computes Conflict Overlap Score (COS: 0-100).",
+                category="rule",
+                handler=self.audit_rule_conflicts,
+                mcp_tool_name="audit_rule_conflicts",
+                composed=True,
+                uses=("rule.get", "rule.deployment.list"),
+                evidence_path="evidence/rule/conflict_audit",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.conflict.batch_audit",
+                name="Batch Audit Rule Conflicts & Overlaps",
+                description="Discovers and ranks semantic rule conflicts across tenant active rules with batch chunking and Evidence Fabric persistence.",
+                category="rule",
+                handler=self.batch_audit_rule_conflicts,
+                mcp_tool_name="batch_audit_rule_conflicts",
+                composed=True,
+                uses=("rule.list", "rule.deployment.list", "rule.conflict.audit"),
+                evidence_path="evidence/rule/conflict_batch_audit",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.similarity.search",
+                name="Search Similar Detection Rules",
+                description="Finds semantically similar detection rules using 768-d text-embedding-004 vectors and cosine similarity.",
+                category="rule",
+                handler=self.find_similar_rules,
+                mcp_tool_name="find_similar_rules",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/rule/similarity_search",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.embeddings.sync",
+                name="Synchronize Rule Embeddings",
+                description="Batch computes and stores text-embedding-004 vector embeddings for all active tenant rules.",
+                category="rule",
+                handler=self.sync_rule_embeddings,
+                mcp_tool_name="sync_rule_embeddings",
+                composed=False,
+                kind="primitive",
+                evidence_path="evidence/rule/embeddings_sync",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.audit",
+                name="Unified Detection Rule Repository Audit",
+                description="Performs an end-to-end repository audit across custom and curated rules, synchronizing vector embeddings, calculating DPS decay, discovering cross-rule conflicts, and updating Firestore Evidence Fabric.",
+                category="rule",
+                handler=self.audit_rules,
+                mcp_tool_name="audit_rules",
+                composed=True,
+                uses=(
+                    "rule.list",
+                    "rule.deployment.list",
+                    "rule.errors",
+                    "rule.embeddings.sync",
+                    "rule.decay.audit",
+                    "rule.conflict.batch_audit",
+                ),
+                evidence_path="evidence/rule/audit",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="gcp_logging.search",
                 name="Search GCP Cloud Logging for SecOps",
                 description="Queries Google Cloud Logging for SecOps audit, error, parser, and forwarder telemetry via ADC.",
@@ -2942,9 +3140,191 @@ class SecOpsEngine:
                 evidence_path="evidence/identity/inventory_report",
             )
         )
-
-
-
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="log_cost.analyze",
+                name="Analyze Log Ingestion Cost and FinOps Optimization",
+                description="Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations.",
+                category="log",
+                handler=self.analyze_log_costs,
+                mcp_tool_name="analyze_log_costs",
+                composed=True,
+                uses=("dashboard.execute_query",),
+                evidence_path="evidence/log_cost/analyze",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="log_cost.get_latest",
+                name="Get Latest Log Cost and FinOps Analysis Report",
+                description="Retrieves the most recent log cost and FinOps analysis report from Evidence Fabric.",
+                category="log",
+                handler=self.get_latest_log_costs,
+                mcp_tool_name="get_latest_log_costs",
+                composed=False,
+                kind="query",
+                cardinality="single",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="ingestion.labels.analyze",
+                name="Analyze Active Ingestion Labels",
+                description="Analyzes active ingestion labels across log types via native GoogleSQL, classifying auto-generated vs custom tags.",
+                category="ingestion",
+                handler=self.analyze_ingestion_labels,
+                mcp_tool_name="analyze_ingestion_labels",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/ingestion/labels",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="ingestion.namespaces.analyze",
+                name="Analyze Active UDM Namespaces",
+                description="Analyzes active UDM namespaces and flags potential RFC 1918 overlapping IP collisions across network telemetry.",
+                category="ingestion",
+                handler=self.analyze_namespaces,
+                mcp_tool_name="analyze_namespaces",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/ingestion/namespaces",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="ingestion.rbac_alignment.audit",
+                name="Audit Data RBAC Alignment",
+                description="Audits Data Access Labels against active telemetry tags and namespaces, detecting unreferenced or broken scoping rules.",
+                category="ingestion",
+                handler=self.audit_data_rbac_alignment,
+                mcp_tool_name="audit_data_rbac_alignment",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/ingestion/rbac_alignment",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="ingestion.labels_and_namespaces.analyze",
+                name="Analyze Ingestion Labels, Namespaces and Data RBAC Hygiene",
+                description="Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes.",
+                category="ingestion",
+                handler=self.analyze_labels_and_namespaces,
+                mcp_tool_name="analyze_labels_and_namespaces",
+                composed=True,
+                uses=(
+                    "ingestion.labels.analyze",
+                    "ingestion.namespaces.analyze",
+                    "ingestion.rbac_alignment.audit",
+                    "data_rbac.label.search",
+                ),
+                evidence_path="evidence/ingestion/labels_and_namespaces",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="tenant.profile.identity_fidelity",
+                name="Profile Tenant UDM Identity Fidelity Density",
+                description="Executes native GoogleSQL pipe aggregation against live events to measure distinct user identity density per log type.",
+                category="tenant_profiling",
+                handler=self.get_identity_fidelity,
+                mcp_tool_name="get_identity_fidelity",
+                composed=True,
+                uses=("dashboard.execute_query",),
+                evidence_path="evidence/tenant_profiling/identity_fidelity",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="tenant.profile.graph_lineage",
+                name="Profile Tenant Entity Graph Lineage & Longevity",
+                description="Executes native GoogleSQL pipe aggregation against live graph table to map entity resolution provenance and longevity.",
+                category="tenant_profiling",
+                handler=self.get_entity_graph_lineage,
+                mcp_tool_name="get_entity_graph_lineage",
+                composed=True,
+                uses=("dashboard.execute_query",),
+                evidence_path="evidence/tenant_profiling/graph_lineage",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="tenant.profile.volume_pareto",
+                name="Profile Tenant Telemetry Volume Pareto",
+                description="Executes native GoogleSQL pipe aggregation against live events to rank log sources by raw ingestion volume.",
+                category="tenant_profiling",
+                handler=self.get_log_source_volume_pareto,
+                mcp_tool_name="get_log_source_volume_pareto",
+                composed=True,
+                uses=("dashboard.execute_query",),
+                evidence_path="evidence/tenant_profiling/volume_pareto",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="tenant.profile.generate",
+                name="Generate Comprehensive Tenant Telemetry Profile",
+                description="Executes deep tenant cartography across graph, identity, and volume to synthesize an attested tenant telemetry profile.",
+                category="tenant_profiling",
+                handler=self.generate_tenant_telemetry_profile,
+                mcp_tool_name="generate_tenant_telemetry_profile",
+                composed=True,
+                uses=(
+                    "tenant.profile.identity_fidelity",
+                    "tenant.profile.graph_lineage",
+                    "tenant.profile.volume_pareto",
+                    "dashboard.execute_query",
+                ),
+                evidence_path="evidence/tenant_profiling/generate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="soc.briefing.shift_handover",
+                name="Generate Shift Handover Briefing",
+                description="Deterministically aggregates work queue deltas, resolved issues, active agent leases, applied changes, and verified healthy baselines into a shift briefing.",
+                category="operational_intelligence",
+                handler=self.generate_shift_briefing,
+                mcp_tool_name="generate_shift_briefing",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/operational_intelligence/shift_briefing",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="soc.briefing.posture_snapshot",
+                name="Generate SOC Knowledge & Posture Snapshot",
+                description="Compiles complete tenant operational posture, subsystem health indicators, assertion freshness distributions, and surfaced Knowledge Gaps.",
+                category="operational_intelligence",
+                handler=self.generate_posture_snapshot,
+                mcp_tool_name="generate_posture_snapshot",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/operational_intelligence/posture_snapshot",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="soc.briefing.entity_dossier",
+                name="Get Composite Entity Dossier",
+                description="Synthesizes cross-agent factual assertions, health statuses, linked issues, and knowledge gaps for a specific operational entity.",
+                category="operational_intelligence",
+                handler=self.get_composite_entity_dossier,
+                mcp_tool_name="get_composite_entity_dossier",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/operational_intelligence/entity_dossier",
+            )
+        )
 
 
     def execute(self, capability_id: str, *args: Any, **kwargs: Any) -> Any:
@@ -3705,6 +4085,44 @@ class SecOpsEngine:
             slow_threshold_minutes=slow_threshold_minutes,
         )
 
+    def audit_playbook_decay(
+        self,
+        workflow_identifier: Optional[str] = None,
+        category: Optional[str] = None,
+        lookback_days: int = 30,
+        generate_brief: bool = True,
+        persist: bool = True,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day telemetry, and decay."""
+        return self._audit_playbook_decay_wf.execute(
+            workflow_identifier=workflow_identifier,
+            category=category,
+            lookback_days=lookback_days,
+            generate_brief=generate_brief,
+            persist=persist,
+            limit=limit,
+        )
+
+    def audit_timestamp_integrity(
+        self,
+        days: int = 7,
+        clear_cache: bool = True,
+        project_id: Optional[str] = None,
+    ) -> TimestampIntegrityReport:
+        """Audits log sources for ingestion latency bottlenecks and NTP clock skews."""
+        return self._timestamp_integrity_wf.execute(
+            days=days,
+            clear_cache=clear_cache,
+            project_id=project_id,
+        )
+
+    def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest stored timestamp integrity report from Evidence Fabric."""
+        if not self.evidence_store:
+            return None
+        return self.evidence_store.get_latest_timestamp_integrity()
+
     def search_integrations(
         self,
         query: Optional[Union[str, IntegrationSearchQuery]] = None,
@@ -4098,6 +4516,7 @@ class SecOpsEngine:
         dialect: str = "YL2",
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        clear_cache: Optional[bool] = None,
     ) -> DashboardQueryResult:
         """Executes a dashboard query (by resource ID or inline query expression) and normalizes columnar output into tabular rows."""
         return self._execute_dashboard_query_wf.execute(
@@ -4111,6 +4530,7 @@ class SecOpsEngine:
             dialect=dialect,
             start_time=start_time,
             end_time=end_time,
+            clear_cache=clear_cache,
         )
 
     def validate_dashboard_query(
@@ -5065,6 +5485,17 @@ class SecOpsEngine:
             page_token=page_token,
         )
 
+    def list_rule_deployments(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+    ) -> RuleDeploymentListResult:
+        """Lists deployment, frequency, and alerting status for all detection rules."""
+        return self._list_rule_deployments_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+        )
+
     def get_rule_deployment(self, rule_id_or_name: str) -> RuleDeployment:
         """Retrieves deployment, frequency, and alerting status of a rule."""
         return self._get_rule_deployment_wf.execute(rule_id_or_name=rule_id_or_name)
@@ -5305,6 +5736,153 @@ class SecOpsEngine:
             lookback_days=lookback_days,
             schema_cache=schema_cache,
         )
+
+    def audit_rule_conflicts(
+        self,
+        rule_id: str,
+        limit: int = 6,
+    ) -> RuleConflictAuditResult:
+        """Audits detection rule for semantic overlaps, contradictions, redundancies, and computes COS."""
+        return self._audit_rule_conflict_wf.execute(rule_id=rule_id, limit=limit)
+
+    def batch_audit_rule_conflicts(
+        self,
+        limit: int = 50,
+        batch_size: int = 10,
+        min_cos: float = 45.0,
+    ) -> BatchRuleConflictAuditResult:
+        """Discovers and scores rule conflicts and overlaps across all tenant active rules."""
+        return self._batch_audit_rule_conflicts_wf.execute(limit=limit, batch_size=batch_size, min_cos=min_cos)
+
+    def find_similar_rules(
+        self,
+        rule_id: str,
+        limit: int = 6,
+    ) -> List[Dict[str, Any]]:
+        """Finds candidate overlapping or conflicting rules via vector similarity search."""
+        return self._find_similar_rules_wf.execute(rule_id=rule_id, limit=limit)
+
+    def sync_rule_embeddings(
+        self,
+        batch_size: int = 50,
+        force_refresh: bool = False,
+        include_curated: bool = True,
+    ) -> Dict[str, Any]:
+        """Synchronizes vector embeddings for all active tenant detection rules in batches."""
+        return self._sync_rule_embeddings_wf.execute(
+            batch_size=batch_size,
+            force_refresh=force_refresh,
+            include_curated=include_curated,
+        )
+
+    def audit_rules(
+        self,
+        include_curated: bool = True,
+        sync_embeddings: bool = True,
+        lookback_days: int = 90,
+        run_conflict_scan: bool = True,
+        batch_size: int = 50,
+        page_size: int = 1000,
+    ) -> RuleAuditReport:
+        """Executes full detection rule repository audit across custom and curated rules."""
+        return self._audit_rules_wf.execute(
+            include_curated=include_curated,
+            sync_embeddings=sync_embeddings,
+            lookback_days=lookback_days,
+            run_conflict_scan=run_conflict_scan,
+            batch_size=batch_size,
+            page_size=page_size,
+        )
+
+    def analyze_log_costs(
+        self,
+        lookback_days: int = 7,
+        pricing_tier: str = "ENTERPRISE",
+        bloat_threshold_bytes: int = 2048,
+    ) -> LogCostAnalysisReport:
+        """Executes ingestion telemetry analysis, multi-tier pricing, and FinOps evaluation."""
+        return self._analyze_log_cost_wf.execute(
+            lookback_days=lookback_days,
+            pricing_tier=pricing_tier,
+            bloat_threshold_bytes=bloat_threshold_bytes,
+        )
+
+    def get_latest_log_costs(self, fallback_if_empty: bool = True) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest cached or persisted Log Cost Analysis Report from Evidence Fabric."""
+        return self._get_latest_log_cost_wf.execute(fallback_if_empty=fallback_if_empty)
+
+    def analyze_ingestion_labels(self, lookback_days: int = 7) -> List[IngestionLabelMetric]:
+        """Analyzes active ingestion labels and tagging consistency across log types."""
+        return self._analyze_ingestion_labels_wf.execute(lookback_days=lookback_days)
+
+    def analyze_namespaces(self, lookback_days: int = 7) -> List[NamespaceMetric]:
+        """Analyzes active UDM namespaces and detects RFC 1918 private IP collision risks."""
+        return self._analyze_namespaces_wf.execute(lookback_days=lookback_days)
+
+    def audit_data_rbac_alignment(
+        self,
+        active_label_keys: Optional[Set[str]] = None,
+        active_namespaces: Optional[Set[str]] = None,
+    ) -> List[DataRbacLabelReference]:
+        """Audits Data Access Labels for backing in active telemetry tags and namespaces."""
+        return self._audit_data_rbac_alignment_wf.execute(
+            active_label_keys=active_label_keys,
+            active_namespaces=active_namespaces,
+        )
+
+    def analyze_labels_and_namespaces(self, lookback_days: int = 7) -> NamespaceLabelAnalysisReport:
+        """Executes full hygiene audit across ingestion labels, namespaces, and Data RBAC."""
+        return self._analyze_namespace_labels_wf.execute(lookback_days=lookback_days)
+
+    def get_identity_fidelity(self, days: int = 7, limit: int = 50) -> List[IdentityFidelityMetric]:
+        """Profiles the population density of distinct user identity keys across all active log types."""
+        return self._tenant_profiling_wf.get_identity_fidelity(days=days, limit=limit)
+
+    def get_entity_graph_lineage(self, days: int = 7, limit: int = 50) -> List[EntityGraphSource]:
+        """Profiles the provenance, vendors, products, and longevity of entity graph bindings."""
+        return self._tenant_profiling_wf.get_entity_graph_lineage(days=days, limit=limit)
+
+    def get_log_source_volume_pareto(self, days: int = 7, limit: int = 50) -> List[LogSourceVolumeMetric]:
+        """Profiles total event volume and ingestion temporal bounds per log source."""
+        return self._tenant_profiling_wf.get_log_source_volume_pareto(days=days, limit=limit)
+
+    def generate_tenant_telemetry_profile(self, days: int = 7, limit: int = 50) -> TenantTelemetryProfile:
+        """Executes full tenant survey and synthesizes an Attested TenantTelemetryProfile."""
+        return self._tenant_profiling_wf.generate_tenant_telemetry_profile(days=days, limit=limit)
+
+    def export_attested_computation_markdown(
+        self, profile: TenantTelemetryProfile, output_path: Optional[str] = None
+    ) -> str:
+        """Formats the profile as an Open Knowledge Format (OKF v0.2) Attested Computation document."""
+        return self._tenant_profiling_wf.export_attested_computation_markdown(profile, output_path=output_path)
+
+    def generate_shift_briefing(
+        self, shift_hours: int = 8, shift_name: Optional[str] = None
+    ) -> ShiftBriefing:
+        """Deterministically aggregates operational deltas and issues into a structured ShiftBriefing."""
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=shift_hours)
+        return compute_shift_delta(
+            start_time=start,
+            end_time=now,
+            shift_name=shift_name,
+        )
+
+    def generate_posture_snapshot(self) -> KnowledgeSnapshot:
+        """Deterministically compiles the current SOC Knowledge & Posture Snapshot."""
+        return compute_knowledge_snapshot()
+
+    def get_composite_entity_dossier(
+        self, subject_type: str, subject_id: str
+    ) -> Dict[str, Any]:
+        """Synthesizes cross-agent observations, status, and knowledge gaps for an entity."""
+        store = get_knowledge_store()
+        return store.get_composite_entity(subject_type, subject_id)
+
+
+
+
 
 
 

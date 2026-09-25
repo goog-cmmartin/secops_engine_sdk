@@ -1,14 +1,28 @@
 ---
 id: feature.gcp.cloud_logging
-title: "Google Cloud Logging Audit & SecOps Diagnostic Trails"
+title: Google Cloud Logging Audit & SecOps Diagnostic Trails
 type: feature
 platform: gcp
 sdk_capabilities:
-  - gcp_logging.search
+- gcp_logging.search
 mcp_tools:
-  - query_gcp_cloud_logging
+- query_gcp_cloud_logging
 related_concepts:
-  - concept.ingestion_pipeline_topology
+- concept.ingestion_pipeline_topology
+status: stable
+description: Google Cloud Logging Audit & SecOps Diagnostic Trails (feature reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Google Cloud Logging Audit & SecOps Diagnostic Trails

@@ -1,15 +1,29 @@
 ---
 id: concept.udm_search_lifecycle
-title: "UDM Search Execution Lifecycle & Query Optimization"
+title: UDM Search Execution Lifecycle & Query Optimization
 type: concept
 applies_to:
-  - secops_siem
+- secops_siem
 related_features:
-  - feature.siem.native_dashboards
+- feature.siem.native_dashboards
 tags:
-  - search
-  - udm
-  - performance
+- search
+- udm
+- performance
+status: stable
+description: UDM Search Execution Lifecycle & Query Optimization (concept reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # UDM Search Execution Lifecycle & Query Optimization

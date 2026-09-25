@@ -1,22 +1,36 @@
 ---
 id: task.ingestion_specialist.audit_feed_health
-title: "Audit Feed Connectivity, Ingestion Latency, and Error States"
+title: Audit Feed Connectivity, Ingestion Latency, and Error States
 type: task
 persona: persona.ingestion_specialist
 trigger:
-  - scheduled_daily
-  - on_demand
+- scheduled_daily
+- on_demand
 capabilities_used:
-  - feed.audit_health
-  - feed.search
-  - feed.get
+- feed.audit_health
+- feed.search
+- feed.get
 related_concepts:
-  - concept.ingestion_pipeline_topology
+- concept.ingestion_pipeline_topology
 related_features:
-  - feature.siem.feed_management
+- feature.siem.feed_management
 evaluation_rules:
   max_acceptable_latency_hours: 4.0
   max_unhealthy_feeds: 0
+status: stable
+description: Audit Feed Connectivity, Ingestion Latency, and Error States (task reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Audit Feed Connectivity, Ingestion Latency, and Error States

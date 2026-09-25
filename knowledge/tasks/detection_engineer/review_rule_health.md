@@ -1,23 +1,37 @@
 ---
 id: task.detection_engineer.review_rule_health
-title: "Review Detection Rule Compilation, Execution Health, and Curated Drift"
+title: Review Detection Rule Compilation, Execution Health, and Curated Drift
 type: task
 persona: persona.detection_engineer
 trigger:
-  - scheduled_weekly
-  - on_demand
+- scheduled_weekly
+- on_demand
 capabilities_used:
-  - rule.audit_health
-  - rule.list
-  - curated_detections.audit_health
+- rule.audit_health
+- rule.list
+- curated_detections.audit_health
 related_concepts:
-  - concept.detection_lifecycle
+- concept.detection_lifecycle
 related_features:
-  - feature.siem.rules_engine
-  - feature.siem.curated_detections
+- feature.siem.rules_engine
+- feature.siem.curated_detections
 evaluation_rules:
   max_execution_errors: 0
   min_curated_enabled_pct: 60.0
+status: stable
+description: Review Detection Rule Compilation, Execution Health, and Curated Drift
+  (task reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Review Detection Rule Compilation, Execution Health, and Curated Drift

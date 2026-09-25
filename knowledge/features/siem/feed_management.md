@@ -1,20 +1,33 @@
 ---
 id: feature.siem.feed_management
-title: "Log Feeds & Ingestion Endpoints"
+title: Log Feeds & Ingestion Endpoints
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - feed.search
-  - feed.get
-  - feed.audit_health
-  - feed_schema.list_sources
-  - feed_schema.list_log_types
+- feed.search
+- feed.get
+- feed.audit_health
+- feed_schema.list_sources
+- feed_schema.list_log_types
 mcp_tools:
-  - audit_feed_health
-  - get_feed
-  - list_feed_log_type_schemas
-  - list_feed_source_type_schemas
-  - search_feeds
+- audit_feed_health
+- get_feed
+- list_feed_log_type_schemas
+- list_feed_source_type_schemas
+- search_feeds
+status: stable
+description: Log Feeds & Ingestion Endpoints (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Log Feeds & Ingestion Endpoints

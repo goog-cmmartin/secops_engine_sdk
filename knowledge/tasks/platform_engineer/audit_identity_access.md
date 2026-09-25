@@ -1,22 +1,36 @@
 ---
 id: task.platform_engineer.audit_identity_access
-title: "Audit Workforce Identity Federation and Admin Role Assignments"
+title: Audit Workforce Identity Federation and Admin Role Assignments
 type: task
 persona: persona.platform_engineer
 trigger:
-  - scheduled_weekly
-  - on_demand
+- scheduled_weekly
+- on_demand
 capabilities_used:
-  - data_rbac.environment.search
-  - data_rbac.scope.search
-  - identity.iam.bindings
+- data_rbac.environment.search
+- data_rbac.scope.search
+- identity.iam.bindings
 related_concepts:
-  - concept.workforce_identity_federation
+- concept.workforce_identity_federation
 related_features:
-  - feature.gcp.workforce_identity
+- feature.gcp.workforce_identity
 evaluation_rules:
   max_unassigned_scopes: 0
-  unauthorized_role_drift: "none"
+  unauthorized_role_drift: none
+status: stable
+description: Audit Workforce Identity Federation and Admin Role Assignments (task
+  reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # Audit Workforce Identity Federation and Admin Role Assignments

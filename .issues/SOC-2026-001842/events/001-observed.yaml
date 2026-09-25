@@ -1,0 +1,19 @@
+event_id: SOC-2026-001842-evt-001
+issue_id: SOC-2026-001842
+sequence: 1
+transition_type: OBSERVED
+transition: OBSERVED
+actor: '@feed-health-agent'
+timestamp: '2026-09-24T16:28:56.217943+00:00'
+details: &id001
+  title: 'UDM Normalization Degradation: Palo Alto Networks Firewall'
+  observed_state:
+    drop_rate_pct: 18.2
+    malformed_records: 1420
+  desired_state:
+    drop_rate_pct: 0.0
+    malformed_records: 0
+  severity: HIGH
+metadata: *id001
+evidence_refs: &id002 []
+evidence_references: *id002

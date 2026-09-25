@@ -1,16 +1,30 @@
 ---
 id: concept.detection_lifecycle
-title: "YARA-L Rule Engine & Curated Detections Lifecycle"
+title: YARA-L Rule Engine & Curated Detections Lifecycle
 type: concept
 applies_to:
-  - secops_siem
+- secops_siem
 related_features:
-  - feature.siem.rules_engine
-  - feature.siem.curated_detections
+- feature.siem.rules_engine
+- feature.siem.curated_detections
 tags:
-  - detections
-  - yara_l
-  - alerts
+- detections
+- yara_l
+- alerts
+status: stable
+description: YARA-L Rule Engine & Curated Detections Lifecycle (concept reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # YARA-L Rule Engine & Curated Detections Lifecycle

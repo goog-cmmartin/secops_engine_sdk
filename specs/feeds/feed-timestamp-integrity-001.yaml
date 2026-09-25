@@ -1,0 +1,27 @@
+schema_version: "1.0"
+contract_id: "feed-timestamp-integrity-001"
+metadata:
+  capability_id: "feed.timestamp_integrity_audit"
+name: "Audit Ingestion Timestamp Integrity & Clock Skew"
+description: "Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief."
+category: "feed"
+
+invariants:
+  - "Live data origin exclusively from Google SecOps dashboardQueries:execute endpoint."
+  - "Zero mock, synthetic, or fallback data."
+  - "Dual-document persistence in Evidence Fabric timestamp_integrity collection."
+
+inputs:
+  - name: "days"
+    type: "int"
+    default: 7
+    description: "Relative lookback window in days."
+  - name: "clear_cache"
+    type: "bool"
+    default: true
+    description: "Bypasses cached query results to ensure real-time telemetry freshness."
+
+outputs:
+  - name: "report"
+    type: "TimestampIntegrityReport"
+    description: "Aggregated delta metrics, delay distribution buckets, progression states, and synthesized narrative."

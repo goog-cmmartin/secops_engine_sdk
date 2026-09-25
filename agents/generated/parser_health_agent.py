@@ -30,6 +30,8 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
         proposal_manager: Optional[ProposalManager] = None,
         inventory_client: Any = None,
         evidence_store: Optional[EvidenceFabricStore] = None,
+        work_queue: Optional[Any] = None,
+        lifecycle_manager: Optional[Any] = None,
     ):
         super().__init__(
             name='Parser Health Agent',
@@ -45,6 +47,8 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
             proposal_manager=proposal_manager,
             inventory_client=inventory_client,
             evidence_store=evidence_store,
+            work_queue=work_queue,
+            lifecycle_manager=lifecycle_manager,
         )
 
         # Bind declared capabilities from engine registry if engine is provided
@@ -202,12 +206,18 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
 
         samples = []
         for s in diag.diagnostics:
+            raw_full = getattr(s, "raw_log", "") or getattr(s, "raw_log_preview", "")
+            raw_preview = getattr(s, "raw_log_preview", "") or raw_full[:300]
+            ts = s.retrieved_at.isoformat() if hasattr(getattr(s, "retrieved_at", None), "isoformat") else str(getattr(s, "retrieved_at", ""))
             samples.append({
-                "raw_log": s.raw_log,
-                "timestamp": s.timestamp,
-                "syntax_error": s.syntax_error,
-                "parsed_event_count": s.parsed_event_count,
-                "error_details": s.error_details,
+                "log_id": getattr(s, "log_id", ""),
+                "raw_log": raw_full,
+                "raw_log_preview": raw_preview,
+                "timestamp": ts,
+                "syntax_error": getattr(s, "error_message", ""),
+                "error_category": getattr(s, "error_category", ""),
+                "parsed_event_count": len(s.raw.get("parsed_events", [])) if isinstance(getattr(s, "raw", None), dict) else 0,
+                "error_details": getattr(s, "error_message", "") or getattr(s, "error_category", ""),
             })
 
         widget = {
@@ -249,12 +259,23 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
             parser_cbn=parser_cbn,
         )
 
+        first_entry = res.entries[0] if (hasattr(res, "entries") and res.entries) else None
+        is_success = getattr(first_entry, "is_success", getattr(res, "success_count", 0) > 0 if hasattr(res, "success_count") else False)
+        all_parsed = []
+        if hasattr(res, "entries"):
+            for e in res.entries:
+                all_parsed.extend(getattr(e, "parsed_events", []))
+        elif hasattr(res, "parsed_events") and res.parsed_events:
+            all_parsed = res.parsed_events
+
+        err_msg = getattr(first_entry, "error_message", None) if first_entry else getattr(res, "error_message", None)
+
         return {
-            "status": "SUCCESS" if res.success else "FAILED",
-            "success": res.success,
-            "parsed_events_count": len(res.parsed_events) if res.parsed_events else 0,
-            "parsed_events": res.parsed_events,
-            "error_message": res.error_message,
+            "status": "SUCCESS" if is_success else "FAILED",
+            "success": is_success,
+            "parsed_events_count": len(all_parsed),
+            "parsed_events": all_parsed,
+            "error_message": err_msg,
         }
 
     def submit_parser_proposal(
@@ -264,6 +285,7 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
         rationale: str,
         proposed_diff: str,
         patched_cbn_snippet: str,
+        issue_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Submits a formal Human-In-The-Loop proposal to Gas Town .proposals/ for CBN parser or extension patch."""
         preflight = PreflightProof(
@@ -282,6 +304,7 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
                 "cbn_snippet": patched_cbn_snippet,
             },
             preflight=preflight,
+            issue_id=issue_id,
         )
 
         return {
@@ -289,4 +312,5 @@ class ParserHealthAgentAgent(BaseSecOpsAdkAgent):
             "proposal_id": proposal.id,
             "title": proposal.title,
             "target_resource_id": log_type,
+            "issue_id": issue_id,
         }

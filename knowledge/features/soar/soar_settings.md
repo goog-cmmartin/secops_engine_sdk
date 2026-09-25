@@ -1,70 +1,83 @@
 ---
 id: feature.soar.soar_settings
-title: "SOAR Global Settings & Environments"
+title: SOAR Global Settings & Environments
 type: feature
 platform: secops_soar
 sdk_capabilities:
-  - soar.user.search
-  - soar.user.get
-  - soar.soc_role.list
-  - soar.company.get
-  - soar.data_retention.get
-  - soar.environment.search
-  - soar.environment.get
-  - soar.environment_group.search
-  - soar.remote_agent.search
-  - soar.remote_agent.get
-  - soar.email_settings.get
-  - soar.support_settings.get
-  - soar.network.search
-  - soar.network.get
-  - soar.domain.search
-  - soar.domain.get
-  - soar.custom_list.search
-  - soar.custom_list.get
-  - soar.email_template.search
-  - soar.email_template.get
-  - soar.entities_blocklist.search
-  - soar.entities_blocklist.get
-  - soar.sla_definition.search
-  - soar.sla_definition.get
-  - soar.request_template.search
-  - soar.request_template.get
-  - soar.ingestion_connector.search
-  - soar.ingestion_connector.get
-  - soar.webhook.search
-  - soar.webhook.get
+- soar.user.search
+- soar.user.get
+- soar.soc_role.list
+- soar.company.get
+- soar.data_retention.get
+- soar.environment.search
+- soar.environment.get
+- soar.environment_group.search
+- soar.remote_agent.search
+- soar.remote_agent.get
+- soar.email_settings.get
+- soar.support_settings.get
+- soar.network.search
+- soar.network.get
+- soar.domain.search
+- soar.domain.get
+- soar.custom_list.search
+- soar.custom_list.get
+- soar.email_template.search
+- soar.email_template.get
+- soar.entities_blocklist.search
+- soar.entities_blocklist.get
+- soar.sla_definition.search
+- soar.sla_definition.get
+- soar.request_template.search
+- soar.request_template.get
+- soar.ingestion_connector.search
+- soar.ingestion_connector.get
+- soar.webhook.search
+- soar.webhook.get
 mcp_tools:
-  - get_company_settings
-  - get_data_retention_settings
-  - get_email_settings
-  - get_email_template
-  - get_entities_blocklist
-  - get_environment
-  - get_remote_agent
-  - get_request_template
-  - get_sla_definition
-  - get_soar_custom_list
-  - get_soar_domain
-  - get_soar_ingestion_connector
-  - get_soar_network
-  - get_soar_user
-  - get_soar_webhook
-  - get_support_settings
-  - list_soc_roles
-  - search_email_templates
-  - search_entities_blocklists
-  - search_environment_groups
-  - search_environments
-  - search_remote_agents
-  - search_request_templates
-  - search_sla_definitions
-  - search_soar_custom_lists
-  - search_soar_domains
-  - search_soar_ingestion_connectors
-  - search_soar_networks
-  - search_soar_users
-  - search_soar_webhooks
+- get_company_settings
+- get_data_retention_settings
+- get_email_settings
+- get_email_template
+- get_entities_blocklist
+- get_environment
+- get_remote_agent
+- get_request_template
+- get_sla_definition
+- get_soar_custom_list
+- get_soar_domain
+- get_soar_ingestion_connector
+- get_soar_network
+- get_soar_user
+- get_soar_webhook
+- get_support_settings
+- list_soc_roles
+- search_email_templates
+- search_entities_blocklists
+- search_environment_groups
+- search_environments
+- search_remote_agents
+- search_request_templates
+- search_sla_definitions
+- search_soar_custom_lists
+- search_soar_domains
+- search_soar_ingestion_connectors
+- search_soar_networks
+- search_soar_users
+- search_soar_webhooks
+status: stable
+description: SOAR Global Settings & Environments (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOAR Global Settings & Environments

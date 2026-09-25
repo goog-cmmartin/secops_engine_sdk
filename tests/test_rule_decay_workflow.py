@@ -87,5 +87,33 @@ rule suspicious_process_execution {
         self.assertIn('security_result.category = /.+/', q)
 
 
+    def test_calculate_decay_score_explicit_is_live(self):
+        rule = {
+            "id": "ru_explicit_live",
+            "name": "Live Rule with Deployment",
+            "revision_create_time": "2024-01-01T00:00:00Z",
+        }
+        # When is_live=False, live bonus is not added
+        score_dead, flags_dead, _, _ = calculate_decay_score(
+            rule_detail=rule,
+            detection_telemetry_90d={"count": 0},
+            syntax_verified=True,
+            is_live=False,
+        )
+        self.assertNotIn("SILENT", flags_dead)
+        self.assertIn("STALE", flags_dead)
+
+        # When is_live=True, rule is live and silent (+30 live, +30 silent)
+        score_live, flags_live, _, _ = calculate_decay_score(
+            rule_detail=rule,
+            detection_telemetry_90d={"count": 0},
+            syntax_verified=True,
+            is_live=True,
+        )
+        self.assertIn("SILENT", flags_live)
+        self.assertIn("STALE", flags_live)
+        self.assertGreater(score_live, score_dead)
+
+
 if __name__ == "__main__":
     unittest.main()

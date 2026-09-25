@@ -112,8 +112,10 @@ plan.md
 test_qt_app.py
 secops_state_graph*
 
-# Live Tenant Capture & Evidence Data
-evidence/
+# Live Tenant Capture & Evidence Data (top-level only; durable .issues evidence is tracked)
+/evidence/
+!/.issues/
+!/.issues/**
 
 # External reference repositories (Gastown, Zulip, etc.)
 references/

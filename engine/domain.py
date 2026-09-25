@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
+
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 
 
 class LifecycleState(str, Enum):
@@ -2803,6 +2807,7 @@ class UnparsedLogDiagnostic:
     parser_id: str
     parser_version: str
     parser_creator: str
+    raw_log: str = ""
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -4136,9 +4141,30 @@ class RuleDeployment:
     execution_state: str = "DEFAULT"
     enabled: bool = False
     alerting: bool = False
+    archived: bool = False
+    archive_time: str = ""
     last_alert_status_change_time: str = ""
     display_name: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rule_id(self) -> str:
+        parts = self.name.split("/")
+        if len(parts) >= 2 and parts[-1] == "deployment":
+            return parts[-2]
+        return parts[-1] if parts else ""
+
+
+@dataclass
+class RuleDeploymentListResult:
+    """Result container for rule deployments across rules."""
+    deployments: List[RuleDeployment] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleDeployment]:
+        return self.deployments
 
 
 @dataclass
@@ -4694,26 +4720,1452 @@ class GcpMonitoringQueryResult(UniversalBatchMixin):
         return self.time_series
 
 
+class TimestampProgressionState(str, Enum):
+    """Classification states for telemetry timestamp and latency progression."""
+    NEW = "NEW"
+    PREVIOUSLY_KNOWN = "PREVIOUSLY KNOWN"
+    RESOLVED = "RESOLVED"
+    HEALTHY = "HEALTHY"
+
+
+@dataclass
+class TimestampMetricRow:
+    """Aggregated timestamp delta and delay distribution for an individual log type."""
+    log_type: str
+    total: int = 0
+    average_difference_minutes: float = 0.0
+    cnt_lt_0_hours: int = 0  # Future events / NTP clock skew
+    cnt_0_1_hours: int = 0   # 0-1 hour delay (real-time)
+    cnt_1_2_hours: int = 0   # 1-2 hour delay (batching)
+    cnt_gt_2_hours: int = 0  # >2 hour delay (severe delay)
+    progression_state: str = "HEALTHY"
+    is_anomaly: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "total": self.total,
+            "average_difference_minutes": self.average_difference_minutes,
+            "cnt_lt_0_hours": self.cnt_lt_0_hours,
+            "cnt_0_1_hours": self.cnt_0_1_hours,
+            "cnt_1_2_hours": self.cnt_1_2_hours,
+            "cnt_gt_2_hours": self.cnt_gt_2_hours,
+            "progression_state": self.progression_state,
+            "is_anomaly": self.is_anomaly,
+        }
+
+
+@dataclass
+class TimestampIntegrityReport(UniversalBatchMixin):
+    """Comprehensive tenant audit report for timestamp deltas, clock skews, and pipeline latency."""
+    timestamp: str
+    days: int
+    total_log_types_audited: int = 0
+    healthy_count: int = 0
+    new_anomalies_count: int = 0
+    previously_known_count: int = 0
+    resolved_count: int = 0
+    total_skewed_events: int = 0
+    total_delayed_events: int = 0
+    metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    comparative_findings: Dict[str, str] = field(default_factory=dict)
+    log_types: List[TimestampMetricRow] = field(default_factory=list)
+    top_delayed_log_types: List[TimestampMetricRow] = field(default_factory=list)
+    top_skewed_log_types: List[TimestampMetricRow] = field(default_factory=list)
+    narrative: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.metrics and self.log_types:
+            for lt in self.log_types:
+                lt_name = lt.log_type if hasattr(lt, "log_type") else str(lt.get("log_type", ""))
+                self.metrics[lt_name] = {
+                    "total": getattr(lt, "total", 0),
+                    "average_difference_minutes": getattr(lt, "average_difference_minutes", 0.0),
+                    "cnt_lt_0_hours": getattr(lt, "cnt_lt_0_hours", 0),
+                    "cnt_0_1_hours": getattr(lt, "cnt_0_1_hours", 0),
+                    "cnt_1_2_hours": getattr(lt, "cnt_1_2_hours", 0),
+                    "cnt_gt_2_hours": getattr(lt, "cnt_gt_2_hours", 0),
+                }
+
+    @property
+    def items(self) -> List[TimestampMetricRow]:
+        return self.log_types
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "days": self.days,
+            "total_log_types_audited": self.total_log_types_audited,
+            "healthy_count": self.healthy_count,
+            "new_anomalies_count": self.new_anomalies_count,
+            "previously_known_count": self.previously_known_count,
+            "resolved_count": self.resolved_count,
+            "total_skewed_events": self.total_skewed_events,
+            "total_delayed_events": self.total_delayed_events,
+            "metrics": self.metrics,
+            "comparative_findings": self.comparative_findings,
+            "log_types": [lt.to_dict() for lt in self.log_types],
+            "top_delayed_log_types": [lt.to_dict() for lt in self.top_delayed_log_types],
+            "top_skewed_log_types": [lt.to_dict() for lt in self.top_skewed_log_types],
+            "narrative": self.narrative,
+        }
+
+
+@dataclass
+class Provenance:
+    """Verifiable execution provenance for workflow results and findings."""
+    source: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "timestamp": self.timestamp,
+            "details": self.details,
+        }
+
+
+class RuleConflictType:
+    """Standardized conflict and overlap classifications for YARA-L detection rules."""
+    REDUNDANCY = "REDUNDANCY"
+    OVERLAP = "OVERLAP"
+    CONTRADICTION = "CONTRADICTION"
+    SCOPE_GAPS = "SCOPE GAPS"
+
+
+class ConflictSeverityTier:
+    """Operational urgency tiers based on Conflict Overlap Score (COS: 0-100)."""
+    CRITICAL = "CRITICAL"
+    MODERATE = "MODERATE"
+    LOW = "LOW / NO OVERLAP"
+
+
+@dataclass
+class RuleConflictPair:
+    """Pairwise conflict and overlap comparison between a target rule and a candidate similar rule."""
+    target_rule_id: str = ""
+    target_rule_name: str = ""
+    similar_rule_id: str = ""
+    similar_rule_name: str = ""
+    similarity_score: float = 0.0
+    conflict_type: str = "OVERLAP"
+    impact_severity: str = "MEDIUM"
+    cos_score: float = 0.0
+    similarity_pts: float = 0.0
+    conflict_type_pts: float = 0.0
+    impact_severity_pts: float = 0.0
+    explanation: str = ""
+    consolidation_strategy: str = ""
+    recommendation: str = ""
+    events_overlap: Optional[Dict[str, Any]] = None
+    match_overlap: Optional[Dict[str, Any]] = None
+    condition_overlap: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "target_rule_id": self.target_rule_id,
+            "target_rule_name": self.target_rule_name,
+            "similar_rule_id": self.similar_rule_id,
+            "similar_rule_name": self.similar_rule_name,
+            "similarity_score": self.similarity_score,
+            "conflict_type": self.conflict_type,
+            "impact_severity": self.impact_severity,
+            "cos_score": self.cos_score,
+            "similarity_pts": self.similarity_pts,
+            "conflict_type_pts": self.conflict_type_pts,
+            "impact_severity_pts": self.impact_severity_pts,
+            "explanation": self.explanation,
+            "consolidation_strategy": self.consolidation_strategy,
+            "recommendation": self.recommendation,
+            "events_overlap": self.events_overlap,
+            "match_overlap": self.match_overlap,
+            "condition_overlap": self.condition_overlap,
+        }
+
+
+@dataclass
+class RuleConflictAuditResult:
+    """Audit result evaluating all semantic overlaps and conflicts for a single detection rule."""
+    rule_id: str = ""
+    rule_name: str = ""
+    highest_cos: float = 0.0
+    severity_tier: str = "LOW / NO OVERLAP"
+    conflicts: List[RuleConflictPair] = field(default_factory=list)
+    is_live: bool = False
+    is_silent: bool = False
+    strategic_recommendation: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    provenance: Optional[Provenance] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "rule_id": self.rule_id,
+            "rule_name": self.rule_name,
+            "highest_cos": self.highest_cos,
+            "severity_tier": self.severity_tier,
+            "conflicts": [c.to_dict() for c in self.conflicts],
+            "is_live": self.is_live,
+            "is_silent": self.is_silent,
+            "strategic_recommendation": self.strategic_recommendation,
+            "timestamp": self.timestamp,
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+
+@dataclass
+class BatchRuleConflictAuditResult:
+    """Summary of batch rule conflict and overlap discovery across tenant rules."""
+    total_rules_scanned: int = 0
+    total_pairs_evaluated: int = 0
+    conflict_counts: Dict[str, int] = field(default_factory=lambda: {
+        "REDUNDANCY": 0,
+        "OVERLAP": 0,
+        "CONTRADICTION": 0,
+        "SCOPE GAPS": 0,
+    })
+    severity_counts: Dict[str, int] = field(default_factory=lambda: {
+        "CRITICAL": 0,
+        "MODERATE": 0,
+        "LOW": 0,
+    })
+    highest_cos_rules: List[RuleConflictAuditResult] = field(default_factory=list)
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    provenance: Optional[Provenance] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total_rules_scanned": self.total_rules_scanned,
+            "total_pairs_evaluated": self.total_pairs_evaluated,
+            "conflict_counts": self.conflict_counts,
+            "severity_counts": self.severity_counts,
+            "highest_cos_rules": [r.to_dict() for r in self.highest_cos_rules],
+            "timestamp": self.timestamp,
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+class RuleSourceType(str, Enum):
+    """Origin of a detection rule."""
+    CUSTOMER = "CUSTOMER"
+    GOOGLE_CURATED = "GOOGLE_CURATED"
+
+
+@dataclass
+class RuleAuditFinding:
+    """Actionable assessment of a single detection rule across health, decay, and conflict dimensions."""
+    rule_id: str
+    display_name: str
+    rule_source: str = "CUSTOMER"  # CUSTOMER | GOOGLE_CURATED
+    severity: str = "MEDIUM"
+    status: RuleHealthStatus = RuleHealthStatus.HEALTHY
+    enabled: bool = True
+    alerting: bool = True
+    run_frequency: str = "LIVE"
+    dps_score: Optional[float] = None
+    decay_status: Optional[str] = None
+    detection_count_90d: int = 0
+    execution_error_count: int = 0
+    last_error_message: Optional[str] = None
+    has_embedding: bool = False
+    highest_conflict_cos: float = 0.0
+    highest_conflict_type: Optional[str] = None
+    shadowed_by_curated_id: Optional[str] = None
+    shadowed_by_curated_name: Optional[str] = None
+    details: str = ""
+    remediation_steps: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "rule_id": self.rule_id,
+            "display_name": self.display_name,
+            "rule_source": self.rule_source,
+            "severity": self.severity,
+            "status": self.status.value if isinstance(self.status, Enum) else str(self.status),
+            "enabled": self.enabled,
+            "alerting": self.alerting,
+            "run_frequency": self.run_frequency,
+            "dps_score": self.dps_score,
+            "decay_status": self.decay_status,
+            "detection_count_90d": self.detection_count_90d,
+            "execution_error_count": self.execution_error_count,
+            "last_error_message": self.last_error_message,
+            "has_embedding": self.has_embedding,
+            "highest_conflict_cos": self.highest_conflict_cos,
+            "highest_conflict_type": self.highest_conflict_type,
+            "shadowed_by_curated_id": self.shadowed_by_curated_id,
+            "shadowed_by_curated_name": self.shadowed_by_curated_name,
+            "details": self.details,
+            "remediation_steps": self.remediation_steps,
+        }
+
+
+@dataclass
+class RuleAuditReport(UniversalBatchMixin):
+    """End-to-end detection repository audit report covering customer and curated rules."""
+    findings: List[RuleAuditFinding] = field(default_factory=list)
+    total_rules_scanned: int = 0
+    customer_rules_count: int = 0
+    curated_rules_count: int = 0
+    embeddings_synced_count: int = 0
+    healthy_count: int = 0
+    silent_decay_count: int = 0
+    failing_count: int = 0
+    misconfigured_count: int = 0
+    disabled_count: int = 0
+    conflict_count: int = 0
+    shadowed_by_curated_count: int = 0
+    total_detections_90d: int = 0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    provenance: Optional[Provenance] = None
+
+    @property
+    def items(self) -> List[RuleAuditFinding]:
+        return self.findings
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total_rules_scanned": self.total_rules_scanned,
+            "customer_rules_count": self.customer_rules_count,
+            "curated_rules_count": self.curated_rules_count,
+            "embeddings_synced_count": self.embeddings_synced_count,
+            "healthy_count": self.healthy_count,
+            "silent_decay_count": self.silent_decay_count,
+            "failing_count": self.failing_count,
+            "misconfigured_count": self.misconfigured_count,
+            "disabled_count": self.disabled_count,
+            "conflict_count": self.conflict_count,
+            "shadowed_by_curated_count": self.shadowed_by_curated_count,
+            "total_detections_90d": self.total_detections_90d,
+            "findings": [f.to_dict() for f in self.findings],
+            "generated_at": self.generated_at.isoformat() if isinstance(self.generated_at, datetime) else str(self.generated_at),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+
+class LogPricingTier(str, Enum):
+    """Google SecOps ingestion pricing tiers (USD per GB)."""
+    STANDARD = "STANDARD"          # $1.95/GB
+    ENTERPRISE = "ENTERPRISE"      # $2.40/GB
+    ENTERPRISE_PLUS = "ENTERPRISE_PLUS"  # $4.60/GB
+
+    @property
+    def rate_per_gb(self) -> float:
+        rates = {
+            LogPricingTier.STANDARD: 1.95,
+            LogPricingTier.ENTERPRISE: 2.40,
+            LogPricingTier.ENTERPRISE_PLUS: 4.60,
+        }
+        return rates.get(self, 2.40)
+
+
+@dataclass
+class LogTypeCostMetric:
+    """Ingestion volume, event sizing, and multi-tier cost metrics for a single log type."""
+    log_type: str
+    event_count: int = 0
+    volume_bytes: int = 0
+    volume_gb_decimal: float = 0.0      # bytes / 10^9
+    volume_gib_binary: float = 0.0       # bytes / 2^30
+    avg_event_size_bytes: float = 0.0    # volume_bytes / event_count
+    is_bloated: bool = False             # avg_event_size_bytes > bloat threshold (e.g. 2048 bytes)
+    cost_standard: float = 0.0           # volume_gb_decimal * $1.95
+    cost_enterprise: float = 0.0         # volume_gb_decimal * $2.40
+    cost_enterprise_plus: float = 0.0    # volume_gb_decimal * $4.60
+    pct_total_volume: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "event_count": self.event_count,
+            "volume_bytes": self.volume_bytes,
+            "volume_gb_decimal": round(self.volume_gb_decimal, 3),
+            "volume_gib_binary": round(self.volume_gib_binary, 3),
+            "avg_event_size_bytes": round(self.avg_event_size_bytes, 1),
+            "is_bloated": self.is_bloated,
+            "cost_standard": round(self.cost_standard, 2),
+            "cost_enterprise": round(self.cost_enterprise, 2),
+            "cost_enterprise_plus": round(self.cost_enterprise_plus, 2),
+            "pct_total_volume": round(self.pct_total_volume, 2),
+        }
+
+
+@dataclass
+class FinOpsRecommendation:
+    """Actionable FinOps reduction recommendation for an expensive or bloated log source."""
+    log_type: str
+    category: str  # e.g., "UPSTREAM_DROP_FILTER", "PROXY_NOISE_PRUNING", "SAMPLING_AGGREGATION", "PARSER_NORMALIZATION"
+    title: str
+    description: str
+    potential_volume_savings_gb: float = 0.0
+    potential_monthly_savings_usd: float = 0.0
+    implementation_guidance: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "category": self.category,
+            "title": self.title,
+            "description": self.description,
+            "potential_volume_savings_gb": round(self.potential_volume_savings_gb, 2),
+            "potential_monthly_savings_usd": round(self.potential_monthly_savings_usd, 2),
+            "implementation_guidance": self.implementation_guidance,
+        }
+
+
+@dataclass
+class LogCostAnalysisReport(UniversalBatchMixin):
+    """Holistic tenant ingestion cost, event sizing, and FinOps optimization report."""
+    lookback_window: str = "7d"
+    pricing_tier: str = "ENTERPRISE"
+    total_events: int = 0
+    total_volume_bytes: int = 0
+    total_volume_gb: float = 0.0
+    total_volume_gib: float = 0.0
+    total_projected_monthly_spend_standard: float = 0.0
+    total_projected_monthly_spend_enterprise: float = 0.0
+    total_projected_monthly_spend_enterprise_plus: float = 0.0
+    metrics_by_log_type: List[LogTypeCostMetric] = field(default_factory=list)
+    top_volume_drivers: List[LogTypeCostMetric] = field(default_factory=list)
+    bloated_sources: List[LogTypeCostMetric] = field(default_factory=list)
+    recommendations: List[FinOpsRecommendation] = field(default_factory=list)
+    total_potential_savings_usd: float = 0.0
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    provenance: Optional[Provenance] = None
+
+    @property
+    def items(self) -> List[LogTypeCostMetric]:
+        return self.metrics_by_log_type
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "lookback_window": self.lookback_window,
+            "pricing_tier": self.pricing_tier,
+            "total_events": self.total_events,
+            "total_volume_bytes": self.total_volume_bytes,
+            "total_volume_gb": round(self.total_volume_gb, 3),
+            "total_volume_gib": round(self.total_volume_gib, 3),
+            "total_projected_monthly_spend_standard": round(self.total_projected_monthly_spend_standard, 2),
+            "total_projected_monthly_spend_enterprise": round(self.total_projected_monthly_spend_enterprise, 2),
+            "total_projected_monthly_spend_enterprise_plus": round(self.total_projected_monthly_spend_enterprise_plus, 2),
+            "metrics_by_log_type": [m.to_dict() for m in self.metrics_by_log_type],
+            "top_volume_drivers": [m.to_dict() for m in self.top_volume_drivers],
+            "bloated_sources": [m.to_dict() for m in self.bloated_sources],
+            "recommendations": [r.to_dict() for r in self.recommendations],
+            "total_potential_savings_usd": round(self.total_potential_savings_usd, 2),
+            "generated_at": self.generated_at.isoformat() if isinstance(self.generated_at, datetime) else str(self.generated_at),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+
+@dataclass
+class IngestionLabelMetric:
+    """Telemetry metrics and classification for an active ingestion label key."""
+    label_key: str
+    log_types: List[str] = field(default_factory=list)
+    event_count: int = 0
+    is_auto_generated: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "label_key": self.label_key,
+            "log_types": self.log_types,
+            "event_count": self.event_count,
+            "is_auto_generated": self.is_auto_generated,
+        }
+
+
+@dataclass
+class NamespaceMetric:
+    """Telemetry metrics and classification for an active UDM namespace."""
+    namespace: str
+    log_types: List[str] = field(default_factory=list)
+    event_count: int = 0
+    is_network_rfc1918_relevant: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "namespace": self.namespace,
+            "log_types": self.log_types,
+            "event_count": self.event_count,
+            "is_network_rfc1918_relevant": self.is_network_rfc1918_relevant,
+        }
+
+
+@dataclass
+class UntaggedTelemetrySummary:
+    """Log types with unlabelled or default-namespace telemetry volume."""
+    log_type: str
+    unlabelled_event_count: int = 0
+    untagged_namespace_event_count: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "unlabelled_event_count": self.unlabelled_event_count,
+            "untagged_namespace_event_count": self.untagged_namespace_event_count,
+        }
+
+
+@dataclass
+class DataRbacLabelReference:
+    """Audit metric evaluating Data RBAC label query coverage against live telemetry."""
+    label_id: str
+    display_name: str
+    udm_query: str
+    extracted_label_keys: List[str] = field(default_factory=list)
+    extracted_namespaces: List[str] = field(default_factory=list)
+    is_telemetry_backed: bool = False
+    status: str = "ACTIVE_MATCH"  # "ACTIVE_MATCH", "UNREFERENCED_IN_TELEMETRY", "SYNTAX_MISMATCH"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "label_id": self.label_id,
+            "display_name": self.display_name,
+            "udm_query": self.udm_query,
+            "extracted_label_keys": self.extracted_label_keys,
+            "extracted_namespaces": self.extracted_namespaces,
+            "is_telemetry_backed": self.is_telemetry_backed,
+            "status": self.status,
+        }
+
+
+@dataclass
+class NamespaceLabelHygieneFinding:
+    """Actionable hygiene finding for telemetry tagging or Data RBAC alignment."""
+    finding_id: str
+    category: str  # "DATA_RBAC_GAP", "MISSING_INGESTION_LABELS", "RFC1918_OVERLAP_RISK", "INCONSISTENT_TAGGING"
+    severity: str  # "HIGH", "MEDIUM", "LOW", "INFO"
+    title: str
+    description: str
+    affected_log_types: List[str] = field(default_factory=list)
+    remediation_guidance: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "finding_id": self.finding_id,
+            "category": self.category,
+            "severity": self.severity,
+            "title": self.title,
+            "description": self.description,
+            "affected_log_types": self.affected_log_types,
+            "remediation_guidance": self.remediation_guidance,
+        }
+
+
+@dataclass
+class NamespaceLabelAnalysisReport(UniversalBatchMixin):
+    """Holistic tenant report on Ingestion Labels, Namespaces, and Data RBAC alignment."""
+    lookback_window: str = "7d"
+    total_labelled_events: int = 0
+    total_namespaced_events: int = 0
+    total_untagged_events: int = 0
+    active_ingestion_labels: List[IngestionLabelMetric] = field(default_factory=list)
+    active_namespaces: List[NamespaceMetric] = field(default_factory=list)
+    untagged_telemetry: List[UntaggedTelemetrySummary] = field(default_factory=list)
+    data_rbac_references: List[DataRbacLabelReference] = field(default_factory=list)
+    findings: List[NamespaceLabelHygieneFinding] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    provenance: Optional[Provenance] = None
+
+    @property
+    def items(self) -> List[NamespaceLabelHygieneFinding]:
+        return self.findings
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "lookback_window": self.lookback_window,
+            "total_labelled_events": self.total_labelled_events,
+            "total_namespaced_events": self.total_namespaced_events,
+            "total_untagged_events": self.total_untagged_events,
+            "active_ingestion_labels": [m.to_dict() for m in self.active_ingestion_labels],
+            "active_namespaces": [m.to_dict() for m in self.active_namespaces],
+            "untagged_telemetry": [u.to_dict() for u in self.untagged_telemetry],
+            "data_rbac_references": [r.to_dict() for r in self.data_rbac_references],
+            "findings": [f.to_dict() for f in self.findings],
+            "generated_at": self.generated_at.isoformat() if isinstance(self.generated_at, datetime) else str(self.generated_at),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+        }
+
+
+# ==============================================================================
+# SOC Operating System: Issue, Event, Lease & Work Queue Models
+# ==============================================================================
+
+class OperationalPlane(str, Enum):
+    """The 7 operational planes of the autonomous SOC."""
+    DATA = "data"
+    DETECTION = "detection"
+    AUTOMATION = "automation"
+    PLATFORM = "platform"
+    GOVERNANCE = "governance"
+    IMPROVEMENT = "improvement"
+    EXTERNAL = "external"
+
+
+class IssueLifecycleStatus(str, Enum):
+    """Lifecycle states of a SOC work item."""
+    OBSERVED = "OBSERVED"
+    QUALIFIED = "QUALIFIED"
+    AVAILABLE = "AVAILABLE"
+    LEASED = "LEASED"
+    CLAIMED = "CLAIMED"
+    EXECUTING = "EXECUTING"
+    VALIDATING = "VALIDATING"
+    APPROVED = "APPROVED"
+    APPLIED = "APPLIED"
+    VERIFIED = "VERIFIED"
+    CLOSED = "CLOSED"
+    # Failure / escalation states
+    BLOCKED = "BLOCKED"
+    NEEDS_HUMAN = "NEEDS_HUMAN"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    ROLLED_BACK = "ROLLED_BACK"
+
+
+class AuthorityTier(str, Enum):
+    """Action-bound authority classification."""
+    TIER_1_AUTONOMOUS = "TIER_1_AUTONOMOUS"
+    TIER_2_PEER_REVIEW = "TIER_2_PEER_REVIEW"
+    TIER_3_HUMAN_APPROVAL = "TIER_3_HUMAN_APPROVAL"
+
+
+class IssueSeverity(str, Enum):
+    """Standardized issue severity."""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class IssueSource:
+    """Provenance and sensing origin of an issue."""
+    deacon_id: str
+    observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    evidence_fabric_uris: List[str] = field(default_factory=list)
+    initial_metrics: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "deacon_id": self.deacon_id,
+            "observed_at": self.observed_at,
+            "evidence_fabric_uris": self.evidence_fabric_uris,
+            "initial_metrics": self.initial_metrics,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IssueSource:
+        return cls(
+            deacon_id=data.get("deacon_id", ""),
+            observed_at=data.get("observed_at", datetime.now(timezone.utc).isoformat()),
+            evidence_fabric_uris=data.get("evidence_fabric_uris", []),
+            initial_metrics=data.get("initial_metrics", {}),
+        )
+
+
+@dataclass
+class IssueProblem:
+    """The observed versus desired state definition."""
+    title: str
+    description: str = ""
+    observed_state: Dict[str, Any] = field(default_factory=dict)
+    desired_state: Dict[str, Any] = field(default_factory=dict)
+    affected_objects: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "observed_state": self.observed_state,
+            "desired_state": self.desired_state,
+            "affected_objects": self.affected_objects,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IssueProblem:
+        return cls(
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            observed_state=data.get("observed_state", {}),
+            desired_state=data.get("desired_state", {}),
+            affected_objects=data.get("affected_objects", []),
+        )
+
+
+@dataclass
+class IssueRouting:
+    """Capability requirements and claim status."""
+    requires_capabilities: Dict[str, int] = field(default_factory=dict)
+    claimed_by: Optional[str] = None
+    claim_timestamp: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "requires_capabilities": self.requires_capabilities,
+            "claimed_by": self.claimed_by,
+            "claim_timestamp": self.claim_timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IssueRouting:
+        return cls(
+            requires_capabilities=data.get("requires_capabilities", {}),
+            claimed_by=data.get("claimed_by"),
+            claim_timestamp=data.get("claim_timestamp"),
+        )
+
+
+@dataclass
+class IssueGovernance:
+    """Authority tier and validation criteria."""
+    required_authority_tier: str = AuthorityTier.TIER_2_PEER_REVIEW.value
+    validation_criteria: List[str] = field(default_factory=list)
+    rollback_spec: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "required_authority_tier": self.required_authority_tier,
+            "validation_criteria": self.validation_criteria,
+            "rollback_spec": self.rollback_spec,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IssueGovernance:
+        return cls(
+            required_authority_tier=data.get("required_authority_tier", AuthorityTier.TIER_2_PEER_REVIEW.value),
+            validation_criteria=data.get("validation_criteria", []),
+            rollback_spec=data.get("rollback_spec", {}),
+        )
+
+
+@dataclass
+class Lease:
+    """Distributed lease tracking worker assignment and heartbeat expiry."""
+    owner: str
+    acquired_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    expires_at: str = ""
+    generation: int = 1
+
+    def is_expired(self) -> bool:
+        if not self.expires_at:
+            return True
+        try:
+            clean = self.expires_at.replace("Z", "+00:00")
+            exp = datetime.fromisoformat(clean)
+            return datetime.now(timezone.utc) > exp
+        except Exception:
+            return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "owner": self.owner,
+            "holder_agent": self.owner,
+            "acquired_at": self.acquired_at,
+            "expires_at": self.expires_at,
+            "generation": self.generation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Lease:
+        return cls(
+            owner=data.get("owner", ""),
+            acquired_at=data.get("acquired_at", datetime.now(timezone.utc).isoformat()),
+            expires_at=data.get("expires_at", ""),
+            generation=int(data.get("generation", 1)),
+        )
+
+
+@dataclass
+class AgentCapabilityProfile:
+    """Advertised capability profile of a worker agent in the fleet."""
+    agent_handle: str
+    capabilities: Dict[str, int] = field(default_factory=dict)
+    operational_planes: List[str] = field(default_factory=list)
+    status: str = "ONLINE"  # ONLINE, BUSY, OFFLINE
+    current_lease_id: Optional[str] = None
+    max_concurrent_leases: int = 3
+    heartbeat_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    version: str = "1.0.0"
+
+    def satisfies(self, required: Dict[str, int]) -> bool:
+        """Evaluates whether this agent possesses all required capabilities at sufficient levels."""
+        for cap, min_level in required.items():
+            if self.capabilities.get(cap, 0) < min_level:
+                return False
+        return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "agent_handle": self.agent_handle,
+            "capabilities": self.capabilities,
+            "operational_planes": self.operational_planes,
+            "status": self.status,
+            "current_lease_id": self.current_lease_id,
+            "max_concurrent_leases": self.max_concurrent_leases,
+            "heartbeat_at": self.heartbeat_at,
+            "version": self.version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> AgentCapabilityProfile:
+        return cls(
+            agent_handle=data.get("agent_handle", ""),
+            capabilities=data.get("capabilities", {}),
+            operational_planes=data.get("operational_planes", []),
+            status=data.get("status", "ONLINE"),
+            current_lease_id=data.get("current_lease_id"),
+            max_concurrent_leases=int(data.get("max_concurrent_leases", 3)),
+            heartbeat_at=data.get("heartbeat_at", datetime.now(timezone.utc).isoformat()),
+            version=data.get("version", "1.0.0"),
+        )
+
+
+@dataclass
+class IssueEvent:
+    """Append-only state transition event for the durable Git ledger."""
+    event_id: str
+    issue_id: str
+    sequence: int
+    transition_type: str  # OBSERVED, QUALIFIED, CLAIMED, PROPOSAL_CREATED, VALIDATION_RECORDED, APPROVED, APPLIED, VERIFIED, CLOSED
+    actor: str
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    details: Dict[str, Any] = field(default_factory=dict)
+    evidence_refs: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "issue_id": self.issue_id,
+            "sequence": self.sequence,
+            "transition_type": self.transition_type,
+            "transition": self.transition_type,
+            "actor": self.actor,
+            "timestamp": self.timestamp,
+            "details": self.details,
+            "metadata": self.details,
+            "evidence_refs": self.evidence_refs,
+            "evidence_references": self.evidence_refs,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IssueEvent:
+        return cls(
+            event_id=data.get("event_id", ""),
+            issue_id=data.get("issue_id", ""),
+            sequence=int(data.get("sequence", 0)),
+            transition_type=data.get("transition_type", ""),
+            actor=data.get("actor", ""),
+            timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            details=data.get("details", {}),
+            evidence_refs=data.get("evidence_refs", []),
+        )
+
+
+@dataclass
+class SOCIssue:
+    """Canonical SOC Work Item representing an operational condition requiring attention."""
+    id: str
+    type: str  # e.g. "parser_drop_spike", "rfc1918_collision_risk", "rule_decay"
+    plane: str = OperationalPlane.DATA.value
+    status: str = IssueLifecycleStatus.AVAILABLE.value
+    severity: str = IssueSeverity.MEDIUM.value
+    confidence: float = 1.0
+    priority_score: int = 50
+    source: IssueSource = field(default_factory=lambda: IssueSource(deacon_id=""))
+    problem: IssueProblem = field(default_factory=lambda: IssueProblem(title=""))
+    routing: IssueRouting = field(default_factory=IssueRouting)
+    governance: IssueGovernance = field(default_factory=IssueGovernance)
+    lease: Optional[Lease] = None
+    attempts: List[Dict[str, Any]] = field(default_factory=list)
+    active_proposal_id: Optional[str] = None
+    applied_change_id: Optional[str] = None
+    references: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    closed_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "issue_id": self.id,
+            "type": self.type,
+            "plane": self.plane,
+            "operational_plane": self.plane,
+            "status": self.status,
+            "severity": self.severity,
+            "confidence": self.confidence,
+            "priority_score": self.priority_score,
+            "source": self.source.to_dict() if hasattr(self.source, "to_dict") else self.source,
+            "problem": self.problem.to_dict() if hasattr(self.problem, "to_dict") else self.problem,
+            "routing": self.routing.to_dict() if hasattr(self.routing, "to_dict") else self.routing,
+            "governance": self.governance.to_dict() if hasattr(self.governance, "to_dict") else self.governance,
+            "lease": self.lease.to_dict() if self.lease else None,
+            "attempts": self.attempts,
+            "active_proposal_id": self.active_proposal_id,
+            "applied_change_id": self.applied_change_id,
+            "references": self.references,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "closed_at": self.closed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> SOCIssue:
+        src_raw = data.get("source", {})
+        source = IssueSource.from_dict(src_raw) if isinstance(src_raw, dict) else src_raw
+        prob_raw = data.get("problem", {})
+        problem = IssueProblem.from_dict(prob_raw) if isinstance(prob_raw, dict) else prob_raw
+        rout_raw = data.get("routing", {})
+        routing = IssueRouting.from_dict(rout_raw) if isinstance(rout_raw, dict) else rout_raw
+        gov_raw = data.get("governance", {})
+        governance = IssueGovernance.from_dict(gov_raw) if isinstance(gov_raw, dict) else gov_raw
+        lease_raw = data.get("lease")
+        lease = Lease.from_dict(lease_raw) if isinstance(lease_raw, dict) else None
+
+        return cls(
+            id=data.get("id", ""),
+            type=data.get("type", "operational_issue"),
+            plane=data.get("plane", OperationalPlane.DATA.value),
+            status=data.get("status", IssueLifecycleStatus.AVAILABLE.value),
+            severity=data.get("severity", IssueSeverity.MEDIUM.value),
+            confidence=float(data.get("confidence", 1.0)),
+            priority_score=int(data.get("priority_score", 50)),
+            source=source,
+            problem=problem,
+            routing=routing,
+            governance=governance,
+            lease=lease,
+            attempts=data.get("attempts", []),
+            active_proposal_id=data.get("active_proposal_id"),
+            applied_change_id=data.get("applied_change_id"),
+            references=data.get("references", {}),
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
+            closed_at=data.get("closed_at"),
+        )
+
+
+@dataclass
+class ChangeRecord:
+    """Record of an actually applied mutation to Google SecOps production state."""
+    change_id: str
+    issue_id: str
+    proposal_id: str
+    subsystem: str
+    target_resource_id: str
+    applied_by: str
+    applied_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    commit_sha: Optional[str] = None
+    api_response: Dict[str, Any] = field(default_factory=dict)
+    status: str = "APPLIED"  # APPLIED, ROLLED_BACK
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "change_id": self.change_id,
+            "issue_id": self.issue_id,
+            "proposal_id": self.proposal_id,
+            "subsystem": self.subsystem,
+            "target_resource_id": self.target_resource_id,
+            "applied_by": self.applied_by,
+            "applied_at": self.applied_at,
+            "commit_sha": self.commit_sha,
+            "api_response": self.api_response,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ChangeRecord:
+        return cls(
+            change_id=data.get("change_id", ""),
+            issue_id=data.get("issue_id", ""),
+            proposal_id=data.get("proposal_id", ""),
+            subsystem=data.get("subsystem", ""),
+            target_resource_id=data.get("target_resource_id", ""),
+            applied_by=data.get("applied_by", ""),
+            applied_at=data.get("applied_at", datetime.now(timezone.utc).isoformat()),
+            commit_sha=data.get("commit_sha"),
+            api_response=data.get("api_response", {}),
+            status=data.get("status", "APPLIED"),
+        )
+
+
+@dataclass
+class VerificationProof:
+    """Post-deployment telemetry proof confirming an issue is verified and resolved."""
+    verification_id: str
+    change_id: str
+    issue_id: str
+    verified_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    verifier_actor: str = ""
+    cleared: bool = True
+    metrics_before: Dict[str, Any] = field(default_factory=dict)
+    metrics_after: Dict[str, Any] = field(default_factory=dict)
+    summary: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "verification_id": self.verification_id,
+            "change_id": self.change_id,
+            "issue_id": self.issue_id,
+            "verified_at": self.verified_at,
+            "verifier_actor": self.verifier_actor,
+            "cleared": self.cleared,
+            "metrics_before": self.metrics_before,
+            "metrics_after": self.metrics_after,
+            "summary": self.summary,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> VerificationProof:
+        return cls(
+            verification_id=data.get("verification_id", ""),
+            change_id=data.get("change_id", ""),
+            issue_id=data.get("issue_id", ""),
+            verified_at=data.get("verified_at", datetime.now(timezone.utc).isoformat()),
+            verifier_actor=data.get("verifier_actor", ""),
+            cleared=bool(data.get("cleared", True)),
+            metrics_before=data.get("metrics_before", {}),
+            metrics_after=data.get("metrics_after", {}),
+            summary=data.get("summary", ""),
+        )
+
+
+@dataclass
+class IdentityFidelityMetric:
+    """Density of distinct identity keys populated across a log type in events."""
+    log_type: str
+    principal_user_id: int = 0
+    principal_user_email_address: int = 0
+    principal_user_windows_sid: int = 0
+    principal_user_product_object_id: int = 0
+    target_user_id: int = 0
+    target_user_email_address: int = 0
+    target_user_windows_sid: int = 0
+    target_user_product_object_id: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "principal_user_id": self.principal_user_id,
+            "principal_user_email_address": self.principal_user_email_address,
+            "principal_user_windows_sid": self.principal_user_windows_sid,
+            "principal_user_product_object_id": self.principal_user_product_object_id,
+            "target_user_id": self.target_user_id,
+            "target_user_email_address": self.target_user_email_address,
+            "target_user_windows_sid": self.target_user_windows_sid,
+            "target_user_product_object_id": self.target_user_product_object_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> IdentityFidelityMetric:
+        return cls(
+            log_type=str(data.get("log_type", "UNKNOWN")),
+            principal_user_id=int(data.get("principal_user_id", 0) or 0),
+            principal_user_email_address=int(data.get("principal_user_email_address", 0) or 0),
+            principal_user_windows_sid=int(data.get("principal_user_windows_sid", 0) or 0),
+            principal_user_product_object_id=int(data.get("principal_user_product_object_id", 0) or 0),
+            target_user_id=int(data.get("target_user_id", 0) or 0),
+            target_user_email_address=int(data.get("target_user_email_address", 0) or 0),
+            target_user_windows_sid=int(data.get("target_user_windows_sid", 0) or 0),
+            target_user_product_object_id=int(data.get("target_user_product_object_id", 0) or 0),
+        )
+
+
+@dataclass
+class EntityGraphSource:
+    """Provenance and longevity metrics of entity graph bindings."""
+    log_type: str
+    entity_source: str
+    vendor_name: str
+    product_name: str
+    total_entities: int = 0
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "entity_source": self.entity_source,
+            "vendor_name": self.vendor_name,
+            "product_name": self.product_name,
+            "total_entities": self.total_entities,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> EntityGraphSource:
+        return cls(
+            log_type=str(data.get("log_type", "UNKNOWN")),
+            entity_source=str(data.get("entity_source", "")),
+            vendor_name=str(data.get("vendor_name", "")),
+            product_name=str(data.get("product_name", "")),
+            total_entities=int(data.get("total_entities", data.get("total", 0)) or 0),
+            first_seen=data.get("first_seen"),
+            last_seen=data.get("last_seen"),
+        )
+
+
+@dataclass
+class LogSourceVolumeMetric:
+    """Volume baseline and time range metrics for an ingested log type."""
+    log_type: str
+    event_count: int = 0
+    earliest_event: Optional[str] = None
+    latest_event: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "log_type": self.log_type,
+            "event_count": self.event_count,
+            "earliest_event": self.earliest_event,
+            "latest_event": self.latest_event,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> LogSourceVolumeMetric:
+        return cls(
+            log_type=str(data.get("log_type", "UNKNOWN")),
+            event_count=int(data.get("event_count", 0) or 0),
+            earliest_event=data.get("earliest_event"),
+            latest_event=data.get("latest_event"),
+        )
+
+
+@dataclass
+class TenantTelemetryProfile:
+    """Comprehensive tenant telemetry cartography profile combining graph, identity, and volume."""
+    profiled_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    observation_window_days: int = 7
+    identity_metrics: List[IdentityFidelityMetric] = field(default_factory=list)
+    graph_sources: List[EntityGraphSource] = field(default_factory=list)
+    volume_metrics: List[LogSourceVolumeMetric] = field(default_factory=list)
+    total_events_observed: int = 0
+    total_graph_entities_observed: int = 0
+    summary: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "profiled_at": self.profiled_at,
+            "observation_window_days": self.observation_window_days,
+            "identity_metrics": [m.to_dict() for m in self.identity_metrics],
+            "graph_sources": [g.to_dict() for g in self.graph_sources],
+            "volume_metrics": [v.to_dict() for v in self.volume_metrics],
+            "total_events_observed": self.total_events_observed,
+            "total_graph_entities_observed": self.total_graph_entities_observed,
+            "summary": self.summary,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TenantTelemetryProfile:
+        return cls(
+            profiled_at=data.get("profiled_at", datetime.now(timezone.utc).isoformat()),
+            observation_window_days=int(data.get("observation_window_days", 7)),
+            identity_metrics=[IdentityFidelityMetric.from_dict(m) for m in data.get("identity_metrics", [])],
+            graph_sources=[EntityGraphSource.from_dict(g) for g in data.get("graph_sources", [])],
+            volume_metrics=[LogSourceVolumeMetric.from_dict(v) for v in data.get("volume_metrics", [])],
+            total_events_observed=int(data.get("total_events_observed", 0)),
+            total_graph_entities_observed=int(data.get("total_graph_entities_observed", 0)),
+            summary=data.get("summary", ""),
+        )
+
+
+class CommunicationClass(str, Enum):
+    """Classification of communication urgency and routing."""
+    URGENT = "urgent"              # Immediate notification (Slack alert / urgent stream)
+    OPERATIONAL = "operational"    # Issue/update in the work queue (Gas Town durability boundary)
+    INFORMATIONAL = "informational"# Rolled into next scheduled shift briefing
+
+
+@dataclass
+class CommunicationPolicy:
+    """Routing and notification policy attached to an observation or finding."""
+    communication_class: str = CommunicationClass.OPERATIONAL.value
+    urgency: str = "medium"  # critical, high, medium, low
+    briefing: bool = True
+    immediate_notification: bool = False
+    target_channel: Optional[str] = None
+    routing_class: Optional[Any] = None
+    publish_to_chat: Optional[bool] = None
+    channel: Optional[str] = None
+
+    def __post_init__(self):
+        if self.routing_class is not None:
+            val = getattr(self.routing_class, "value", self.routing_class)
+            self.communication_class = str(val).lower()
+        if self.publish_to_chat is not None and not self.immediate_notification:
+            self.immediate_notification = self.publish_to_chat
+        if self.channel and not self.target_channel:
+            self.target_channel = self.channel
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "communication_class": self.communication_class,
+            "class": self.communication_class,
+            "urgency": self.urgency,
+            "briefing": self.briefing,
+            "immediate_notification": self.immediate_notification,
+            "target_channel": self.target_channel,
+            "publish_to_chat": self.immediate_notification,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CommunicationPolicy:
+        if not isinstance(data, dict):
+            return cls()
+        c_class = data.get("communication_class") or data.get("class") or CommunicationClass.OPERATIONAL.value
+        pub_chat = data.get("publish_to_chat")
+        immed = bool(data.get("immediate_notification", False)) or bool(pub_chat) if pub_chat is not None else False
+        return cls(
+            communication_class=str(c_class).lower(),
+            urgency=str(data.get("urgency", "medium")).lower(),
+            briefing=bool(data.get("briefing", True)),
+            immediate_notification=immed,
+            target_channel=data.get("target_channel") or data.get("channel"),
+            publish_to_chat=pub_chat,
+        )
 
 
 
+@dataclass
+class SubjectRef:
+    """Target subject of an observation or relationship."""
+    type: str  # log_source, parser, rule, playbook, identity, integration, feed, tenant
+    id: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.type, "id": self.id}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> SubjectRef:
+        if not isinstance(data, dict):
+            return cls(type="unknown", id=str(data))
+        return cls(type=str(data.get("type", "unknown")), id=str(data.get("id", "")))
 
 
+@dataclass
+class ObserverRef:
+    """Agent and execution run that produced an observation."""
+    agent: str
+    run_id: str = ""
+    deacon: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"agent": self.agent, "run_id": self.run_id, "deacon": self.deacon}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ObserverRef:
+        if not isinstance(data, dict):
+            return cls(agent=str(data))
+        return cls(
+            agent=str(data.get("agent", "")),
+            run_id=str(data.get("run_id", "")),
+            deacon=str(data.get("deacon", "")),
+        )
 
 
+@dataclass
+class Observation:
+    """Normalized assertion made by an autonomous agent about tenant operational state."""
+    subject: SubjectRef
+    predicate: str  # e.g. "parser_health", "volume_24h", "rule_decay", "iam_drift", "identity_density"
+    value: Dict[str, Any]
+    observed_by: ObserverRef
+    observation_id: str = ""
+    observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    valid_until: str = field(
+        default_factory=lambda: (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    )
+    confidence: float = 1.0
+
+    scope: Dict[str, str] = field(default_factory=dict)
+    evidence_refs: List[str] = field(default_factory=list)
+    issue_id: Optional[str] = None
+    communication: CommunicationPolicy = field(default_factory=CommunicationPolicy)
+    policy: Optional[CommunicationPolicy] = None
+
+    def __post_init__(self):
+        if self.policy is not None:
+            self.communication = self.policy
+        if not self.observation_id:
+            now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            rnd = os.urandom(3).hex()
+            self.observation_id = f"obs-{now_str}-{rnd}"
 
 
+    def is_stale(self, as_of: Optional[datetime] = None) -> bool:
+        ref = as_of or datetime.now(timezone.utc)
+        try:
+            val_dt = datetime.fromisoformat(self.valid_until.replace("Z", "+00:00"))
+            return ref > val_dt
+        except Exception:
+            return False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "observation_id": self.observation_id,
+            "subject": self.subject.to_dict(),
+            "predicate": self.predicate,
+            "value": self.value,
+            "observed_by": self.observed_by.to_dict(),
+            "observed_at": self.observed_at,
+            "valid_until": self.valid_until,
+            "confidence": self.confidence,
+            "scope": self.scope,
+            "evidence_refs": self.evidence_refs,
+            "issue_id": self.issue_id,
+            "communication": self.communication.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Observation:
+        return cls(
+            observation_id=str(data.get("observation_id", "")),
+            subject=SubjectRef.from_dict(data.get("subject", {})),
+            predicate=str(data.get("predicate", "")),
+            value=data.get("value", {}) if isinstance(data.get("value"), dict) else {},
+            observed_by=ObserverRef.from_dict(data.get("observed_by", {})),
+            observed_at=data.get("observed_at", datetime.now(timezone.utc).isoformat()),
+            valid_until=data.get("valid_until", datetime.now(timezone.utc).isoformat()),
+            confidence=float(data.get("confidence", 1.0)),
+            scope=data.get("scope", {}) if isinstance(data.get("scope"), dict) else {},
+            evidence_refs=list(data.get("evidence_refs", [])),
+            issue_id=data.get("issue_id"),
+            communication=CommunicationPolicy.from_dict(data.get("communication", {})),
+        )
 
 
+@dataclass
+class KnowledgeGap:
+    """An explicit unknown or unmapped operational state surfaced by the SOC."""
+    gap_id: str
+    category: str  # "ownership", "dependency", "governance", "staleness", "coverage"
+    title: str
+    description: str
+    subject: Optional[SubjectRef] = None
+    impact: str = "MEDIUM"  # CRITICAL, HIGH, MEDIUM, LOW
+    recommendation: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "gap_id": self.gap_id,
+            "category": self.category,
+            "title": self.title,
+            "description": self.description,
+            "subject": self.subject.to_dict() if self.subject else None,
+            "impact": self.impact,
+            "recommendation": self.recommendation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> KnowledgeGap:
+        subj = SubjectRef.from_dict(data.get("subject", {})) if data.get("subject") else None
+        return cls(
+            gap_id=str(data.get("gap_id", "")),
+            category=str(data.get("category", "coverage")),
+            title=str(data.get("title", "")),
+            description=str(data.get("description", "")),
+            subject=subj,
+            impact=str(data.get("impact", "MEDIUM")),
+            recommendation=str(data.get("recommendation", "")),
+        )
 
 
+@dataclass
+class KnowledgeSnapshot:
+    """Authoritative snapshot answering: 'What does the SOC currently understand about itself?'"""
+    snapshot_id: str
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    tenant_coverage: Dict[str, Any] = field(default_factory=dict)
+    telemetry_health: Dict[str, Any] = field(default_factory=dict)
+    parsing_health: Dict[str, Any] = field(default_factory=dict)
+    detection_health: Dict[str, Any] = field(default_factory=dict)
+    soar_health: Dict[str, Any] = field(default_factory=dict)
+    governance_health: Dict[str, Any] = field(default_factory=dict)
+    cost_metrics: Dict[str, Any] = field(default_factory=dict)
+    knowledge_freshness: Dict[str, Any] = field(default_factory=dict)
+    knowledge_gaps: List[KnowledgeGap] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "generated_at": self.generated_at,
+            "tenant_coverage": self.tenant_coverage,
+            "telemetry_health": self.telemetry_health,
+            "parsing_health": self.parsing_health,
+            "detection_health": self.detection_health,
+            "soar_health": self.soar_health,
+            "governance_health": self.governance_health,
+            "cost_metrics": self.cost_metrics,
+            "knowledge_freshness": self.knowledge_freshness,
+            "knowledge_gaps": [g.to_dict() for g in self.knowledge_gaps],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> KnowledgeSnapshot:
+        return cls(
+            snapshot_id=str(data.get("snapshot_id", "")),
+            generated_at=data.get("generated_at", datetime.now(timezone.utc).isoformat()),
+            tenant_coverage=data.get("tenant_coverage", {}),
+            telemetry_health=data.get("telemetry_health", {}),
+            parsing_health=data.get("parsing_health", {}),
+            detection_health=data.get("detection_health", {}),
+            soar_health=data.get("soar_health", {}),
+            governance_health=data.get("governance_health", {}),
+            cost_metrics=data.get("cost_metrics", {}),
+            knowledge_freshness=data.get("knowledge_freshness", {}),
+            knowledge_gaps=[KnowledgeGap.from_dict(g) for g in data.get("knowledge_gaps", [])],
+        )
 
 
+@dataclass
+class ShiftBriefing:
+    """Operational handover answering: 'What is happening and what changed since previous shift?'"""
+    briefing_id: str
+    shift_name: str
+    window_start: str
+    window_end: str
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    requires_attention: List[Dict[str, Any]] = field(default_factory=list)
+    changed_since_previous: List[Dict[str, Any]] = field(default_factory=list)
+    agent_work_in_progress: List[Dict[str, Any]] = field(default_factory=list)
+    no_action_required: List[str] = field(default_factory=list)
+    carry_over: List[Dict[str, Any]] = field(default_factory=list)
+    summary_narrative: str = ""
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "briefing_id": self.briefing_id,
+            "shift_name": self.shift_name,
+            "window_start": self.window_start,
+            "window_end": self.window_end,
+            "generated_at": self.generated_at,
+            "requires_attention": self.requires_attention,
+            "changed_since_previous": self.changed_since_previous,
+            "agent_work_in_progress": self.agent_work_in_progress,
+            "no_action_required": self.no_action_required,
+            "carry_over": self.carry_over,
+            "summary_narrative": self.summary_narrative,
+        }
 
-
-
-
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ShiftBriefing:
+        return cls(
+            briefing_id=str(data.get("briefing_id", "")),
+            shift_name=str(data.get("shift_name", "Handover")),
+            window_start=str(data.get("window_start", "")),
+            window_end=str(data.get("window_end", "")),
+            generated_at=data.get("generated_at", datetime.now(timezone.utc).isoformat()),
+            requires_attention=list(data.get("requires_attention", [])),
+            changed_since_previous=list(data.get("changed_since_previous", [])),
+            agent_work_in_progress=list(data.get("agent_work_in_progress", [])),
+            no_action_required=list(data.get("no_action_required", [])),
+            carry_over=list(data.get("carry_over", [])),
+            summary_narrative=str(data.get("summary_narrative", "")),
+        )
 
 
 

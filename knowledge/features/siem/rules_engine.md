@@ -1,32 +1,45 @@
 ---
 id: feature.siem.rules_engine
-title: "YARA-L Detection Rules Engine"
+title: YARA-L Detection Rules Engine
 type: feature
 platform: secops_siem
 sdk_capabilities:
-  - rule.list
-  - rule.get
-  - rule.verify
-  - rule.create
-  - rule.patch
-  - rule.delete
-  - rule.revisions
-  - rule.deployment.get
-  - rule.deployment.update
-  - rule.errors
-  - rule.audit_health
+- rule.list
+- rule.get
+- rule.verify
+- rule.create
+- rule.patch
+- rule.delete
+- rule.revisions
+- rule.deployment.get
+- rule.deployment.update
+- rule.errors
+- rule.audit_health
 mcp_tools:
-  - audit_rule_health
-  - create_rule
-  - delete_rule
-  - get_rule
-  - get_rule_deployment
-  - list_rule_errors
-  - list_rule_revisions
-  - list_rules
-  - patch_rule
-  - update_rule_deployment
-  - verify_rule_text
+- audit_rule_health
+- create_rule
+- delete_rule
+- get_rule
+- get_rule_deployment
+- list_rule_errors
+- list_rule_revisions
+- list_rules
+- patch_rule
+- update_rule_deployment
+- verify_rule_text
+status: stable
+description: YARA-L Detection Rules Engine (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # YARA-L Detection Rules Engine

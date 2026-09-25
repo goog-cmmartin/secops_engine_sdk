@@ -1,50 +1,63 @@
 ---
 id: feature.soar.case_management
-title: "SOAR Case Management & Triage"
+title: SOAR Case Management & Triage
 type: feature
 platform: secops_soar
 sdk_capabilities:
-  - case.investigate
-  - case.comment
-  - case.list_comments
-  - case.get_wall
-  - case.update
-  - case.assign
-  - case.set_stage
-  - case.set_incident
-  - case_alert.update
-  - case_alert.set_priority
-  - case_alert.create_recommendation
-  - case_alert.fetch_recommendation
-  - case_alert.get_recommendation
-  - case.get_or_create_summary
-  - case.get_summary
-  - case.search
-  - case.orchestrate_triage
-  - case.triage
-  - case.timeline
-  - case.ai_investigate
+- case.investigate
+- case.comment
+- case.list_comments
+- case.get_wall
+- case.update
+- case.assign
+- case.set_stage
+- case.set_incident
+- case_alert.update
+- case_alert.set_priority
+- case_alert.create_recommendation
+- case_alert.fetch_recommendation
+- case_alert.get_recommendation
+- case.get_or_create_summary
+- case.get_summary
+- case.search
+- case.orchestrate_triage
+- case.triage
+- case.timeline
+- case.ai_investigate
 mcp_tools:
-  - add_case_comment
-  - ai_investigate_case
-  - assign_case
-  - create_case_alert_recommendation
-  - fetch_case_alert_recommendation
-  - get_case_alert_recommendation
-  - get_case_summary
-  - get_case_timeline
-  - get_case_wall
-  - get_or_create_case_summary
-  - investigate_case
-  - list_case_comments
-  - orchestrate_case_triage
-  - search_cases
-  - set_case_alert_priority
-  - set_case_incident
-  - set_case_stage
-  - triage_case
-  - update_case
-  - update_case_alert
+- add_case_comment
+- ai_investigate_case
+- assign_case
+- create_case_alert_recommendation
+- fetch_case_alert_recommendation
+- get_case_alert_recommendation
+- get_case_summary
+- get_case_timeline
+- get_case_wall
+- get_or_create_case_summary
+- investigate_case
+- list_case_comments
+- orchestrate_case_triage
+- search_cases
+- set_case_alert_priority
+- set_case_incident
+- set_case_stage
+- triage_case
+- update_case
+- update_case_alert
+status: stable
+description: SOAR Case Management & Triage (feature reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOAR Case Management & Triage

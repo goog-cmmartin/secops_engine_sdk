@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Google SecOps Multi-Agent Fleet</title>
-  <link rel="stylesheet" href="/static/style.css?v=2.3.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.4.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -24,23 +24,32 @@
       </button>
       <button id="navBtnGastown" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
-        <span>Gas Town Board</span>
+        <span>Actions</span>
         <span id="navBoardBadge" class="nav-pill-badge" style="display:none;">0</span>
       </button>
-      <button id="navBtnIngestion" class="nav-tab">
-        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-        <span>Ingestion &amp; Normalization</span>
+      <button id="navBtnBriefings" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        <span>Briefings &amp; Posture</span>
+      </button>
+      <button id="navBtnDashboards" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+        <span>Dashboards</span>
       </button>
       <button id="navBtnLibrary" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span>Agent Library</span>
       </button>
+      <a id="navBtnKnowledge" class="nav-tab" href="/knowledge/viz.html" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        <span>Knowledge Graph</span>
+      </a>
     </nav>
     <div class="topbar-meta">
       <span class="meta-tag">ADK 2</span>
-      <span class="meta-tag">Gas Town HITL</span>
-      <span id="fleetStatusTag" class="meta-status">10 Agents Active</span>
+      <span class="meta-tag">HITL Review</span>
+      <span id="fleetStatusTag" class="meta-status">20 Agents Active</span>
     </div>
+
   </header>
 
   <div class="app-container">
@@ -61,8 +70,28 @@
 
         <!-- Slack-Style Direct Messages Section -->
         <div id="dmSectionHeader" class="section-header-row clickable" title="Toggle Direct Messages">
-          <span class="section-label">Direct Messages</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="section-label">Direct Messages</span>
+            <span id="dmCountBadge" class="dm-count-badge">19</span>
+          </div>
           <span id="dmToggleIcon" class="section-toggle-icon">▼</span>
+        </div>
+        <div id="dmSearchContainer" class="dm-search-container">
+          <div class="dm-search-box">
+            <svg class="dm-search-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="dmSearchInput"
+              class="dm-search-input"
+              placeholder="Filter agents..."
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button id="dmClearFilterBtn" class="dm-clear-btn" title="Clear filter" style="display:none;" type="button">&times;</button>
+          </div>
         </div>
         <div id="dmList" class="dm-list"></div>
       </div>
@@ -81,6 +110,9 @@
           </div>
           <div class="chat-actions">
             <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 8px;">Google ADK 2 &bull; GEAP Ready</span>
+            <button id="btnTriggerRuleAudit" class="btn-drawer-action" style="display:none; background:#059669; color:white; border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run unified detection repository audit across custom and curated rules">
+              <span>🛡️ Audit Rules</span>
+            </button>
             <button id="clearTopicBtn" class="btn-clear-topic" title="Clear message history for this topic">
               <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -141,7 +173,7 @@
               </div>
               <div class="gt-stat-item">
                 <span class="gt-stat-label">Fleet</span>
-                <span id="gtFleetOnline" class="gt-stat-val">9 Agents Online</span>
+                <span id="gtFleetOnline" class="gt-stat-val">19 Agents Online</span>
               </div>
             </div>
           </div>
@@ -159,7 +191,11 @@
               </div>
               <div class="gt-summary-card">
                 <span id="gtStatWork" class="gt-stat-num">3</span>
-                <span class="gt-stat-caption">📋 Active Work / Issues</span>
+                <span class="gt-stat-caption">📋 Active Work</span>
+              </div>
+              <div class="gt-summary-card">
+                <span id="gtStatLeases" class="gt-stat-num">0</span>
+                <span class="gt-stat-caption">🔒 Active Leases</span>
               </div>
               <div class="gt-summary-card">
                 <span id="gtStatConvoys" class="gt-stat-num">4</span>
@@ -181,6 +217,10 @@
               <button id="tabGtKanban" class="subtab active">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
                 <span>Kanban Board</span>
+              </button>
+              <button id="tabGtWorkQueue" class="subtab">
+                <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                <span>Work Queue &amp; Leases</span>
               </button>
               <button id="tabGtConvoys" class="subtab">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
@@ -376,7 +416,7 @@
                   <span class="deacon-telemetry-pill" id="gtDeaconHeartbeatDetail">Heartbeat: Active (&lt;1m)</span>
                   <span class="deacon-telemetry-pill" id="gtDeaconActivePatrolsPill">5 Active Patrols</span>
                 </div>
-                <h3 class="deacon-section-heading">Autonomous Background Fleet Audits (Steve Yegge Gas Town)</h3>
+                <h3 class="deacon-section-heading">Autonomous Background Fleet Audits</h3>
                 <p class="deacon-section-desc">
                   The Deacon daemon evaluates scheduled patrol sweeps, queries live Google SecOps APIs, detects transport and parser anomalies, generates collaborative chat alerts, and autonomously registers atomic tasks in Evidence Fabric.
                 </p>
@@ -427,20 +467,111 @@
             </div>
           </div>
 
+          <!-- Section 6: Work Queue & Leases -->
+          <div id="secGtWorkQueue" class="gastown-section" style="display:none;">
+            <!-- Active Issues Table -->
+            <div class="table-card" style="margin-bottom: 20px;">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                    <span>SOC Coordination Work Queue (Active Operational Issues)</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Hybrid coordination items across 7 Operational Planes with dynamic capability matching and lease-based ownership.
+                  </p>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <select id="socFilterPlane" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                    <option value="">All Planes</option>
+                    <option value="data">Data</option>
+                    <option value="detection">Detection</option>
+                    <option value="automation">Automation</option>
+                    <option value="platform">Platform</option>
+                    <option value="governance">Governance</option>
+                    <option value="improvement">Improvement</option>
+                    <option value="external">External</option>
+                  </select>
+                  <select id="socFilterStatus" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                    <option value="">All Statuses</option>
+                    <option value="AVAILABLE">Available</option>
+                    <option value="LEASED">Leased</option>
+                    <option value="VALIDATING">Validating</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="APPLIED">Applied</option>
+                    <option value="CLOSED">Closed</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:110px;">Issue ID</th>
+                      <th style="width:90px;">Plane</th>
+                      <th>Problem Title &amp; Target</th>
+                      <th style="width:85px;">Severity</th>
+                      <th style="width:100px;">Status</th>
+                      <th style="width:130px;">Lease Owner</th>
+                      <th style="width:100px;">Expires In</th>
+                      <th style="width:110px;">Authority</th>
+                      <th style="width:130px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtSocIssuesTableBody">
+                    <tr><td colspan="9" class="table-loading">Loading SOC Work Queue...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Registered Workers & Capabilities Table -->
+            <div class="table-card">
+              <div class="table-card-header">
+                <div>
+                  <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span>Registered Workers &amp; Advertised Capability Profiles</span>
+                  </h3>
+                  <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Agents advertising operational authority, supported planes, capability IDs, and concurrency boundaries.
+                  </p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width:160px;">Agent Handle</th>
+                      <th style="width:120px;">Max Authority</th>
+                      <th style="width:180px;">Supported Planes</th>
+                      <th>Advertised Capabilities</th>
+                      <th style="width:100px;">Max Leases</th>
+                      <th style="width:90px;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="gtSocWorkersTableBody">
+                    <tr><td colspan="6" class="table-loading">Loading worker registry...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      <!-- View 3: Dedicated Ingestion & Normalization Full-Width Page View -->
+      <!-- View 3: Dedicated Dashboards & Operations Full-Width Page View -->
       <div id="ingestionView" class="view-panel" style="display:none;">
         <div class="page-container">
           <!-- Page Header -->
           <div class="page-header">
             <div class="page-title-group">
               <h1 class="page-title">
-                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-                <span>Ingestion &amp; Normalization Engineering</span>
+                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+                <span>SecOps Dashboards &amp; Operations</span>
               </h1>
-              <p class="page-subtitle">Health Hub transport telemetry, P95 latency SLAs, and Logstash CBN normalization</p>
+              <p class="page-subtitle">Telemetry Health Hub, transport SLAs, parser normalization, and FinOps analytics</p>
             </div>
             <div class="page-actions">
               <button id="pageBtnAuditFeeds" class="btn btn-primary">
@@ -450,6 +581,14 @@
               <button id="pageBtnAuditParsers" class="btn btn-success">
                 <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                 <span class="btn-text">Audit Parsers</span>
+              </button>
+              <button id="pageBtnAuditRules" class="btn" style="background:#059669; color:white; border:none;">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span class="btn-text">Audit Rules</span>
+              </button>
+              <button id="pageBtnAnalyzeCost" class="btn" style="background:#0284c7; color:white; border:none;">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span class="btn-text">Log Costs &amp; FinOps</span>
               </button>
               <button id="pageBtnRefresh" class="btn btn-secondary">
                 <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -488,6 +627,11 @@
               <div id="kpiDropCodes" class="kpi-value">--</div>
               <div id="kpiDropSub" class="kpi-sub">Unparsed / syntax issues</div>
             </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Projected Spend</div>
+              <div id="kpiProjectedSpend" class="kpi-value">--</div>
+              <div id="kpiSpendSub" class="kpi-sub">Enterprise tier / mo</div>
+            </div>
           </div>
 
           <!-- Ingestion Page Sub-Tabs -->
@@ -502,7 +646,15 @@
             </button>
             <button id="tabIngestionDiagnostics" class="subtab">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.31L4.15 19.3A2 2 0 0 0 5.86 22h12.28a2 2 0 0 0 1.71-2.7L14 9.31V2"/><line x1="8.5" y1="2" x2="15.5" y2="2"/></svg>
-              <span>Unparsed Log Diagnostic Lab</span>
+              <span>Unparsed Log Diagnostic Lab (@raw-log-agent)</span>
+            </button>
+            <button id="tabIngestionFinOps" class="subtab">
+              <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              <span>FinOps &amp; Log Costs (@log-cost-agent)</span>
+            </button>
+            <button id="tabIngestionNamespaceLabels" class="subtab">
+              <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              <span>Labels &amp; Namespaces (@namespace-label-agent)</span>
             </button>
           </div>
 
@@ -613,6 +765,189 @@
             </div>
           </div>
 
+          <!-- Tab 4: FinOps & Log Cost Optimization -->
+          <div id="secIngestionFinOps" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
+            <div class="table-toolbar">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <label style="font-size:12px; color:var(--text-muted);">Pricing Tier:</label>
+                <select id="finopsTierSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
+                  <option value="STANDARD">Standard ($1.95/GB)</option>
+                  <option value="ENTERPRISE" selected>Enterprise ($2.40/GB)</option>
+                  <option value="ENTERPRISE_PLUS">Enterprise Plus ($4.60/GB)</option>
+                </select>
+                <label style="font-size:12px; color:var(--text-muted); margin-left:8px;">Lookback:</label>
+                <select id="finopsDaysSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
+                  <option value="1">1 Day</option>
+                  <option value="7" selected>7 Days</option>
+                  <option value="14">14 Days</option>
+                  <option value="30">30 Days</option>
+                </select>
+                <button id="btnRunFinopsAnalysis" class="btn btn-sm btn-primary" style="margin-left:8px;">
+                  <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  <span>Analyze Costs</span>
+                </button>
+              </div>
+              <button id="btnChatLogCostAgent" class="btn btn-sm btn-ghost">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>Chat with @log-cost-agent</span>
+              </button>
+            </div>
+
+            <!-- FinOps Metrics Overview -->
+            <div id="finopsMetricsOverview" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Total Ingestion Volume</div>
+                <div id="finopsTotalVolume" class="kpi-value" style="font-size:20px; font-weight:700; color:#38bdf8; margin:6px 0;">--</div>
+                <div id="finopsVolumeSub" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Total events: --</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Projected Monthly Spend</div>
+                <div id="finopsProjectedSpend" class="kpi-value" style="font-size:20px; font-weight:700; color:#fbbf24; margin:6px 0;">--</div>
+                <div id="finopsSpendSub" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Enterprise tier</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Potential Monthly Savings</div>
+                <div id="finopsPotentialSavings" class="kpi-value" style="font-size:20px; font-weight:700; color:#34d399; margin:6px 0;">--</div>
+                <div id="finopsSavingsSub" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Actionable FinOps rules</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Bloated Sources (>2KB)</div>
+                <div id="finopsBloatedCount" class="kpi-value" style="font-size:20px; font-weight:700; color:#f87171; margin:6px 0;">--</div>
+                <div id="finopsBloatedSub" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">High event payloads</div>
+              </div>
+            </div>
+
+            <!-- FinOps Recommendations Panel -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:16px;">
+              <h4 style="font-size:13px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:6px; color:#f3f4f6;">
+                <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span>Strategic FinOps Recommendations</span>
+              </h4>
+              <div id="finopsRecommendationsList" style="display:flex; flex-direction:column; gap:10px;">
+                <div style="font-size:12px; color:var(--text-muted);">Click "Analyze Costs" to compute real-time FinOps optimization recommendations.</div>
+              </div>
+            </div>
+
+            <!-- Volume Drivers Table -->
+            <div class="table-wrapper">
+              <table class="data-table" id="finopsDriversTable">
+                <thead>
+                  <tr>
+                    <th>Log Type</th>
+                    <th>Events</th>
+                    <th>Volume (GB)</th>
+                    <th>Avg Bytes/Evt</th>
+                    <th>Bloat Status</th>
+                    <th>Est. Monthly Spend</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="finopsDriversTableBody">
+                  <tr><td colspan="7" class="table-loading">Loading ingestion cost metrics...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tab 5: Ingestion Labels & Namespaces Hygiene -->
+          <div id="secIngestionNamespaceLabels" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
+            <div class="table-toolbar">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <label style="font-size:12px; color:var(--text-muted);">Lookback:</label>
+                <select id="nsLabelsDaysSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
+                  <option value="1">1 Day</option>
+                  <option value="7" selected>7 Days</option>
+                  <option value="14">14 Days</option>
+                  <option value="30">30 Days</option>
+                </select>
+                <button id="btnRunNsLabelsAudit" class="btn btn-sm btn-primary" style="margin-left:8px;">
+                  <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                  <span>Audit Hygiene</span>
+                </button>
+              </div>
+              <button id="btnChatNamespaceAgent" class="btn btn-sm btn-ghost">
+                <svg class="btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>Chat with @namespace-label-agent</span>
+              </button>
+            </div>
+
+            <!-- Hygiene Overview Cards -->
+            <div id="nsLabelsMetricsOverview" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Labelled Events</div>
+                <div id="nsTotalLabelledEvents" class="kpi-value" style="font-size:20px; font-weight:700; color:#38bdf8; margin:6px 0;">--</div>
+                <div id="nsActiveLabelsCount" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Active tags: --</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Namespaced Events</div>
+                <div id="nsTotalNamespacedEvents" class="kpi-value" style="font-size:20px; font-weight:700; color:#818cf8; margin:6px 0;">--</div>
+                <div id="nsActiveNamespacesCount" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Active namespaces: --</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Default Untagged Telemetry</div>
+                <div id="nsTotalUntaggedEvents" class="kpi-value" style="font-size:20px; font-weight:700; color:#f87171; margin:6px 0;">--</div>
+                <div class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Untagged namespace volume</div>
+              </div>
+              <div class="kpi-card" style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+                <div class="kpi-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Data RBAC Alignment</div>
+                <div id="nsRbacAlignmentStatus" class="kpi-value" style="font-size:20px; font-weight:700; color:#34d399; margin:6px 0;">--</div>
+                <div id="nsRbacLabelCount" class="kpi-sub" style="font-size:11.5px; color:var(--text-muted);">Configured labels: --</div>
+              </div>
+            </div>
+
+            <!-- Findings Panel -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:16px;">
+              <h4 style="font-size:13px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:6px; color:#f3f4f6;">
+                <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>Telemetry Hygiene &amp; Data RBAC Findings</span>
+              </h4>
+              <div id="nsLabelsFindingsList" style="display:flex; flex-direction:column; gap:10px;">
+                <div style="font-size:12px; color:var(--text-muted);">Click "Audit Hygiene" to evaluate Ingestion Labels, UDM Namespaces, and Data RBAC consistency.</div>
+              </div>
+            </div>
+
+            <!-- Labels & Namespaces Tables Grid -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+              <div class="table-wrapper">
+                <div style="padding:10px 14px; font-size:12px; font-weight:700; color:#9ca3af; border-bottom:1px solid var(--border-color); background:var(--bg-table-header);">
+                  Active Ingestion Labels
+                </div>
+                <table class="data-table" id="ingestionLabelsTable">
+                  <thead>
+                    <tr>
+                      <th>Label Key</th>
+                      <th>Events</th>
+                      <th>Type</th>
+                      <th>Log Types</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ingestionLabelsTableBody">
+                    <tr><td colspan="4" class="table-loading">Run audit to load labels...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="table-wrapper">
+                <div style="padding:10px 14px; font-size:12px; font-weight:700; color:#9ca3af; border-bottom:1px solid var(--border-color); background:var(--bg-table-header);">
+                  Active UDM Namespaces
+                </div>
+                <table class="data-table" id="udmNamespacesTable">
+                  <thead>
+                    <tr>
+                      <th>Namespace</th>
+                      <th>Events</th>
+                      <th>RFC 1918</th>
+                      <th>Log Types</th>
+                    </tr>
+                  </thead>
+                  <tbody id="udmNamespacesTableBody">
+                    <tr><td colspan="4" class="table-loading">Run audit to load namespaces...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -629,7 +964,7 @@
               <p class="page-subtitle">Inspect specialized Google ADK 2 agents, system instructions, operational protocols, and bound SDK tools</p>
             </div>
             <div class="page-actions library-header-actions">
-              <span class="meta-tag">10 Active Agents</span>
+              <span id="libraryAgentCountBadge" class="meta-tag">19 Active Agents</span>
               <span class="meta-tag">Google ADK 2</span>
               <span class="meta-tag">Live Chronicle / GEAP</span>
             </div>
@@ -655,6 +990,8 @@
                 <button class="lib-filter-chip" data-subsystem="ingestion">Ingestion</button>
                 <button class="lib-filter-chip" data-subsystem="identity">Identity</button>
                 <button class="lib-filter-chip" data-subsystem="analytics">Analytics</button>
+                <button class="lib-filter-chip" data-subsystem="cartography">Cartography</button>
+                <button class="lib-filter-chip" data-subsystem="governance">Governance</button>
                 <button class="lib-filter-chip" data-subsystem="soar">SOAR</button>
               </div>
 
@@ -678,15 +1015,234 @@
           </div>
         </div>
       </div>
+
+      <!-- View 5: SOC Operational Picture & Shift Briefings -->
+      <div id="briefingsView" class="view-panel" style="display:none;">
+        <div class="page-container briefing-page-container">
+          <!-- Page Header -->
+          <div class="page-header briefing-header">
+            <div class="page-title-group">
+              <h1 class="page-title">
+                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <span>SOC Operational Picture &amp; Briefings</span>
+              </h1>
+              <p class="page-subtitle">Deterministic shift handovers, institutional posture, cross-agent entity dossiers, and surfaced knowledge gaps</p>
+            </div>
+            <div class="page-actions briefing-header-actions">
+              <div class="shift-selector-group" style="display:flex; align-items:center; gap:8px;">
+                <label for="shiftWindowSelect" style="font-size:12px; color:#94a3b8; font-weight:600;">Lookback:</label>
+                <select id="shiftWindowSelect" class="form-select" style="background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:6px 10px; border-radius:6px; font-size:12px;">
+                  <option value="8" selected>Last 8 Hours (Standard Shift)</option>
+                  <option value="12">Last 12 Hours</option>
+                  <option value="24">Last 24 Hours</option>
+                  <option value="48">Last 48 Hours</option>
+                </select>
+              </div>
+              <button id="btnTriggerShiftBrief" class="btn btn-primary" title="Trigger @soc-briefing-agent to compute shift brief" style="display:flex; align-items:center; gap:6px;">
+                <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Trigger Shift Brief</span>
+              </button>
+              <button id="btnRefreshPosture" class="btn btn-secondary" title="Recompute institutional knowledge and posture snapshot" style="display:flex; align-items:center; gap:6px;">
+                <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>Refresh Posture</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Sub-Navigation Tabs: Shift Briefing | Posture & Gaps | Entity Dossiers -->
+          <div class="subnav-tabs-bar" style="display:flex; gap:8px; border-bottom:1px solid #1e293b; margin-bottom:16px;">
+            <button id="tabBtnShiftBrief" class="subnav-tab active">Shift Handover Briefing</button>
+            <button id="tabBtnPostureGaps" class="subnav-tab">Institutional Posture &amp; Gaps</button>
+            <button id="tabBtnEntityDossier" class="subnav-tab">Cross-Agent Entity Dossier</button>
+          </div>
+
+          <!-- Tab Content 1: Shift Handover Briefing -->
+          <div id="tabContentShiftBrief" class="briefing-tab-pane active">
+            <!-- Shift Header Metadata Banner -->
+            <div id="shiftMetaBanner" class="brief-meta-banner" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between;">
+              <div class="shift-badge-row" style="display:flex; align-items:center; gap:10px;">
+                <span id="shiftTitleBadge" class="badge-blue" style="font-weight:700;">SHIFT BRIEFING</span>
+                <span id="shiftTimestampBadge" class="meta-tag" style="background:#1e293b; color:#94a3b8; padding:3px 8px; border-radius:4px; font-size:11px;">-</span>
+                <span id="shiftGeneratedByBadge" class="meta-tag" style="background:#1e293b; color:#38bdf8; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600;">@soc-briefing-agent</span>
+              </div>
+              <button id="btnCopySlackBlock" class="btn btn-secondary btn-sm" title="Copy Slack Block Kit payload" style="font-size:11px; padding:4px 8px;">Copy Slack Blocks</button>
+            </div>
+
+            <!-- 5 Operational Delta Categories Grid -->
+            <div class="delta-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:18px;">
+              <!-- Requires Attention -->
+              <div class="delta-card delta-card-urgent" style="background:#151016; border:1px solid rgba(239, 68, 68, 0.4); border-radius:8px; padding:12px;">
+                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#f87171; display:flex; align-items:center; gap:5px;">
+                    <span>⚠️ Requires Attention</span>
+                  </div>
+                  <span id="countRequiresAttention" class="delta-badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                </div>
+                <div class="delta-card-body" id="listRequiresAttention" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
+                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No critical blockers.</p>
+                </div>
+              </div>
+
+              <!-- Changed Since Previous Shift -->
+              <div class="delta-card delta-card-changed" style="background:#0f1820; border:1px solid rgba(56, 189, 248, 0.4); border-radius:8px; padding:12px;">
+                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#38bdf8; display:flex; align-items:center; gap:5px;">
+                    <span>🔄 Changed Since Previous</span>
+                  </div>
+                  <span id="countChangedSincePrevious" class="delta-badge" style="background:rgba(56,189,248,0.2); color:#38bdf8; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                </div>
+                <div class="delta-card-body" id="listChangedSincePrevious" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
+                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No mutations this shift.</p>
+                </div>
+              </div>
+
+              <!-- Agent Work in Progress -->
+              <div class="delta-card delta-card-wip" style="background:#131522; border:1px solid rgba(129, 140, 248, 0.4); border-radius:8px; padding:12px;">
+                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#818cf8; display:flex; align-items:center; gap:5px;">
+                    <span>🤖 Agent Work in Progress</span>
+                  </div>
+                  <span id="countAgentWip" class="delta-badge" style="background:rgba(129,140,248,0.2); color:#818cf8; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                </div>
+                <div class="delta-card-body" id="listAgentWip" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
+                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No active autonomous leases.</p>
+                </div>
+              </div>
+
+              <!-- No Action Required -->
+              <div class="delta-card delta-card-healthy" style="background:#0e1915; border:1px solid rgba(34, 197, 94, 0.4); border-radius:8px; padding:12px;">
+                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#4ade80; display:flex; align-items:center; gap:5px;">
+                    <span>🛡️ Verified Baselines</span>
+                  </div>
+                  <span id="countHealthy" class="delta-badge" style="background:rgba(34,197,94,0.2); color:#4ade80; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                </div>
+                <div class="delta-card-body" id="listHealthy" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
+                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No baseline checks recorded.</p>
+                </div>
+              </div>
+
+              <!-- Carry-Over Issues -->
+              <div class="delta-card delta-card-carryover" style="background:#171612; border:1px solid rgba(234, 179, 8, 0.4); border-radius:8px; padding:12px;">
+                <div class="delta-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div class="delta-card-title" style="font-size:12px; font-weight:700; color:#facc15; display:flex; align-items:center; gap:5px;">
+                    <span>⏳ Carry-Over Issues</span>
+                  </div>
+                  <span id="countCarryover" class="delta-badge" style="background:rgba(234,179,8,0.2); color:#facc15; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">0</span>
+                </div>
+                <div class="delta-card-body" id="listCarryover" style="font-size:12px; color:#cbd5e1; max-height:160px; overflow-y:auto;">
+                  <p class="empty-state-muted" style="color:#64748b; margin:0; font-style:italic;">No backlog issues.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Full Briefing Executive Narrative Section -->
+            <div class="card briefing-narrative-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
+              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:8px;">Executive Briefing Narrative</h3>
+              <div id="shiftNarrativeBody" class="markdown-preview-pane" style="font-size:13px; line-height:1.6; color:#cbd5e1;">
+                <p class="empty-state-muted" style="color:#64748b;">Loading shift briefing narrative...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab Content 2: Institutional Posture & Knowledge Gaps -->
+          <div id="tabContentPostureGaps" class="briefing-tab-pane" style="display:none;">
+            <!-- Posture Gauges Grid -->
+            <div class="posture-metrics-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
+                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:6px;">Assertion Freshness</span>
+                <div class="freshness-bar-container" style="display:flex; height:10px; border-radius:5px; overflow:hidden; background:#1e293b; margin-bottom:6px;">
+                  <div id="freshnessBarFresh" style="background:#22c55e; width:60%;" title="Fresh (<1h)"></div>
+                  <div id="freshnessBarRecent" style="background:#eab308; width:30%;" title="Recent (1-24h)"></div>
+                  <div id="freshnessBarStale" style="background:#ef4444; width:10%;" title="Stale (>24h)"></div>
+                </div>
+                <div id="freshnessLegend" style="font-size:10px; color:#94a3b8;">Fresh: 0 | Recent: 0 | Stale: 0</div>
+              </div>
+
+              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
+                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Telemetry &amp; Feeds</span>
+                <span id="postureTelemetryVal" style="font-size:16px; font-weight:700; color:#38bdf8; display:block;">Active</span>
+                <span class="metric-sub" style="font-size:10px; color:#64748b;">Chronicle Ingestion</span>
+              </div>
+
+              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
+                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Parsing Quality</span>
+                <span id="postureParsingVal" style="font-size:16px; font-weight:700; color:#4ade80; display:block;">Healthy</span>
+                <span class="metric-sub" style="font-size:10px; color:#64748b;">CBN Normalization</span>
+              </div>
+
+              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
+                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Detection Health</span>
+                <span id="postureDetectionsVal" style="font-size:16px; font-weight:700; color:#a78bfa; display:block;">Operational</span>
+                <span class="metric-sub" style="font-size:10px; color:#64748b;">YARA-L Rule Engine</span>
+              </div>
+
+              <div class="metric-card" style="background:#111927; border:1px solid #1e293b; border-radius:8px; padding:12px;">
+                <span class="metric-label" style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700; display:block; margin-bottom:4px;">Surfaced Unknowns</span>
+                <span id="postureGapsCount" style="font-size:16px; font-weight:700; color:#f87171; display:block;">0</span>
+                <span class="metric-sub" style="font-size:10px; color:#64748b;">Institutional Knowledge Gaps</span>
+              </div>
+            </div>
+
+            <!-- Surfaced Institutional Knowledge Gaps Table -->
+            <div class="card gaps-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
+              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                <span>Surfaced Institutional Knowledge Gaps &amp; Unknowns</span>
+                <span class="badge-blue" style="font-size:10px; padding:2px 6px;">Zero Hallucination</span>
+              </h3>
+              <div class="table-responsive" style="overflow-x:auto;">
+                <table class="data-table" id="tableKnowledgeGaps" style="width:100%; border-collapse:collapse; font-size:12px;">
+                  <thead>
+                    <tr style="border-bottom:1px solid #1e293b; text-align:left; color:#94a3b8;">
+                      <th style="padding:8px 10px;">Gap ID</th>
+                      <th style="padding:8px 10px;">Category</th>
+                      <th style="padding:8px 10px;">Subject</th>
+                      <th style="padding:8px 10px;">Description</th>
+                      <th style="padding:8px 10px;">Severity</th>
+                      <th style="padding:8px 10px;">Investigation Agent</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bodyKnowledgeGaps">
+                    <tr><td colspan="6" style="padding:12px; color:#64748b; text-align:center;">Loading institutional knowledge gaps...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab Content 3: Cross-Agent Entity Dossier -->
+          <div id="tabContentEntityDossier" class="briefing-tab-pane" style="display:none;">
+            <div class="card dossier-search-card" style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px; margin-bottom:16px;">
+              <h3 style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:8px;">Cross-Agent Entity Dossier Explorer</h3>
+              <p style="font-size:12px; color:#94a3b8; margin-bottom:14px;">Synthesize multi-agent factual assertions, health statuses, and knowledge gaps for any operational entity (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
+              <div class="dossier-search-bar" style="display:flex; gap:10px; align-items:center;">
+                <select id="dossierSubjectType" class="form-select" style="background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:7px 12px; border-radius:6px; font-size:12px;">
+                  <option value="log_type">Log Source (log_type)</option>
+                  <option value="rule_id">Detection Rule (rule_id)</option>
+                  <option value="playbook_id">SOAR Playbook (playbook_id)</option>
+                  <option value="feed_id">Ingestion Feed (feed_id)</option>
+                </select>
+                <input type="text" id="dossierSubjectId" class="form-input" placeholder="e.g. PAN_FIREWALL" style="flex:1; background:#17212e; border:1px solid #2a3c52; color:#cbd5e1; padding:7px 12px; border-radius:6px; font-size:12px;" />
+                <button id="btnFetchDossier" class="btn btn-primary" style="padding:7px 16px; font-size:12px;">Fetch Dossier</button>
+              </div>
+            </div>
+
+            <div id="dossierResultContainer" class="dossier-result-container" style="display:none; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:16px;">
+              <!-- Dynamic Dossier Rendering -->
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
+
 
     <!-- Right Drawer: Proposals & Fleet Inspector (Toggleable) -->
     <aside id="sidebarRight" class="sidebar-right sidebar-right-closed">
       <div class="drawer-header-bar">
         <span class="drawer-header-title">Inspector</span>
         <div class="drawer-header-actions">
-          <button id="btnOpenFullBoard" class="btn-drawer-action" title="Open Full Gas Town Board">
-            <span>Board ↗</span>
+          <button id="btnOpenFullBoard" class="btn-drawer-action" title="Open Full Actions Board">
+            <span>Actions ↗</span>
           </button>
           <button id="btnCloseDrawer" class="btn-drawer-close" title="Close Drawer">
             <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -742,11 +1298,31 @@
     </div>
   </div>
 
+  <!-- Modal: SOC Issue Detail & Git Durability Ledger -->
+  <div id="modalSocIssue" class="gt-modal-backdrop" style="display:none;">
+    <div class="gt-modal-dialog" style="max-width:800px; max-height:85vh; display:flex; flex-direction:column;">
+      <div class="gt-modal-header">
+        <div class="gt-modal-title-group">
+          <span id="modalSocIssueBadge" class="badge-blue">SOC ISSUE</span>
+          <h2 id="modalSocIssueTitle" class="gt-modal-title">SOC Issue Detail</h2>
+        </div>
+        <button id="btnCloseSocModal" class="gt-modal-close-btn" onclick="closeSocIssueModal()">&times;</button>
+      </div>
+      <div id="modalSocIssueBody" class="gt-modal-body" style="overflow-y:auto; padding:16px;">
+        <!-- Populated dynamically by app.js -->
+      </div>
+      <div class="gt-modal-footer" id="modalSocIssueFooter">
+        <button class="btn btn-secondary" onclick="closeSocIssueModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Global Toast Notifications Container -->
   <div id="toastContainer" class="toast-container"></div>
 
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
-  <script src="/static/app.js?v=2.3.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="/static/app.js?v=2.5.0"></script>
 </body>
 </html>

@@ -1,18 +1,32 @@
 ---
 id: feature.bindplane.agent_fleet
-title: "BindPlane OP Collector Fleets & Pipeline Ingestion"
+title: BindPlane OP Collector Fleets & Pipeline Ingestion
 type: feature
 platform: bindplane
 sdk_capabilities:
-  - feed.search
-  - feed.get
-  - feed.audit_health
+- feed.search
+- feed.get
+- feed.audit_health
 mcp_tools:
-  - search_feeds
-  - get_feed
-  - audit_feed_health
+- search_feeds
+- get_feed
+- audit_feed_health
 related_concepts:
-  - concept.bindplane_telemetry_architecture
+- concept.bindplane_telemetry_architecture
+status: stable
+description: BindPlane OP Collector Fleets & Pipeline Ingestion (feature reference
+  in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # BindPlane OP Collector Fleets & Pipeline Ingestion

@@ -23,8 +23,26 @@ from pydantic import BaseModel, Field
 from agents.core.proposal_manager import ProposalManager
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
+from agents.core.work_queue import get_work_queue, BaseWorkQueue
+from agents.core.materializer import IssueMaterializer
+from agents.core.lifecycle import SOCLifecycleManager
+from agents.core.knowledge_store import get_knowledge_store
+from agents.core.communication_router import get_communication_router
 from agents.generated import create_agent_fleet
 from clients.web.chat_engine import ChatMessage, ChatStore, AgentDispatcher
+
+from engine.domain import (
+    IssueLifecycleStatus,
+    IssueSeverity,
+    OperationalPlane,
+    AuthorityTier,
+    SOCIssue,
+    IssueProblem,
+    IssueRouting,
+    IssueGovernance,
+    Lease,
+    AgentCapabilityProfile,
+)
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
 from tests.test_helpers import get_live_engine
@@ -57,10 +75,19 @@ chat_store = ChatStore(root_dir=REPO_ROOT)
 proposal_manager = ProposalManager(root_dir=REPO_ROOT)
 engine = _build_engine()
 evidence_store = get_evidence_store(root_dir=str(REPO_ROOT))
+work_queue = get_work_queue(root_dir=str(REPO_ROOT))
+issue_materializer = IssueMaterializer(root_dir=REPO_ROOT)
+lifecycle_manager = SOCLifecycleManager(
+    work_queue=work_queue,
+    materializer=issue_materializer,
+    root_dir=REPO_ROOT,
+)
 fleet = create_agent_fleet(
     engine=engine,
     proposal_manager=proposal_manager,
     evidence_store=evidence_store,
+    work_queue=work_queue,
+    lifecycle_manager=lifecycle_manager,
 )
 dispatcher = AgentDispatcher(
     chat_store=chat_store,
@@ -69,14 +96,31 @@ dispatcher = AgentDispatcher(
     proposal_manager=proposal_manager,
     evidence_store=evidence_store,
 )
+knowledge_store = get_knowledge_store(root_dir=REPO_ROOT)
+communication_router = get_communication_router(
+    work_queue=work_queue,
+    chat_store=chat_store,
+    knowledge_store=knowledge_store,
+)
 fleet_scheduler = FleetScheduler(
     fleet=fleet,
     evidence_store=evidence_store,
     chat_store=chat_store,
+    lifecycle_manager=lifecycle_manager,
+    work_queue=work_queue,
+    communication_router=communication_router,
+    knowledge_store=knowledge_store,
 )
+
 
 # Ensure baseline remediation tasks exist in Evidence Fabric
 evidence_store.ensure_default_tasks()
+try:
+    dedup_stats = evidence_store.deduplicate_todos()
+    if dedup_stats.get("deleted", 0) > 0:
+        logger.info("Consolidated duplicate Gas Town tasks on startup: %s", dedup_stats)
+except Exception as e:
+    logger.warning("Failed to deduplicate todos on startup: %s", e)
 
 # Seed an initial announcement if store is empty
 if len(chat_store.list_messages("general", "announcements")) == 0:
@@ -87,7 +131,7 @@ if len(chat_store.list_messages("general", "announcements")) == 0:
         sender_type="agent",
         content=(
             "🚀 **SecOps Multi-Agent Fleet is Online**.\n\n"
-            "Welcome to the fleet workspace. You can coordinate with 16 specialized agents across "
+            "Welcome to the fleet workspace. You can coordinate with 17 specialized agents across "
             "`#general`, `#detections`, `#ingestion`, `#testing`, `#identity`, and `#soar`.\n\n"
             "Try asking `@rule-troubleshooter analyze ru_0e378636` or `@yaral-optimizer optimize ru_0e378636`!"
         ),
@@ -120,6 +164,12 @@ async def add_no_cache_headers(request: Request, call_next: Any) -> Any:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    for agent in fleet.values():
+        if hasattr(agent, "register_worker"):
+            try:
+                agent.register_worker()
+            except Exception as reg_err:
+                logger.warning("Failed to register agent %s: %s", getattr(agent, "handle", "unknown"), reg_err)
     fleet_scheduler.start()
 
 
@@ -433,6 +483,7 @@ async def approve_proposal(
         proposal_id=proposal_id,
         engine=engine,
         merged_by=body.merged_by,
+        lifecycle_manager=lifecycle_manager,
     )
 
     if not res.success:
@@ -465,6 +516,25 @@ async def approve_proposal(
         },
     )
 
+    # Cascade resolution to any matching pending tasks in Evidence Fabric
+    if proposal.target_resource_id:
+        try:
+            pending_todos = evidence_store.list_todos(status="PENDING")
+            for td in pending_todos:
+                t_desc = f"{td.get('title', '')} {td.get('description', '')} {td.get('target_resource_id', '')}"
+                if proposal.target_resource_id in t_desc:
+                    tid = td.get("todo_id") or td.get("id")
+                    if tid:
+                        evidence_store.update_todo_status(
+                            todo_id=tid,
+                            status="RESOLVED",
+                            resolved_by=body.merged_by,
+                            proposal_id=proposal_id,
+                            resolution=f"Resolved via approved proposal {proposal_id}",
+                        )
+        except Exception as e:
+            logger.warning("Could not cascade approval resolution to todos: %s", e)
+
     return asdict(res)
 
 
@@ -479,9 +549,29 @@ async def reject_proposal(
             proposal_id=proposal_id,
             reason=body.reason,
             rejected_by=body.rejected_by,
+            lifecycle_manager=lifecycle_manager,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Cascade dismissal to any matching pending tasks in Evidence Fabric
+    if proposal.target_resource_id:
+        try:
+            pending_todos = evidence_store.list_todos(status="PENDING")
+            for td in pending_todos:
+                t_desc = f"{td.get('title', '')} {td.get('description', '')} {td.get('target_resource_id', '')}"
+                if proposal.target_resource_id in t_desc:
+                    tid = td.get("todo_id") or td.get("id")
+                    if tid:
+                        evidence_store.update_todo_status(
+                            todo_id=tid,
+                            status="RESOLVED",
+                            resolved_by=body.rejected_by,
+                            proposal_id=proposal_id,
+                            resolution=f"Dismissed via rejected proposal {proposal_id}: {body.reason}",
+                        )
+        except Exception as e:
+            logger.warning("Could not cascade rejection dismissal to todos: %s", e)
 
     target_stream = "detections" if "rule" in proposal.subsystem else "general"
     chat_store.add_message(
@@ -540,6 +630,57 @@ async def get_rule_state(rule_id: str) -> Dict[str, Any]:
     return state
 
 
+@app.post("/api/rules/audit")
+async def run_rule_audit(
+    include_curated: bool = Query(True, description="Include Google Curated Rules"),
+    sync_embeddings: bool = Query(True, description="Synchronize vector embeddings"),
+    lookback_days: int = Query(90, description="Telemetry lookback days"),
+    run_conflict_scan: bool = Query(True, description="Scan for rule overlaps and curated shadowing"),
+) -> Dict[str, Any]:
+    """Executes a unified detection repository health audit across customer and curated rules."""
+    report = engine.audit_rules(
+        include_curated=include_curated,
+        sync_embeddings=sync_embeddings,
+        lookback_days=lookback_days,
+        run_conflict_scan=run_conflict_scan,
+    )
+    rep_dict = report.to_dict()
+    widget = {
+        "type": "rule_audit_card",
+        "title": "Detection Repository Health Audit",
+        "data": rep_dict,
+    }
+    chat_store.add_message(
+        stream="detections",
+        topic="decay-review",
+        sender_handle="@detection-decay-agent",
+        sender_type="agent",
+        content=(
+            f"🛡️ **Unified Detection Repository Audit Completed**\n\n"
+            f"- **Total Rules Scanned**: `{report.total_rules_scanned}` ({report.customer_rules_count} Customer, {report.curated_rules_count} Curated)\n"
+            f"- **Healthy Active**: `{report.healthy_count}`\n"
+            f"- **Silent (0 Detections / 90d)**: `{report.silent_decay_count}`\n"
+            f"- **Execution Failures**: `{report.failing_count}`\n"
+            f"- **Misconfigured Alerting**: `{report.misconfigured_count}`\n"
+            f"- **Semantic Conflicts (COS ≥ 75)**: `{report.conflict_count}`\n"
+            f"- **Shadowing Curated Rules**: `{report.shadowed_by_curated_count}`\n"
+            f"- **Vector Embeddings Synced**: `{report.embeddings_synced_count}`\n\n"
+            f"Repository telemetry, conflict matrix, and 768-d vector embeddings updated in Firestore Evidence Fabric."
+        ),
+        widget=widget,
+    )
+    return rep_dict
+
+
+@app.get("/api/rules/audit/latest")
+async def get_latest_rule_audit() -> Dict[str, Any]:
+    """Retrieves the most recent unified rule audit report from Evidence Fabric."""
+    latest = evidence_store.get_latest_rule_audit()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No prior detection rule audit found.")
+    return latest
+
+
 @app.get("/api/todos")
 async def list_todos(
     status: Optional[str] = Query("PENDING", description="Filter by status (e.g. PENDING, IN_PROGRESS, RESOLVED)"),
@@ -567,6 +708,38 @@ async def delete_todo_by_id(todo_id: str) -> Dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Task {todo_id} not found")
     return {"status": "DELETED", "todo_id": todo_id}
+
+
+class UpdateTodoStatusRequest(BaseModel):
+    status: str = Field(..., description="Target status: PENDING, IN_PROGRESS, RESOLVED, DISMISSED")
+    resolution: Optional[str] = Field(None, description="Resolution note or dismissal explanation")
+    resolved_by: Optional[str] = Field("secops-operator", description="Operator or agent resolving task")
+
+
+@app.patch("/api/todos/{todo_id}")
+async def update_todo_status_endpoint(
+    todo_id: str,
+    body: UpdateTodoStatusRequest,
+) -> Dict[str, Any]:
+    """Updates the status of a remediation task."""
+    evidence_store.ensure_default_tasks()
+    todo = evidence_store.get_todo(todo_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail=f"Task {todo_id} not found")
+    evidence_store.update_todo_status(
+        todo_id=todo_id,
+        status=body.status,
+        resolved_by=body.resolved_by,
+        resolution=body.resolution,
+    )
+    return {"status": "SUCCESS", "todo_id": todo_id, "new_status": body.status}
+
+
+@app.post("/api/todos/deduplicate")
+async def deduplicate_todos_endpoint() -> Dict[str, Any]:
+    """Consolidates duplicate open tasks by resource and action type, merging sightings."""
+    stats = evidence_store.deduplicate_todos()
+    return {"status": "SUCCESS", "stats": stats}
 
 
 class CreateTodoRequest(BaseModel):
@@ -750,6 +923,14 @@ async def get_gastown_overview() -> Dict[str, Any]:
                 })
     summary["escalation_count"] = len(escalations)
 
+    soc_issues = [i.to_dict() for i in work_queue.list_issues(limit=50)]
+    soc_workers = [w.to_dict() for w in work_queue.list_workers(active_only=False)]
+    active_leases_count = sum(1 for i in soc_issues if i.get("lease") and i.get("status") in ["LEASED", "CLAIMED", "EXECUTING", "VALIDATING"])
+    summary["soc_issues_count"] = len(soc_issues)
+    summary["soc_leases_active"] = active_leases_count
+    summary["soc_workers_count"] = len(soc_workers)
+    summary["issue_count"] = len(open_props) + len(todos_pending) + len([i for i in soc_issues if i.get("status") != "CLOSED"])
+
     return {
         "mayor": mayor,
         "health": health,
@@ -758,7 +939,141 @@ async def get_gastown_overview() -> Dict[str, Any]:
         "escalations": escalations,
         "todos_pending": todos_pending,
         "todos_in_progress": todos_in_progress,
+        "todos_resolved": todos_resolved,
+        "soc_issues": soc_issues,
+        "soc_workers": soc_workers,
+        "soc_leases_active": active_leases_count,
     }
+
+
+# --- SOC Operating System Work Queue & Durability Endpoints ---
+
+class ClaimIssueRequest(BaseModel):
+    agent_handle: str = Field(..., description="Worker agent handle claiming work (e.g. '@parser-doctor')")
+    duration_seconds: int = Field(default=300, ge=10, le=3600, description="Lease duration in seconds")
+
+
+class HeartbeatIssueRequest(BaseModel):
+    agent_handle: str = Field(..., description="Lease holder agent handle")
+    duration_seconds: int = Field(default=300, ge=10, le=3600)
+
+
+class ReleaseIssueRequest(BaseModel):
+    agent_handle: Optional[str] = Field(default=None, description="Lease holder agent handle")
+    force: bool = Field(default=False, description="Force release regardless of ownership")
+
+
+class DecideIssueRequest(BaseModel):
+    decision: str = Field(..., description="Decision outcome: 'APPROVED' or 'REJECTED'")
+    approver: str = Field(default="secops-operator", description="Identifier of the operator or authority")
+    rationale: str = Field(default="", description="Operator rationale or notes")
+
+
+@app.get("/api/soc/issues")
+async def list_soc_issues(
+    status: Optional[str] = Query(None, description="Filter by status (AVAILABLE, LEASED, VALIDATING, CLOSED, etc.)"),
+    plane: Optional[str] = Query(None, description="Filter by operational plane (data, detection, automation, platform, governance, improvement, external)"),
+    limit: int = Query(100, ge=1, le=500),
+) -> List[Dict[str, Any]]:
+    """Lists SOC work items from the operational coordination work queue."""
+    issues = work_queue.list_issues(status=status, plane=plane, limit=limit)
+    return [i.to_dict() for i in issues]
+
+
+@app.get("/api/soc/issues/{issue_id}")
+async def get_soc_issue(issue_id: str) -> Dict[str, Any]:
+    """Retrieves a single SOC work item and its materialized Git ledger events."""
+    issue = work_queue.get_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail=f"SOC Issue '{issue_id}' not found.")
+    
+    events = issue_materializer.list_issue_events(issue_id)
+    issue_dict = issue.to_dict()
+    issue_dict["materialized_events"] = [e.to_dict() for e in events]
+    issue_dict["resolution_markdown"] = issue_materializer.read_resolution(issue_id)
+    return issue_dict
+
+
+@app.post("/api/soc/issues/{issue_id}/claim")
+async def claim_soc_issue(issue_id: str, body: ClaimIssueRequest) -> Dict[str, Any]:
+    """Acquires a lease on a SOC work item for an autonomous worker."""
+    lease = work_queue.acquire_lease(
+        issue_id=issue_id,
+        agent_handle=body.agent_handle,
+        duration_seconds=body.duration_seconds,
+    )
+    if not lease:
+        raise HTTPException(status_code=409, detail=f"Issue '{issue_id}' could not be leased (already leased or closed).")
+    
+    issue_materializer.materialize_claimed(
+        issue_id=issue_id,
+        agent_handle=body.agent_handle,
+        lease=lease,
+        commit=False,
+    )
+    return {"status": "LEASED", "lease": lease.to_dict()}
+
+
+@app.post("/api/soc/issues/{issue_id}/heartbeat")
+async def heartbeat_soc_issue(issue_id: str, body: HeartbeatIssueRequest) -> Dict[str, Any]:
+    """Renews an active lease without generating Git commit churn."""
+    renewed = work_queue.renew_lease(
+        issue_id=issue_id,
+        agent_handle=body.agent_handle,
+        duration_seconds=body.duration_seconds,
+    )
+    if not renewed:
+        raise HTTPException(status_code=400, detail="Failed to renew lease (lease expired or mismatched owner).")
+    return {"status": "RENEWED"}
+
+
+@app.post("/api/soc/issues/{issue_id}/release")
+async def release_soc_issue(issue_id: str, body: ReleaseIssueRequest) -> Dict[str, Any]:
+    """Releases an active lease back to AVAILABLE pool."""
+    released = work_queue.release_lease(
+        issue_id=issue_id,
+        agent_handle=body.agent_handle,
+        force=body.force,
+    )
+    if not released:
+        raise HTTPException(status_code=400, detail="Failed to release lease.")
+    return {"status": "RELEASED"}
+
+
+@app.post("/api/soc/issues/{issue_id}/decide")
+async def decide_soc_issue(issue_id: str, body: DecideIssueRequest) -> Dict[str, Any]:
+    """Records an approval or rejection decision across the durability boundary."""
+    issue = work_queue.get_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail=f"Issue '{issue_id}' not found.")
+    
+    ok = lifecycle_manager.decide_issue(
+        issue_id=issue_id,
+        decision=body.decision.upper(),
+        approver=body.approver,
+        rationale=body.rationale,
+        commit=False,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to record issue decision.")
+    
+    return {"status": "DECIDED", "decision": body.decision.upper(), "issue_id": issue_id}
+
+
+@app.get("/api/soc/workers")
+async def list_soc_workers(active_only: bool = Query(False)) -> List[Dict[str, Any]]:
+    """Lists all registered workers with their capability profiles."""
+    workers = work_queue.list_workers(active_only=active_only)
+    return [w.to_dict() for w in workers]
+
+
+@app.get("/api/soc/workers/{agent_handle}")
+async def get_soc_worker(agent_handle: str) -> Dict[str, Any]:
+    """Retrieves worker capability profile."""
+    worker = work_queue.get_worker(agent_handle)
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker '{agent_handle}' not found.")
+    return worker.to_dict()
 
 
 # --- Identity & IAM Governance Endpoints ---
@@ -1146,6 +1461,66 @@ async def diagnose_unparsed_logs(log_type: str, lookback_hours: int = Query(168)
     return {"status": "ERROR", "message": "@parser-doctor not active"}
 
 
+@app.get("/api/playbooks/audit")
+async def audit_playbooks(
+    workflow_identifier: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    lookback_days: int = Query(30),
+    limit: int = Query(20),
+) -> Dict[str, Any]:
+    """Audits SOAR playbooks for 100-pt static resilience, 30-day telemetry, and decay."""
+    agent = fleet.get("@playbook-decay-agent")
+    if hasattr(agent, "audit_playbook_decay"):
+        res = agent.audit_playbook_decay(
+            workflow_identifier=workflow_identifier,
+            category=category,
+            lookback_days=lookback_days,
+            limit=limit,
+        )
+        widget = res.get("widget")
+        summary = res.get("summary", {})
+        chat_store.add_message(
+            stream="soar",
+            topic="playbook-health",
+            sender_handle="@playbook-decay-agent",
+            sender_type="agent",
+            content=(
+                f"⚡ **SOAR Playbook Resilience & Decay Audit**\n\n"
+                f"- **Audited Playbooks**: `{summary.get('total_audited', 0)}`\n"
+                f"- **Catalog Avg Score**: `{summary.get('average_resilience_score', 0)}/100`\n"
+                f"- **Degraded Count**: `{summary.get('degraded_playbooks_count', 0)}`\n"
+                f"- **Telemetry Window**: `{lookback_days} days`\n"
+            ),
+            widget=widget,
+        )
+        return res
+    return {"status": "ERROR", "message": "@playbook-decay-agent not active"}
+
+
+@app.get("/api/playbooks")
+async def list_playbooks(limit: int = Query(100)) -> Dict[str, Any]:
+    """Lists recent audited playbooks from Evidence Fabric."""
+    agent = fleet.get("@playbook-decay-agent")
+    if hasattr(agent, "list_playbook_reports"):
+        return agent.list_playbook_reports(limit=limit)
+    return {"status": "ERROR", "message": "@playbook-decay-agent not active"}
+
+
+@app.get("/api/playbooks/{workflow_identifier}")
+async def get_playbook_audit(workflow_identifier: str) -> Dict[str, Any]:
+    """Retrieves audit report for a specific playbook UUID."""
+    agent = fleet.get("@playbook-decay-agent")
+    if hasattr(agent, "get_playbook_decay_report"):
+        res = agent.get_playbook_decay_report(workflow_identifier)
+        if res.get("status") == "SUCCESS":
+            return res
+    # Fallback to on-demand audit if not cached in store
+    if hasattr(agent, "audit_playbook_decay"):
+        return agent.audit_playbook_decay(workflow_identifier=workflow_identifier)
+    return {"status": "ERROR", "message": "@playbook-decay-agent not active"}
+
+
+
 @app.get("/api/configs/agents/{agent_handle}/schedule")
 async def get_agent_schedule(agent_handle: str) -> Dict[str, Any]:
     """Retrieves schedule and automation settings for an agent."""
@@ -1187,7 +1562,226 @@ async def trigger_gastown_agent_patrol(agent_handle: str) -> Dict[str, Any]:
     return await fleet_scheduler.trigger_run_now(agent_handle)
 
 
+# --- Rule Conflict & Overlap Agent Endpoints ---
+
+@app.post("/api/conflicts/audit/{rule_id}")
+async def audit_rule_conflicts(rule_id: str, limit: int = Query(6)) -> Dict[str, Any]:
+    """Audits detection rule for semantic overlaps, contradictions, redundancies, and computes COS."""
+    agent = fleet.get("@rule-conflict-agent")
+    if hasattr(agent, "audit_rule_conflicts"):
+        res = agent.audit_rule_conflicts(rule_id=rule_id, limit=limit)
+        chat_store.add_message(
+            stream="detections",
+            topic="rule-conflicts",
+            sender_handle="@rule-conflict-agent",
+            sender_display_name="Rule Conflict & Overlap Agent",
+            content=f"Completed conflict audit for **{res.get('rule_name', rule_id)}** (Highest COS: {round(res.get('highest_cos', 0))}/100 - {res.get('severity_tier', 'LOW')}).",
+            widget=res.get("widget"),
+        )
+        return res
+    return {"status": "ERROR", "message": "@rule-conflict-agent not active"}
+
+
+@app.post("/api/conflicts/batch")
+async def batch_audit_rule_conflicts(
+    limit: int = Query(50),
+    batch_size: int = Query(10),
+    min_cos: float = Query(45.0)
+) -> Dict[str, Any]:
+    """Executes tenant-wide detection rule conflict audit across deployed active rules."""
+    agent = fleet.get("@rule-conflict-agent")
+    if hasattr(agent, "batch_audit_rule_conflicts"):
+        res = agent.batch_audit_rule_conflicts(limit=limit, batch_size=batch_size, min_cos=min_cos)
+        chat_store.add_message(
+            stream="detections",
+            topic="rule-conflicts",
+            sender_handle="@rule-conflict-agent",
+            sender_display_name="Rule Conflict & Overlap Agent",
+            content=f"Batch conflict audit finished: scanned {res.get('total_rules_scanned', 0)} rules, evaluated {res.get('total_pairs_evaluated', 0)} candidate pairs.",
+            widget=res.get("widget"),
+        )
+        return res
+    return {"status": "ERROR", "message": "@rule-conflict-agent not active"}
+
+
+@app.get("/api/conflicts/similar/{rule_id}")
+async def find_similar_rules(rule_id: str, limit: int = Query(6)) -> Dict[str, Any]:
+    """Finds candidate overlapping or conflicting rules via vector similarity search."""
+    agent = fleet.get("@rule-conflict-agent")
+    if hasattr(agent, "find_similar_rules"):
+        return agent.find_similar_rules(rule_id=rule_id, limit=limit)
+    return {"status": "ERROR", "message": "@rule-conflict-agent not active"}
+
+
+@app.post("/api/conflicts/sync-embeddings")
+async def sync_rule_embeddings(batch_size: int = Query(50), force: bool = Query(False)) -> Dict[str, Any]:
+    """Batch computes and synchronizes vector embeddings for all active tenant rules."""
+    agent = fleet.get("@rule-conflict-agent")
+    if hasattr(agent, "sync_rule_embeddings"):
+        return agent.sync_rule_embeddings(batch_size=batch_size, force=force)
+    return {"status": "ERROR", "message": "@rule-conflict-agent not active"}
+
+
+@app.get("/api/conflicts/list")
+async def list_stored_rule_conflicts(min_cos: float = Query(0.0), limit: int = Query(50)) -> Dict[str, Any]:
+    """Lists historical rule conflict audit records from Evidence Fabric."""
+    agent = fleet.get("@rule-conflict-agent")
+    if hasattr(agent, "list_stored_rule_conflicts"):
+        return agent.list_stored_rule_conflicts(min_cos=min_cos, limit=limit)
+    return {"status": "ERROR", "message": "@rule-conflict-agent not active"}
+
+
+# --- Log Cost & FinOps Optimization Endpoints ---
+
+@app.post("/api/log_cost/analyze")
+async def analyze_log_costs(
+    days: int = Query(7),
+    tier: str = Query("ENTERPRISE"),
+    bloat_threshold: int = Query(2048),
+) -> Dict[str, Any]:
+    """Executes live Chronicle ingestion telemetry analysis and computes FinOps optimization recommendations."""
+    try:
+        report = engine.analyze_log_costs(
+            lookback_days=days,
+            pricing_tier=tier,
+            bloat_threshold_bytes=bloat_threshold,
+        )
+        return {
+            "status": "SUCCESS",
+            "report": report.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing log costs: {e}", exc_info=True)
+        return {
+            "status": "ERROR",
+            "message": str(e),
+        }
+
+
+@app.get("/api/log_cost/latest")
+async def get_latest_log_costs() -> Dict[str, Any]:
+    """Retrieves the latest persisted Log Cost Analysis Report from Evidence Fabric."""
+    try:
+        latest = engine.get_latest_log_costs(fallback_if_empty=True)
+        if not latest:
+            return {
+                "status": "ERROR",
+                "message": "No log cost analysis report found.",
+            }
+        return {
+            "status": "SUCCESS",
+            "report": latest,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching latest log costs: {e}", exc_info=True)
+        return {
+            "status": "ERROR",
+            "message": str(e),
+        }
+
+
+@app.get("/api/ingestion/labels-and-namespaces")
+async def get_ingestion_labels_and_namespaces(lookback_days: int = 7) -> Dict[str, Any]:
+    """Retrieves real-time Ingestion Labels, UDM Namespaces, and Data RBAC hygiene audit."""
+    try:
+        report = engine.analyze_labels_and_namespaces(lookback_days=lookback_days)
+        return {
+            "status": "SUCCESS",
+            "report": report.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing labels and namespaces: {e}", exc_info=True)
+        return {
+            "status": "ERROR",
+            "message": str(e),
+        }
+
+
+# --- SOC Institutional Knowledge & Shift Briefing Endpoints ---
+
+@app.get("/api/briefings/shift")
+async def get_shift_briefing(hours: int = Query(8, ge=1, le=72)) -> Dict[str, Any]:
+    """Retrieves or computes a deterministic operational shift briefing."""
+    try:
+        briefing = engine.generate_shift_briefing(shift_hours=hours)
+        return {
+            "status": "SUCCESS",
+            "briefing": briefing.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error generating shift briefing: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/briefings/posture")
+async def get_posture_snapshot() -> Dict[str, Any]:
+    """Retrieves the current SOC institutional knowledge and posture snapshot."""
+    try:
+        snapshot = engine.generate_posture_snapshot()
+        return {
+            "status": "SUCCESS",
+            "snapshot": snapshot.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error generating posture snapshot: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/knowledge/entity/{subject_type}/{subject_id}")
+async def get_entity_dossier(subject_type: str, subject_id: str) -> Dict[str, Any]:
+    """Retrieves synthesized cross-agent operational dossier for an entity."""
+    try:
+        dossier = engine.get_composite_entity_dossier(subject_type, subject_id)
+        return {
+            "status": "SUCCESS",
+            "dossier": dossier,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching entity dossier: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.post("/api/briefings/trigger")
+async def trigger_briefing(hours: int = Query(8, ge=1, le=72)) -> Dict[str, Any]:
+    """Manually triggers an immediate shift briefing broadcast to the briefings stream."""
+    try:
+        briefing = engine.generate_shift_briefing(shift_hours=hours)
+        chat_store.add_message(
+            stream="briefings",
+            topic="shift-briefings",
+            sender_handle="@soc-briefing-agent",
+            sender_type="agent",
+            content=briefing.summary_narrative,
+            widget=None,
+        )
+        return {
+            "status": "SUCCESS",
+            "message": "Shift briefing triggered and broadcast successfully.",
+            "briefing": briefing.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error triggering briefing: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/knowledge/observations")
+async def list_observations_endpoint(limit: int = Query(50, ge=1, le=200)) -> Dict[str, Any]:
+    """Lists recent operational assertions recorded in the SOC Knowledge Store."""
+    try:
+        store = get_knowledge_store(root_dir=REPO_ROOT)
+        obs_list = store.list_observations(limit=limit)
+        return {
+            "status": "SUCCESS",
+            "observations": [o.to_dict() for o in obs_list],
+            "total": len(obs_list),
+        }
+    except Exception as e:
+        logger.error(f"Error listing observations: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
 # --- Static Files & Root View ---
+
 
 @app.get("/")
 async def root_view() -> FileResponse:
@@ -1198,7 +1792,22 @@ async def root_view() -> FileResponse:
     return FileResponse(index_file)
 
 
+@app.get("/knowledge/viz.html")
+async def knowledge_viz_view() -> FileResponse:
+    """Serves the interactive OKF Knowledge Graph Cytoscape visualizer."""
+    viz_file = REPO_ROOT / "knowledge" / "viz.html"
+    if not viz_file.is_file():
+        raise HTTPException(status_code=404, detail="Knowledge graph not generated yet.")
+    return FileResponse(viz_file)
+
+
 # Mount static assets
 if STATIC_DIR.is_dir():
     from fastapi.staticfiles import StaticFiles
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("clients.web.server:app", host="127.0.0.1", port=8080, log_level="info")
+

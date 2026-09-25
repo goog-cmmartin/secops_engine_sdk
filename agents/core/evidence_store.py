@@ -17,9 +17,17 @@ import os
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _higher_priority(p1: str, p2: str) -> str:
+    """Returns the higher priority level between two priority strings."""
+    ranks = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+    r1 = ranks.get(str(p1).upper(), 2)
+    r2 = ranks.get(str(p2).upper(), 2)
+    return p1.upper() if r1 >= r2 else p2.upper()
 
 
 def normalize_doc_id(resource_id: str) -> str:
@@ -47,7 +55,7 @@ def sanitize_for_firestore(payload: Any, max_string_len: int = 10000) -> Any:
         sanitized = {}
         for k, v in payload.items():
             # Drop bloated raw cache keys if present
-            if k in ("_raw", "_cache", "overview_html", "overviewTemplates"):
+            if k in ("_raw", "_cache", "overview_html", "overviewTemplates", "debugData"):
                 continue
             sanitized[k] = sanitize_for_firestore(v, max_string_len)
         return sanitized
@@ -60,6 +68,35 @@ def sanitize_for_firestore(payload: Any, max_string_len: int = 10000) -> Any:
     elif isinstance(payload, datetime):
         return payload.isoformat()
     return payload
+
+
+def sanitize_playbook_for_firestore(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitizes SOAR playbook data to strictly adhere to Firestore's 1MB limit.
+
+    Strips bloated UI template HTML and designer debug data, and truncates
+    string parameters longer than 10,000 characters down to 5,000 characters.
+    """
+    if not isinstance(data, dict):
+        return data
+    clean = dict(data)
+    clean.pop("overviewTemplates", None)
+    clean.pop("debugData", None)
+    clean.pop("overview_html", None)
+    clean.pop("_raw", None)
+    for step in clean.get("steps", []):
+        if isinstance(step, dict):
+            params = step.get("parameters")
+            if isinstance(params, list):
+                for p in params:
+                    if isinstance(p, dict):
+                        val = p.get("value")
+                        if isinstance(val, str) and len(val) > 10000:
+                            p["value"] = val[:5000] + "... [TRUNCATED FOR FIRESTORE]"
+            elif isinstance(params, dict):
+                for k, val in params.items():
+                    if isinstance(val, str) and len(val) > 10000:
+                        params[k] = val[:5000] + "... [TRUNCATED FOR FIRESTORE]"
+    return clean
 
 
 class EvidenceFabricStore(ABC):
@@ -150,6 +187,204 @@ class EvidenceFabricStore(ABC):
     ) -> List[Dict[str, Any]]:
         """Lists pending or active remediation tasks."""
         pass
+
+    def upsert_todo(self, todo_id: str, task_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+        """Upserts an actionable task bead.
+
+        If a task with todo_id already exists:
+        - Increments sighting_count by 1
+        - Updates last_seen_at and updated_at
+        - Refreshes rationale, action_prompt, and title
+        - Elevates priority if incoming task has higher severity
+        - Appends to sighting_history (capped at 10)
+        - Calls save_todo
+        - Returns (updated_task, False)
+
+        If task was RESOLVED and anomaly recurs:
+        - Reopens the task with status REOPENED
+        - Increments sighting_count
+        - Appends regression note to history
+        - Returns (updated_task, False)
+
+        If task does not exist:
+        - Sets sighting_count = 1
+        - Sets created_at and last_seen_at
+        - Sets status = PENDING
+        - Calls save_todo
+        - Returns (task_dict, True)
+        """
+        clean_id = normalize_doc_id(todo_id)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        existing = self.get_todo(clean_id)
+
+        if existing:
+            merged = dict(existing)
+            merged["todo_id"] = clean_id
+            curr_status = existing.get("status", "PENDING")
+
+            prev_sightings = int(existing.get("sighting_count") or 1)
+            merged["sighting_count"] = prev_sightings + 1
+            merged["last_seen_at"] = now_iso
+            merged["updated_at"] = now_iso
+
+            if "rationale" in task_dict:
+                merged["rationale"] = task_dict["rationale"]
+            if "title" in task_dict:
+                merged["title"] = task_dict["title"]
+            if "action_prompt" in task_dict:
+                merged["action_prompt"] = task_dict["action_prompt"]
+            if "stream" in task_dict:
+                merged["stream"] = task_dict["stream"]
+            if "topic" in task_dict:
+                merged["topic"] = task_dict["topic"]
+
+            if "priority" in task_dict:
+                merged["priority"] = _higher_priority(existing.get("priority", "MEDIUM"), task_dict["priority"])
+
+            if curr_status == "RESOLVED":
+                merged["status"] = "REOPENED"
+                history_entry = {
+                    "action": "reopened_regression",
+                    "timestamp": now_iso,
+                    "rationale": task_dict.get("rationale", "Anomaly recurred after resolution"),
+                }
+            else:
+                merged["status"] = curr_status
+                history_entry = {
+                    "action": "corroborated_sighting",
+                    "timestamp": now_iso,
+                    "sighting": merged["sighting_count"],
+                    "priority": merged.get("priority"),
+                }
+
+            history = list(existing.get("sighting_history") or [])
+            history.append(history_entry)
+            merged["sighting_history"] = history[-10:]
+
+            self.save_todo(clean_id, merged)
+            return (merged, False)
+
+        new_task = dict(task_dict)
+        new_task["todo_id"] = clean_id
+        new_task.setdefault("sighting_count", 1)
+        new_task.setdefault("status", "PENDING")
+        new_task.setdefault("created_at", now_iso)
+        new_task["last_seen_at"] = now_iso
+        new_task["updated_at"] = now_iso
+        new_task["sighting_history"] = [
+            {
+                "action": "initial_sighting",
+                "timestamp": now_iso,
+                "priority": new_task.get("priority", "MEDIUM"),
+            }
+        ]
+        self.save_todo(clean_id, new_task)
+        return (new_task, True)
+
+    def resolve_todo(self, todo_id: str, reason: str = "") -> Optional[Dict[str, Any]]:
+        """Transitions an active task to RESOLVED."""
+        clean_id = normalize_doc_id(todo_id)
+        task = self.get_todo(clean_id)
+        if not task:
+            return None
+        if task.get("status") in ("PENDING", "IN_PROGRESS", "REOPENED"):
+            task["status"] = "RESOLVED"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            task["resolved_at"] = now_iso
+            task["updated_at"] = now_iso
+            if reason:
+                task["resolution_reason"] = reason
+            history = list(task.get("sighting_history") or [])
+            history.append({
+                "action": "resolved",
+                "timestamp": now_iso,
+                "reason": reason,
+            })
+            task["sighting_history"] = history[-10:]
+            self.save_todo(clean_id, task)
+        return task
+
+    def deduplicate_todos(self) -> Dict[str, int]:
+        """Consolidates duplicate open tasks by resource and action type.
+
+        Merges sighting counts, retains earliest created_at and latest last_seen_at,
+        and deletes redundant timestamped documents.
+        """
+        all_tasks = self.list_todos(status=None, limit=1000)
+        groups: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+
+        for task in all_tasks:
+            agent = task.get("target_agent", "")
+            resource = task.get("target_resource_id", "")
+            action = task.get("action_type", "")
+            if not resource:
+                continue
+            key = (agent, resource, action)
+            groups.setdefault(key, []).append(task)
+
+        scanned = len(all_tasks)
+        consolidated = 0
+        deleted = 0
+
+        for key, tasks in groups.items():
+            has_timestamp_id = any(bool(re.search(r"_\d{10}$", t.get("todo_id", ""))) for t in tasks)
+            if len(tasks) > 1 or has_timestamp_id:
+                canonical_task_candidate = next((t for t in tasks if "_active" in t.get("todo_id", "")), None)
+                if canonical_task_candidate:
+                    canonical_id = canonical_task_candidate["todo_id"]
+                else:
+                    first_id = tasks[0].get("todo_id", "todo_item")
+                    clean_base = re.sub(r"_\d{10}$", "", first_id)
+                    canonical_id = f"{clean_base}_active"
+
+                total_sightings = sum(int(t.get("sighting_count") or 1) for t in tasks)
+                created_ats = [t.get("created_at") for t in tasks if t.get("created_at")]
+                earliest_created = min(created_ats) if created_ats else datetime.now(timezone.utc).isoformat()
+
+                updated_ats = [
+                    t.get("last_seen_at") or t.get("updated_at") or t.get("created_at")
+                    for t in tasks
+                    if (t.get("last_seen_at") or t.get("updated_at") or t.get("created_at"))
+                ]
+                latest_seen = max(updated_ats) if updated_ats else datetime.now(timezone.utc).isoformat()
+
+                best_prio = "LOW"
+                for t in tasks:
+                    best_prio = _higher_priority(best_prio, t.get("priority", "MEDIUM"))
+
+                statuses = [t.get("status", "PENDING") for t in tasks]
+                if "IN_PROGRESS" in statuses:
+                    best_status = "IN_PROGRESS"
+                elif "PENDING" in statuses or "REOPENED" in statuses:
+                    best_status = "PENDING"
+                else:
+                    best_status = "RESOLVED"
+
+                most_recent = tasks[-1]
+                canonical_task = dict(most_recent)
+                canonical_task["todo_id"] = canonical_id
+                canonical_task["sighting_count"] = total_sightings
+                canonical_task["created_at"] = earliest_created
+                canonical_task["last_seen_at"] = latest_seen
+                canonical_task["updated_at"] = latest_seen
+                canonical_task["priority"] = best_prio
+                canonical_task["status"] = best_status
+
+                self.save_todo(canonical_id, canonical_task)
+
+                for t in tasks:
+                    tid = t.get("todo_id")
+                    if tid and tid != canonical_id:
+                        if self.delete_todo(tid):
+                            deleted += 1
+
+                consolidated += 1
+
+        return {
+            "scanned": scanned,
+            "consolidated": consolidated,
+            "deleted": deleted,
+        }
 
     @staticmethod
     def _enrich_todo(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,6 +527,8 @@ class EvidenceFabricStore(ABC):
         status: str,
         resolved_by: Optional[str] = None,
         proposal_id: Optional[str] = None,
+        resolution: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         """Updates the status of a remediation task."""
         pass
@@ -354,6 +591,86 @@ class EvidenceFabricStore(ABC):
     @abstractmethod
     def generate_rule_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generates 768-dimensional embeddings for rules using text-embedding-004 with fallback."""
+        pass
+
+    @abstractmethod
+    def save_playbook_analysis(self, workflow_identifier: str, analysis_dict: Dict[str, Any]) -> None:
+        """Saves a SOAR playbook analysis and health audit to the Evidence Fabric."""
+        pass
+
+    @abstractmethod
+    def get_playbook_analysis(self, workflow_identifier: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a stored SOAR playbook analysis by workflow identifier."""
+        pass
+
+    @abstractmethod
+    def list_playbook_analyses(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Lists stored SOAR playbook analyses."""
+        pass
+
+    @abstractmethod
+    def save_timestamp_integrity_report(self, report_dict: Any) -> str:
+        """Saves a timestamp integrity report, updating latest and appending historical snapshot."""
+        pass
+
+    @abstractmethod
+    def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest timestamp integrity report."""
+        pass
+
+    @abstractmethod
+    def list_timestamp_integrity_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Lists historical timestamp integrity snapshots."""
+        pass
+
+    @abstractmethod
+    def save_rule_embeddings(self, rule_id: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Saves a 768-d vector embedding and metadata for a rule."""
+        pass
+
+    @abstractmethod
+    def batch_save_rule_embeddings(self, rules_with_embeddings: List[Dict[str, Any]]) -> None:
+        """Batch saves vector embeddings and metadata for multiple rules."""
+        pass
+
+    @abstractmethod
+    def find_similar_rules(self, target_rule_id: str, embedding: Optional[List[float]] = None, limit: int = 6) -> List[Dict[str, Any]]:
+        """Finds semantically similar rules using vector search with self-healing fallback."""
+        pass
+
+    @abstractmethod
+    def save_rule_conflict(self, rule_id: str, conflict_data: Dict[str, Any]) -> None:
+        """Saves a rule conflict audit result to the Evidence Fabric."""
+        pass
+
+    @abstractmethod
+    def get_rule_conflict(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a stored rule conflict audit result by rule ID."""
+        pass
+
+    @abstractmethod
+    def list_rule_conflicts(self, min_cos: float = 0.0, limit: int = 50) -> List[Dict[str, Any]]:
+        """Lists stored rule conflict audit results ranked by highest COS score descending."""
+        pass
+
+    @abstractmethod
+    def save_rule_audit(self, audit_dict: Dict[str, Any]) -> str:
+        """Saves a unified detection rule repository audit snapshot to Evidence Fabric."""
+        pass
+
+    @abstractmethod
+    def get_latest_rule_audit(self) -> Optional[Dict[str, Any]]:
+        """Retrieves the most recent detection rule repository audit snapshot."""
+        pass
+
+    @abstractmethod
+    def save_log_cost_analysis(self, report_dict: Dict[str, Any]) -> str:
+        """Saves a tenant log cost and FinOps optimization snapshot to Evidence Fabric."""
+        pass
+
+    @abstractmethod
+    def get_latest_log_cost_analysis(self) -> Optional[Dict[str, Any]]:
+        """Retrieves the most recent log cost and FinOps analysis report."""
         pass
 
 
@@ -471,7 +788,10 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
         agent = target_agent or assigned_to
         query = self.db.collection("secops_todos")
         if status:
-            query = query.where(filter=FieldFilter("status", "==", status))
+            if status == "PENDING":
+                query = query.where(filter=FieldFilter("status", "in", ["PENDING", "REOPENED"]))
+            else:
+                query = query.where(filter=FieldFilter("status", "==", status))
         if agent:
             query = query.where(filter=FieldFilter("target_agent", "==", agent))
 
@@ -497,6 +817,8 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
         status: str,
         resolved_by: Optional[str] = None,
         proposal_id: Optional[str] = None,
+        resolution: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         from google.cloud import firestore
 
@@ -509,8 +831,13 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
             updates["resolved_by"] = resolved_by
         if proposal_id:
             updates["proposal_id"] = proposal_id
+        if resolution:
+            updates["resolution"] = resolution
+        for k, v in kwargs.items():
+            if v is not None:
+                updates[k] = v
 
-        self.db.collection("secops_todos").document(clean_id).update(updates)
+        self.db.collection("secops_todos").document(clean_id).set(updates, merge=True)
 
     def get_agent_config(self, agent_handle: str) -> Dict[str, Any]:
         clean_handle = normalize_doc_id(agent_handle)
@@ -658,6 +985,341 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
 
         return [_deterministic_fallback_vector(t) for t in texts]
 
+    def save_playbook_analysis(self, workflow_identifier: str, analysis_dict: Dict[str, Any]) -> None:
+        from google.cloud import firestore
+
+        clean_id = normalize_doc_id(workflow_identifier)
+        if not clean_id:
+            return
+
+        payload = sanitize_playbook_for_firestore(analysis_dict)
+        payload["workflow_identifier"] = clean_id
+        payload["updated_at"] = firestore.SERVER_TIMESTAMP
+
+        self.db.collection("soar_playbooks").document(clean_id).set(
+            sanitize_for_firestore(payload),
+            merge=True,
+        )
+
+    def get_playbook_analysis(self, workflow_identifier: str) -> Optional[Dict[str, Any]]:
+        clean_id = normalize_doc_id(workflow_identifier)
+        if not clean_id:
+            return None
+        doc = self.db.collection("soar_playbooks").document(clean_id).get()
+        return doc.to_dict() if doc.exists else None
+
+    def list_playbook_analyses(self, limit: int = 100) -> List[Dict[str, Any]]:
+        from google.cloud import firestore
+
+        docs = self.db.collection("soar_playbooks").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+        results = []
+        for d in docs:
+            data = d.to_dict()
+            if "updated_at" in data and hasattr(data["updated_at"], "isoformat"):
+                data["updated_at"] = data["updated_at"].isoformat()
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            results.append(data)
+        return results
+
+    def save_timestamp_integrity_report(self, report_dict: Any) -> str:
+        from google.cloud import firestore
+
+        if hasattr(report_dict, "to_dict"):
+            report_dict = report_dict.to_dict()
+        sanitized = sanitize_for_firestore(report_dict)
+        latest_doc = dict(sanitized)
+        latest_doc["updated_at"] = firestore.SERVER_TIMESTAMP
+
+        col = self.db.collection("timestamp_integrity")
+        # 1. Overwrite latest
+        col.document("latest").set(latest_doc, merge=True)
+        # 2. Append immutable historical snapshot
+        history_doc = dict(sanitized)
+        history_doc["created_at"] = firestore.SERVER_TIMESTAMP
+        _, doc_ref = col.add(history_doc)
+        doc_ref.update({"id": doc_ref.id, "snapshot_id": doc_ref.id})
+        return doc_ref.id
+
+    def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
+        doc = self.db.collection("timestamp_integrity").document("latest").get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict()
+        if "updated_at" in data and hasattr(data["updated_at"], "isoformat"):
+            data["updated_at"] = data["updated_at"].isoformat()
+        if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+            data["created_at"] = data["created_at"].isoformat()
+        return data
+
+    def list_timestamp_integrity_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        from google.cloud import firestore
+
+        docs = self.db.collection("timestamp_integrity").order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+        results = []
+        for d in docs:
+            if d.id == "latest":
+                continue
+            data = d.to_dict()
+            data["id"] = d.id
+            if "updated_at" in data and hasattr(data["updated_at"], "isoformat"):
+                data["updated_at"] = data["updated_at"].isoformat()
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            results.append(data)
+        return results
+
+    def save_rule_embeddings(self, rule_id: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None) -> None:
+        from google.cloud import firestore
+        from google.cloud.firestore_v1.vector import Vector
+
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return
+        payload = dict(metadata or {})
+        payload["rule_id"] = clean_id
+        if embedding:
+            payload["embedding"] = Vector(embedding)
+        payload["updated_at"] = firestore.SERVER_TIMESTAMP
+        self.db.collection("secops_rules").document(clean_id).set(
+            sanitize_for_firestore(payload),
+            merge=True,
+        )
+
+    def batch_save_rule_embeddings(self, rules_with_embeddings: List[Dict[str, Any]]) -> None:
+        from google.cloud import firestore
+        from google.cloud.firestore_v1.vector import Vector
+
+        batch_chunk_size = 400
+        for i in range(0, len(rules_with_embeddings), batch_chunk_size):
+            chunk = rules_with_embeddings[i:i + batch_chunk_size]
+            batch = self.db.batch()
+            for item in chunk:
+                rid = normalize_doc_id(item.get("rule_id", ""))
+                if not rid:
+                    continue
+                payload = dict(item)
+                payload["rule_id"] = rid
+                emb = payload.get("embedding")
+                if emb and isinstance(emb, (list, tuple)):
+                    payload["embedding"] = Vector(emb)
+                payload["updated_at"] = firestore.SERVER_TIMESTAMP
+                doc_ref = self.db.collection("secops_rules").document(rid)
+                batch.set(doc_ref, sanitize_for_firestore(payload), merge=True)
+            batch.commit()
+
+    def find_similar_rules(self, target_rule_id: str, embedding: Optional[List[float]] = None, limit: int = 6) -> List[Dict[str, Any]]:
+        clean_target = normalize_doc_id(target_rule_id)
+        query_vec = embedding
+        if query_vec is None:
+            target_state = self.get_rule_state(clean_target)
+            if target_state and target_state.get("embedding"):
+                emb_val = target_state["embedding"]
+                if hasattr(emb_val, "to_map_value"):
+                    query_vec = list(emb_val)
+                elif isinstance(emb_val, (list, tuple)):
+                    query_vec = list(emb_val)
+
+        if not query_vec:
+            logger.info("No embedding vector provided or stored for target rule %s", target_rule_id)
+            return []
+
+        rules_ref = self.db.collection("secops_rules")
+        similar = []
+
+        try:
+            from google.cloud.firestore_v1.vector import Vector
+            from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+
+            vector_query = rules_ref.find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_vec),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=limit + 10,
+            )
+            docs = vector_query.get()
+            for doc in docs:
+                data = doc.to_dict()
+                cand_id = data.get("rule_id") or doc.id
+                if _is_same_rule_identity(clean_target, cand_id):
+                    continue
+                cand_emb = data.get("embedding")
+                if hasattr(cand_emb, "to_map_value"):
+                    cand_vec = list(cand_emb)
+                elif isinstance(cand_emb, (list, tuple)):
+                    cand_vec = list(cand_emb)
+                else:
+                    cand_vec = None
+
+                if cand_vec:
+                    sim_score = _compute_cosine_similarity(query_vec, cand_vec)
+                else:
+                    sim_score = 0.5
+
+                data["similarity_score"] = round(max(0.0, min(1.0, sim_score)), 4)
+                data["rule_id"] = cand_id
+                data["embedding"] = cand_vec
+                similar.append(data)
+                if len(similar) >= limit:
+                    break
+            if similar:
+                return similar
+        except Exception as e:
+            logger.info("Firestore vector search query unavailable (%s); falling back to in-memory cosine similarity.", e)
+
+        docs = rules_ref.limit(500).stream()
+        scored = []
+        for doc in docs:
+            data = doc.to_dict()
+            cand_id = data.get("rule_id") or doc.id
+            if _is_same_rule_identity(clean_target, cand_id):
+                continue
+            cand_emb = data.get("embedding")
+            if not cand_emb:
+                continue
+            if hasattr(cand_emb, "to_map_value"):
+                cand_vec = list(cand_emb)
+            elif isinstance(cand_emb, (list, tuple)):
+                cand_vec = list(cand_emb)
+            else:
+                continue
+            sim = _compute_cosine_similarity(query_vec, cand_vec)
+            data["similarity_score"] = round(max(0.0, min(1.0, sim)), 4)
+            data["rule_id"] = cand_id
+            data["embedding"] = cand_vec
+            scored.append(data)
+        scored.sort(key=lambda x: x.get("similarity_score", 0.0), reverse=True)
+        return scored[:limit]
+
+    def save_rule_conflict(self, rule_id: str, conflict_data: Dict[str, Any]) -> None:
+        from google.cloud import firestore
+
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return
+        payload = dict(conflict_data)
+        payload["rule_id"] = clean_id
+        payload["updated_at"] = firestore.SERVER_TIMESTAMP
+        self.db.collection("rule_conflicts").document(clean_id).set(
+            sanitize_for_firestore(payload),
+            merge=True,
+        )
+
+    def get_rule_conflict(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return None
+        doc = self.db.collection("rule_conflicts").document(clean_id).get()
+        return doc.to_dict() if doc.exists else None
+
+    def list_rule_conflicts(self, min_cos: float = 0.0, limit: int = 50) -> List[Dict[str, Any]]:
+        try:
+            from google.cloud import firestore
+            from google.cloud.firestore_v1.base_query import FieldFilter
+
+            query = self.db.collection("rule_conflicts")
+            if min_cos > 0.0:
+                query = query.where(filter=FieldFilter("highest_cos", ">=", min_cos))
+            query = query.order_by("highest_cos", direction=firestore.Query.DESCENDING).limit(limit)
+            return [doc.to_dict() for doc in query.stream()]
+        except Exception as e:
+            logger.warning("Firestore index error for rule_conflicts, falling back to in-memory filter/sort: %s", e)
+            docs = self.db.collection("rule_conflicts").limit(limit * 2).stream()
+            results = [d.to_dict() for d in docs]
+            filtered = [r for r in results if r.get("highest_cos", 0.0) >= min_cos]
+            filtered.sort(key=lambda x: x.get("highest_cos", 0.0), reverse=True)
+            return filtered[:limit]
+
+    def save_rule_audit(self, audit_dict: Dict[str, Any]) -> str:
+        audit_id = f"rule_audit_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        doc_data = dict(audit_dict)
+        doc_data["audit_id"] = audit_id
+        doc_data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        sanitized = sanitize_for_firestore(doc_data)
+        self.db.collection("rule_audits").document(audit_id).set(sanitized)
+        return audit_id
+
+    def get_latest_rule_audit(self) -> Optional[Dict[str, Any]]:
+        try:
+            from google.cloud import firestore
+            docs = (
+                self.db.collection("rule_audits")
+                .order_by("saved_at", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .stream()
+            )
+            for d in docs:
+                return d.to_dict()
+        except Exception as e:
+            logger.warning("Could not query latest rule audit from Firestore: %s", e)
+        return None
+
+    def save_log_cost_analysis(self, report_dict: Dict[str, Any]) -> str:
+        cost_id = f"log_cost_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        doc_data = dict(report_dict)
+        doc_data["cost_id"] = cost_id
+        doc_data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        sanitized = sanitize_for_firestore(doc_data)
+        # Save historical snapshot
+        self.db.collection("log_costs").document(cost_id).set(sanitized)
+        # Update point-in-time latest document
+        try:
+            self.db.collection("log_costs").document("latest").set(sanitized)
+        except Exception as e:
+            logger.warning("Could not update log_cost/latest in Firestore: %s", e)
+        return cost_id
+
+    def get_latest_log_cost_analysis(self) -> Optional[Dict[str, Any]]:
+        try:
+            doc = self.db.collection("log_costs").document("latest").get()
+            if doc.exists:
+                return doc.to_dict()
+            # Fallback to order by saved_at desc
+            from google.cloud import firestore
+            docs = (
+                self.db.collection("log_costs")
+                .order_by("saved_at", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .stream()
+            )
+            for d in docs:
+                if d.id != "latest":
+                    return d.to_dict()
+        except Exception as e:
+            logger.warning("Could not query latest log cost analysis from Firestore: %s", e)
+        return None
+
+
+def _compute_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """Computes cosine similarity between two numeric vectors in pure Python."""
+    import math
+
+    if not vec1 or not vec2 or len(vec1) != len(vec2):
+        return 0.0
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    sim = dot_product / (norm_a * norm_b)
+    return max(-1.0, min(1.0, float(sim)))
+
+
+def _is_same_rule_identity(rule_id_a: str, rule_id_b: str) -> bool:
+    """Checks whether two rule identifiers represent the same rule identity, ignoring prefix variations.
+
+    E.g. 'ru_6cb096c8...' vs 'ur_6cb096c8...' or 'projects/.../rules/ru_...' vs 'ru_...'
+    """
+    clean_a = normalize_doc_id(rule_id_a).lower()
+    clean_b = normalize_doc_id(rule_id_b).lower()
+    if not clean_a or not clean_b:
+        return False
+    if clean_a == clean_b:
+        return True
+    core_a = re.sub(r"^(ru_|ur_|rule_)", "", clean_a)
+    core_b = re.sub(r"^(ru_|ur_|rule_)", "", clean_b)
+    return core_a == core_b
+
 
 def _deterministic_fallback_vector(text: str, dim: int = 768) -> List[float]:
     """Generates a deterministic normalized 768-d float vector from input string.
@@ -694,7 +1356,7 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
         else:
             self.base_dir = os.path.join(os.getcwd(), ".state", "evidence_fabric")
         os.makedirs(self.base_dir, exist_ok=True)
-        for col in ("evidence", "secops_rules", "secops_todos", "system_configs", "iam_audits", "udm_schema", "tenant_baselines"):
+        for col in ("evidence", "secops_rules", "secops_todos", "system_configs", "iam_audits", "udm_schema", "tenant_baselines", "soar_playbooks", "timestamp_integrity", "rule_conflicts"):
             os.makedirs(os.path.join(self.base_dir, col), exist_ok=True)
         logger.info("Initialized LocalFileEvidenceStore at: %s", self.base_dir)
 
@@ -859,8 +1521,11 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
                 continue
             with open(os.path.join(dir_path, fname), "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if status and data.get("status") != status:
-                    continue
+                if status:
+                    if status == "PENDING" and data.get("status") not in ("PENDING", "REOPENED"):
+                        continue
+                    elif status != "PENDING" and data.get("status") != status:
+                        continue
                 if agent and data.get("target_agent") != agent and data.get("assigned_to") != agent:
                     continue
                 results.append(self._enrich_todo(data))
@@ -961,6 +1626,8 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
         status: str,
         resolved_by: Optional[str] = None,
         proposal_id: Optional[str] = None,
+        resolution: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         clean_id = normalize_doc_id(todo_id)
         path = self._col_path("secops_todos", clean_id)
@@ -974,6 +1641,11 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
             data["resolved_by"] = resolved_by
         if proposal_id:
             data["proposal_id"] = proposal_id
+        if resolution:
+            data["resolution"] = resolution
+        for k, v in kwargs.items():
+            if v is not None:
+                data[k] = v
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -1089,6 +1761,260 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
 
     def generate_rule_embeddings(self, texts: List[str]) -> List[List[float]]:
         return [_deterministic_fallback_vector(t) for t in texts]
+
+    def save_playbook_analysis(self, workflow_identifier: str, analysis_dict: Dict[str, Any]) -> None:
+        clean_id = normalize_doc_id(workflow_identifier)
+        if not clean_id:
+            return
+        path = self._col_path("soar_playbooks", clean_id)
+        payload = sanitize_playbook_for_firestore(analysis_dict)
+        payload["workflow_identifier"] = clean_id
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(payload), f, indent=2, default=str)
+
+    def get_playbook_analysis(self, workflow_identifier: str) -> Optional[Dict[str, Any]]:
+        clean_id = normalize_doc_id(workflow_identifier)
+        if not clean_id:
+            return None
+        path = self._col_path("soar_playbooks", clean_id)
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_playbook_analyses(self, limit: int = 100) -> List[Dict[str, Any]]:
+        col_dir = os.path.join(self.base_dir, "soar_playbooks")
+        if not os.path.isdir(col_dir):
+            return []
+        analyses = []
+        for fname in os.listdir(col_dir):
+            if fname.endswith(".json"):
+                fpath = os.path.join(col_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        analyses.append(json.load(f))
+                except Exception:
+                    pass
+        analyses.sort(key=lambda x: str(x.get("updated_at", "") or x.get("created_at", "")), reverse=True)
+        return analyses[:limit]
+
+    def save_timestamp_integrity_report(self, report_dict: Any) -> str:
+        import uuid
+        if hasattr(report_dict, "to_dict"):
+            report_dict = report_dict.to_dict()
+        sanitized = sanitize_for_firestore(report_dict)
+        now_str = datetime.now(timezone.utc).isoformat()
+
+        # 1. Overwrite latest
+        latest_path = self._col_path("timestamp_integrity", "latest")
+        latest_doc = dict(sanitized)
+        latest_doc["updated_at"] = now_str
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(latest_doc, f, indent=2, default=str)
+
+        # 2. Append history
+        hist_id = f"snap_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        hist_path = self._col_path("timestamp_integrity", hist_id)
+        hist_doc = dict(sanitized)
+        hist_doc["id"] = hist_id
+        hist_doc["snapshot_id"] = hist_id
+        hist_doc["created_at"] = now_str
+        with open(hist_path, "w", encoding="utf-8") as f:
+            json.dump(hist_doc, f, indent=2, default=str)
+        return hist_id
+
+    def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
+        latest_path = self._col_path("timestamp_integrity", "latest")
+        if not os.path.exists(latest_path):
+            return None
+        with open(latest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_timestamp_integrity_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        col_dir = os.path.join(self.base_dir, "timestamp_integrity")
+        if not os.path.isdir(col_dir):
+            return []
+        records = []
+        for fname in os.listdir(col_dir):
+            if fname.endswith(".json") and fname != "latest.json":
+                fpath = os.path.join(col_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        records.append(json.load(f))
+                except Exception:
+                    pass
+        records.sort(key=lambda x: str(x.get("created_at", "") or x.get("timestamp", "")), reverse=True)
+        return records[:limit]
+
+    def save_rule_embeddings(self, rule_id: str, embedding: List[float], metadata: Optional[Dict[str, Any]] = None) -> None:
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return
+        path = self._col_path("secops_rules", clean_id)
+        payload = dict(metadata or {})
+        payload["rule_id"] = clean_id
+        payload["embedding"] = list(embedding) if embedding else []
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                existing.update(payload)
+                payload = existing
+            except Exception:
+                pass
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(payload), f, indent=2, default=str)
+
+    def batch_save_rule_embeddings(self, rules_with_embeddings: List[Dict[str, Any]]) -> None:
+        for item in rules_with_embeddings:
+            rid = item.get("rule_id", "")
+            emb = item.get("embedding", [])
+            self.save_rule_embeddings(rid, emb, item)
+
+    def find_similar_rules(self, target_rule_id: str, embedding: Optional[List[float]] = None, limit: int = 6) -> List[Dict[str, Any]]:
+        clean_target = normalize_doc_id(target_rule_id)
+        query_vec = embedding
+        if query_vec is None:
+            target_state = self.get_rule_state(clean_target)
+            if target_state and target_state.get("embedding"):
+                query_vec = list(target_state["embedding"])
+
+        if not query_vec:
+            logger.info("No embedding vector provided or stored for target rule %s", target_rule_id)
+            return []
+
+        col_dir = os.path.join(self.base_dir, "secops_rules")
+        if not os.path.isdir(col_dir):
+            return []
+
+        scored = []
+        for fname in os.listdir(col_dir):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(col_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            cand_id = data.get("rule_id") or fname[:-5]
+            if _is_same_rule_identity(clean_target, cand_id):
+                continue
+            cand_emb = data.get("embedding")
+            if not cand_emb or not isinstance(cand_emb, (list, tuple)):
+                continue
+
+            sim = _compute_cosine_similarity(query_vec, list(cand_emb))
+            data["similarity_score"] = round(max(0.0, min(1.0, sim)), 4)
+            data["rule_id"] = cand_id
+            scored.append(data)
+
+        scored.sort(key=lambda x: x.get("similarity_score", 0.0), reverse=True)
+        return scored[:limit]
+
+    def save_rule_conflict(self, rule_id: str, conflict_data: Dict[str, Any]) -> None:
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return
+        path = self._col_path("rule_conflicts", clean_id)
+        payload = dict(conflict_data)
+        payload["rule_id"] = clean_id
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(payload), f, indent=2, default=str)
+
+    def get_rule_conflict(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        clean_id = normalize_doc_id(rule_id)
+        if not clean_id:
+            return None
+        path = self._col_path("rule_conflicts", clean_id)
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_rule_conflicts(self, min_cos: float = 0.0, limit: int = 50) -> List[Dict[str, Any]]:
+        col_dir = os.path.join(self.base_dir, "rule_conflicts")
+        if not os.path.isdir(col_dir):
+            return []
+        results = []
+        for fname in os.listdir(col_dir):
+            if fname.endswith(".json"):
+                fpath = os.path.join(col_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        results.append(json.load(f))
+                except Exception:
+                    pass
+        filtered = [r for r in results if r.get("highest_cos", 0.0) >= min_cos]
+        filtered.sort(key=lambda x: x.get("highest_cos", 0.0), reverse=True)
+        return filtered[:limit]
+
+    def save_rule_audit(self, audit_dict: Dict[str, Any]) -> str:
+        audit_id = f"rule_audit_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        doc_data = dict(audit_dict)
+        doc_data["audit_id"] = audit_id
+        doc_data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        path = self._col_path("rule_audits", audit_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(doc_data), f, indent=2, default=str)
+        return audit_id
+
+    def get_latest_rule_audit(self) -> Optional[Dict[str, Any]]:
+        col_dir = os.path.join(self.base_dir, "rule_audits")
+        if not os.path.isdir(col_dir):
+            return None
+        files = sorted(
+            [f for f in os.listdir(col_dir) if f.endswith(".json")],
+            reverse=True,
+        )
+        if not files:
+            return None
+        try:
+            with open(os.path.join(col_dir, files[0]), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def save_log_cost_analysis(self, report_dict: Dict[str, Any]) -> str:
+        cost_id = f"log_cost_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        doc_data = dict(report_dict)
+        doc_data["cost_id"] = cost_id
+        doc_data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        path = self._col_path("log_costs", cost_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(doc_data), f, indent=2, default=str)
+        # Update latest.json
+        latest_path = self._col_path("log_costs", "latest")
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_firestore(doc_data), f, indent=2, default=str)
+        return cost_id
+
+    def get_latest_log_cost_analysis(self) -> Optional[Dict[str, Any]]:
+        latest_path = self._col_path("log_costs", "latest")
+        if os.path.isfile(latest_path):
+            try:
+                with open(latest_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        col_dir = os.path.join(self.base_dir, "log_costs")
+        if not os.path.isdir(col_dir):
+            return None
+        files = sorted(
+            [f for f in os.listdir(col_dir) if f.endswith(".json") and f != "latest.json"],
+            reverse=True,
+        )
+        if not files:
+            return None
+        try:
+            with open(os.path.join(col_dir, files[0]), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
 
 
 def diff_iam_audits(prior: Optional[Dict[str, Any]], current: Dict[str, Any]) -> Dict[str, Any]:

@@ -23,7 +23,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 * **Client Interfaces & Integration:**
   * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking (including `secops detection baseline|cardinality|cases|test-refinement|tune`).
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
-  * **Autonomous ADK 2 Agent Fleet (`agents/`)**: 9 specialized AI agents governed by Gas Town human-in-the-loop (HITL) proposal reviews, evidence stores, and real-time streaming chat across `#general`, `#detections`, `#ingestion`, and `#identity`:
+  * **Autonomous ADK 2 Agent Fleet (`agents/`)**: 18 specialized AI agents governed by Gas Town human-in-the-loop (HITL) proposal reviews, evidence stores, and real-time streaming chat across `#general`, `#detections`, `#ingestion`, and `#identity`:
     * `@secops-dispatcher`: Orchestrator and task delegator.
     * `@rule-troubleshooter`: Detection latency, timeout, and execution auditor.
     * `@yaral-optimizer`: High-performance YARAL refactoring engineer.
@@ -33,7 +33,10 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
     * `@detection-tuning-agent`: False positive noise suppression and multi-factor exclusion synthesizer.
     * `@feed-agent` (`@ingestion-doctor`): Feed transport latency, silent push stop, and Health Hub pipeline auditor.
     * `@parser-doctor` (`@cbn-optimizer`): CBN syntax validator, version drift detector, and unparsed log diagnostic engineer.
-  * **Universal Capability Registry (`engine.facade`)**: 175 modular registered capabilities across 41 workflow modules for direct Python SDK and AI agent integration.
+    * `@log-cost-agent`: Multi-tier FinOps pricing analysis and telemetry volume bloat optimizer.
+    * `@raw-log-agent`: Unparsed log discovery, product source volume profiling, and raw payload investigator.
+    * `@namespace-label-agent`: Ingestion label consistency, UDM namespace hygiene, and Data RBAC alignment auditor.
+  * **Universal Capability Registry (`engine.facade`)**: 192 modular registered capabilities across 48 workflow modules for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---

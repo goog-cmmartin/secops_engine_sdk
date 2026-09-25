@@ -1,7 +1,21 @@
 ---
 id: persona.<persona_name>
-title: "<Persona Title>"
 type: persona
+title: "<Persona Title>"
+description: "<One-sentence summary of this operational agent persona>"
+tags:
+  - secops
+  - persona
+  - operations
+status: stable  # valid: draft, stable, deprecated
+generated: { by: "<actor>", at: "<iso8601>" }
+verified:
+  - { by: "human:<reviewer_id>", at: "<iso8601>" }
+stale_after: "<iso8601>"
+sources:
+  - id: official-role-doc
+    resource: "<url_or_path>"
+    title: "<Role Specification Title>"
 scope:
   - secops_siem
   - secops_soar

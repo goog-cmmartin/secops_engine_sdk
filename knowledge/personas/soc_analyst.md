@@ -1,13 +1,27 @@
 ---
 id: persona.soc_analyst
-title: "SOC Lead & Incident Response Operator"
+title: SOC Lead & Incident Response Operator
 type: persona
 scope:
-  - secops_soar
-  - secops_siem
+- secops_soar
+- secops_siem
 authority_level: L1_TRIAGE
 primary_tasks:
-  - task.soc_analyst.triage_high_priority_cases
+- task.soc_analyst.triage_high_priority_cases
+- task.soc_analyst.audit_soar_playbook_decay
+status: stable
+description: SOC Lead & Incident Response Operator (persona reference in Google SecOps).
+generated:
+  by: process:secops-sdk-v1
+  at: '2026-09-20T00:00:00Z'
+verified:
+- by: human:secops-architect
+  at: '2026-09-21T12:00:00Z'
+stale_after: '2027-01-01T00:00:00Z'
+sources:
+- id: google-secops-docs
+  resource: https://cloud.google.com/chronicle/docs
+  title: Google SecOps Official Documentation
 ---
 
 # SOC Lead & Incident Response Operator

@@ -113,6 +113,7 @@ class TestLocalFileEvidenceStore(unittest.TestCase):
             status="RESOLVED",
             resolved_by="@yaral-optimizer",
             proposal_id="prop_999",
+            resolution="Dismissed by operator",
         )
 
         pending = self.store.list_todos(status="PENDING")
@@ -121,6 +122,109 @@ class TestLocalFileEvidenceStore(unittest.TestCase):
         resolved = self.store.list_todos(status="RESOLVED")
         self.assertEqual(len(resolved), 1)
         self.assertEqual(resolved[0]["resolved_by"], "@yaral-optimizer")
+        self.assertEqual(resolved[0]["resolution"], "Dismissed by operator")
+
+    def test_upsert_todo_lifecycle(self):
+        todo_id = "todo_test_upsert_active"
+        task_data = {
+            "title": "Initial Task",
+            "target_agent": "@feed-agent",
+            "target_resource_id": "feed_123",
+            "action_type": "remediate_feed",
+            "priority": "MEDIUM",
+            "rationale": "First sighting",
+        }
+
+        # 1. First upsert -> New
+        task, is_new = self.store.upsert_todo(todo_id, task_data)
+        self.assertTrue(is_new)
+        self.assertEqual(task["sighting_count"], 1)
+        self.assertEqual(task["status"], "PENDING")
+
+        # 2. Second upsert -> Corroborated sighting
+        task_update = {
+            "title": "Initial Task Updated",
+            "priority": "HIGH",
+            "rationale": "Second sighting",
+        }
+        task2, is_new2 = self.store.upsert_todo(todo_id, task_update)
+        self.assertFalse(is_new2)
+        self.assertEqual(task2["sighting_count"], 2)
+        self.assertEqual(task2["priority"], "HIGH")
+        self.assertEqual(task2["status"], "PENDING")
+        self.assertEqual(len(task2.get("sighting_history", [])), 2)
+
+        # 3. Resolve
+        resolved = self.store.resolve_todo(todo_id, reason="Resolved by operator")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved["status"], "RESOLVED")
+
+        # 4. Third upsert after resolution -> Reopens regression
+        task3, is_new3 = self.store.upsert_todo(todo_id, {"rationale": "Recurred"})
+        self.assertFalse(is_new3)
+        self.assertEqual(task3["sighting_count"], 3)
+        self.assertEqual(task3["status"], "REOPENED")
+
+    def test_deduplicate_todos(self):
+        # Create 3 duplicate timestamped cards
+        t1 = {
+            "todo_id": "todo_tuning_ur_5f1035ac_1789978867",
+            "title": "Tune Rule 1",
+            "target_agent": "@detection-tuning-agent",
+            "target_resource_id": "ur_5f1035ac",
+            "action_type": "tune_noise",
+            "priority": "MEDIUM",
+            "status": "PENDING",
+            "sighting_count": 1,
+            "created_at": "2026-09-20T10:00:00Z",
+        }
+        t2 = {
+            "todo_id": "todo_tuning_ur_5f1035ac_1790022094",
+            "title": "Tune Rule 2",
+            "target_agent": "@detection-tuning-agent",
+            "target_resource_id": "ur_5f1035ac",
+            "action_type": "tune_noise",
+            "priority": "HIGH",
+            "status": "PENDING",
+            "sighting_count": 1,
+            "created_at": "2026-09-20T22:00:00Z",
+        }
+        t3 = {
+            "todo_id": "todo_tuning_ur_5f1035ac_1790065305",
+            "title": "Tune Rule 3",
+            "target_agent": "@detection-tuning-agent",
+            "target_resource_id": "ur_5f1035ac",
+            "action_type": "tune_noise",
+            "priority": "MEDIUM",
+            "status": "PENDING",
+            "sighting_count": 1,
+            "created_at": "2026-09-21T10:00:00Z",
+        }
+        self.store.save_todo(t1["todo_id"], t1)
+        self.store.save_todo(t2["todo_id"], t2)
+        self.store.save_todo(t3["todo_id"], t3)
+
+        # Confirm 3 separate tasks exist
+        self.assertEqual(len(self.store.list_todos(status="PENDING")), 3)
+
+        # Run deduplication
+        stats = self.store.deduplicate_todos()
+        self.assertEqual(stats["consolidated"], 1)
+        self.assertEqual(stats["deleted"], 3)
+
+        # Confirm only canonical active task exists
+        remaining = self.store.list_todos(status="PENDING")
+        self.assertEqual(len(remaining), 1)
+        canonical = remaining[0]
+        self.assertEqual(canonical["todo_id"], "todo_tuning_ur_5f1035ac_active")
+        self.assertEqual(canonical["sighting_count"], 3)
+        self.assertEqual(canonical["priority"], "HIGH")
+        self.assertEqual(canonical["created_at"], "2026-09-20T10:00:00Z")
+
+        # Confirm old timestamped tasks no longer exist
+        self.assertIsNone(self.store.get_todo("todo_tuning_ur_5f1035ac_1789978867"))
+        self.assertIsNone(self.store.get_todo("todo_tuning_ur_5f1035ac_1790022094"))
+        self.assertIsNone(self.store.get_todo("todo_tuning_ur_5f1035ac_1790065305"))
 
     def test_agent_config_lifecycle(self):
         self.store.save_agent_config(
@@ -129,6 +233,25 @@ class TestLocalFileEvidenceStore(unittest.TestCase):
         )
         cfg = self.store.get_agent_config("@rule-troubleshooter")
         self.assertEqual(cfg["model"], "gemini-2.5-flash")
+
+    def test_playbook_analysis_lifecycle(self):
+        analysis_data = {
+            "workflow_identifier": "pb-test-123",
+            "name": "Automated Phishing Response",
+            "resilience_score": 88,
+            "resilience_grade": "B",
+            "findings_count": 2,
+        }
+        self.store.save_playbook_analysis("pb-test-123", analysis_data)
+        loaded = self.store.get_playbook_analysis("pb-test-123")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["name"], "Automated Phishing Response")
+        self.assertEqual(loaded["resilience_score"], 88)
+        self.assertEqual(loaded["resilience_grade"], "B")
+
+        all_playbooks = self.store.list_playbook_analyses()
+        self.assertEqual(len(all_playbooks), 1)
+        self.assertEqual(all_playbooks[0]["workflow_identifier"], "pb-test-123")
 
 
 class TestLiveFirestoreEvidenceStore(unittest.TestCase):

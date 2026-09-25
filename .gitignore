@@ -69,6 +69,9 @@ token.json
 logs/
 bridge.log
 *.pid
+*_report.json
+*_inventory.json
+*_audit*.json
 
 # OS & Editor configurations
 .DS_Store

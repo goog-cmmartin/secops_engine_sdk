@@ -1,0 +1,37 @@
+id: SOC-AUTO-20260925190425-99b5ac
+issue_id: SOC-AUTO-20260925190425-99b5ac
+type: patrol_audit_playbook_decay
+plane: data
+operational_plane: data
+status: AVAILABLE
+severity: MEDIUM
+confidence: 1.0
+priority_score: 50
+source:
+  deacon_id: '@playbook-decay-agent'
+  observed_at: '2026-09-25T19:04:25.244902+00:00'
+  evidence_fabric_uris: []
+  initial_metrics: {}
+problem:
+  title: 'soar: patrol_audit_playbook_decay'
+  description: ''
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': '''', ''created_beads'':
+    0}'
+  desired_state: NOMINAL
+  affected_objects: []
+routing:
+  requires_capabilities: {}
+  claimed_by: null
+  claim_timestamp: null
+governance:
+  required_authority_tier: TIER_2_PEER_REVIEW
+  validation_criteria: []
+  rollback_spec: {}
+lease: null
+attempts: []
+active_proposal_id: null
+applied_change_id: null
+references: {}
+created_at: '2026-09-25T19:04:25.244924+00:00'
+updated_at: '2026-09-25T19:04:25.244927+00:00'
+closed_at: null

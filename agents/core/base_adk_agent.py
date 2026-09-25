@@ -676,7 +676,6 @@ class BaseSecOpsAdkAgent:
             os.getenv("GCP_PROJECT_ID")
             or os.getenv("SECOPS_PROJECT_ID")
             or os.getenv("GOOGLE_CLOUD_PROJECT")
-            or "sdl-preview-americas"
         )
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
@@ -727,10 +726,13 @@ class BaseSecOpsAdkAgent:
 
         # Initialize clients to try: Vertex AI location="global" first, then AI Studio API key
         clients_to_try = []
-        try:
-            clients_to_try.append(("vertexai_global", genai.Client(vertexai=True, project=project_id, location="global")))
-        except Exception as v_err:
-            logger.debug("Vertex AI global client init failed: %s", v_err)
+        if project_id:
+            try:
+                clients_to_try.append(("vertexai_global", genai.Client(vertexai=True, project=project_id, location="global")))
+            except Exception as v_err:
+                logger.debug("Vertex AI global client init failed: %s", v_err)
+        else:
+            logger.debug("No GCP project configured; skipping Vertex AI client for %s", self.handle)
 
         if api_key:
             clients_to_try.append(("ai_studio", genai.Client(api_key=api_key)))

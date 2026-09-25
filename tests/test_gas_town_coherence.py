@@ -3,16 +3,71 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
 from agents.core.evidence_store import LocalFileEvidenceStore
+import clients.web.server as web_server
 from clients.web.server import app, fleet
+
+# Explicit test fixtures. Production no longer seeds default todos, so every test
+# that needs tasks creates them in an isolated temp store (never the live store).
+FIXTURE_RULE_ID = "ru_test_fixture_0001"
+FIXTURE_TODOS = [
+    {
+        "todo_id": "todo_test_decay",
+        "title": "Evaluate rule decay for fixture rule",
+        "target_agent": "@detection-decay-agent",
+        "target_resource_id": FIXTURE_RULE_ID,
+        "action_type": "audit_decay",
+        "stream": "detections",
+        "topic": "decay-review",
+        "priority": "HIGH",
+        "status": "PENDING",
+        "action_prompt": f"@detection-decay-agent audit rule {FIXTURE_RULE_ID}",
+        "rationale": "Test fixture.",
+    },
+    {
+        "todo_id": "todo_test_tuning",
+        "title": "Tune noise for fixture rule",
+        "target_agent": "@detection-tuning-agent",
+        "target_resource_id": FIXTURE_RULE_ID,
+        "action_type": "tune_noise",
+        "stream": "detections",
+        "topic": "tuning-review",
+        "priority": "MEDIUM",
+        "status": "IN_PROGRESS",
+        "action_prompt": f"@detection-tuning-agent tune rule {FIXTURE_RULE_ID}",
+        "rationale": "Test fixture.",
+    },
+]
+
+
+def _seed(store: LocalFileEvidenceStore) -> None:
+    for todo in FIXTURE_TODOS:
+        store.save_todo(todo["todo_id"], dict(todo))
 
 
 class GasTownParameterCoherenceTest(unittest.TestCase):
     def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = LocalFileEvidenceStore(base_dir=self._tmp.name)
+        _seed(self.store)
+
+        self._patches = [mock.patch.object(web_server, "evidence_store", self.store)]
+        for agent in fleet.values():
+            if hasattr(agent, "evidence_store"):
+                self._patches.append(mock.patch.object(agent, "evidence_store", self.store))
+        for patcher in self._patches:
+            patcher.start()
+
         self.client = TestClient(app)
+
+    def tearDown(self):
+        for patcher in reversed(self._patches):
+            patcher.stop()
+        self._tmp.cleanup()
 
     def test_no_deprecated_or_fake_handles_in_frontend(self):
         """Ensures no fabricated tasks or non-existent agents exist in app.js."""
@@ -51,7 +106,7 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
         # Verify Todos Pending
         todos_pending = data["todos_pending"]
         self.assertIsInstance(todos_pending, list)
-        self.assertGreater(len(todos_pending), 0, "Default pending tasks should be seeded")
+        self.assertGreater(len(todos_pending), 0, "Fixture pending tasks should be listed")
         for task in todos_pending:
             self.assertIn("todo_id", task)
             self.assertIn("target_agent", task)
@@ -65,7 +120,7 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
         # Verify Todos In Progress
         todos_in_progress = data["todos_in_progress"]
         self.assertIsInstance(todos_in_progress, list)
-        self.assertGreater(len(todos_in_progress), 0, "Default in-progress tasks should be seeded")
+        self.assertGreater(len(todos_in_progress), 0, "Fixture in-progress tasks should be listed")
         for task in todos_in_progress:
             self.assertIn("todo_id", task)
             self.assertIn("target_agent", task)
@@ -115,11 +170,11 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
         """Verifies get_todo in LocalFileEvidenceStore."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = LocalFileEvidenceStore(base_dir=tmp_dir)
-            store.ensure_default_tasks()
+            _seed(store)
 
-            decay_task = store.get_todo("todo_decay_ru_0e378636")
+            decay_task = store.get_todo("todo_test_decay")
             self.assertIsNotNone(decay_task)
-            self.assertEqual(decay_task["target_resource_id"], "ru_0e378636")
+            self.assertEqual(decay_task["target_resource_id"], FIXTURE_RULE_ID)
             self.assertEqual(decay_task["target_agent"], "@detection-decay-agent")
 
             nonexistent = store.get_todo("nonexistent_task_999")
@@ -132,10 +187,10 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
 
         # Test tool execution on detection-tuning-agent
         tuning_agent = fleet["@detection-tuning-agent"]
-        status_res = tuning_agent.get_task_status("todo_tuning_ru_0e378636")
+        status_res = tuning_agent.get_task_status("todo_test_tuning")
         self.assertTrue(status_res["found"])
-        self.assertEqual(status_res["id"], "todo_tuning_ru_0e378636")
-        self.assertEqual(status_res["target_resource_id"], "ru_0e378636")
+        self.assertEqual(status_res["id"], "todo_test_tuning")
+        self.assertEqual(status_res["target_resource_id"], FIXTURE_RULE_ID)
         self.assertEqual(status_res["target_agent"], "@detection-tuning-agent")
 
         # Test lookup for unknown identifier

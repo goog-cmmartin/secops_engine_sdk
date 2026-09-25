@@ -713,8 +713,8 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
         )
 
         # Extract tenant params
-        cust_id = "sdl-preview-americas"
-        proj_id = "sdl-preview-americas"
+        cust_id = None
+        proj_id = None
         region = "us"
         if self.engine and getattr(self.engine, "adapter", None):
             adapter = self.engine.adapter
@@ -733,7 +733,8 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
                 pass
 
         # Ingest test vectors if SecOpsSink can connect
-        submitted = sc.total_log_count
+        submitted = 0
+        ingest_error: Optional[str] = None
         try:
             from logjammer.sinks.secops import SecOpsSink
             sink = SecOpsSink(
@@ -744,22 +745,29 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             )
             submitted = sink.emit(sc)
         except Exception as e:
-            logger.warning("Live ingestion preflight notice: %s", e)
+            ingest_error = f"{type(e).__name__}: {e}"
+            logger.error("Live ingestion preflight failed for %s: %s", proposal_id, ingest_error)
+
+        verified = ingest_error is None and submitted > 0
 
         # Update proposal PreflightProof
-        proposal.preflight.replay_verified = True
+        proposal.preflight.replay_verified = verified
         proposal.preflight.replay_target_tenant = cust_id
         proposal.preflight.replay_log_count = submitted
-        proposal.preflight.replay_summary = (
-            f"{submitted} events across {','.join(effective_types)} replayed; "
-            f"0 compilation errors, detection latency benchmarked successfully."
-        )
+        if verified:
+            proposal.preflight.replay_summary = (
+                f"{submitted} events across {','.join(effective_types)} replayed into SecOps."
+            )
+        else:
+            proposal.preflight.replay_summary = (
+                f"Replay NOT verified: {ingest_error or 'no events were ingested'}."
+            )
 
         # Persist updated proposal back to disk
         self.proposal_manager.update_proposal(proposal)
 
         # Resolve any matching pending tasks in Evidence Fabric blackboard
-        if self.evidence_store:
+        if verified and self.evidence_store:
             try:
                 pending_todos = self.evidence_store.list_todos(status="PENDING")
                 for td in pending_todos:
@@ -784,7 +792,7 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             "target_resource_id": proposal.target_resource_id,
             "log_types": effective_types,
             "event_count": submitted,
-            "status": "VERIFIED",
+            "status": "VERIFIED" if verified else "FAILED",
             "summary": proposal.preflight.replay_summary,
         }
         self.last_widget = replay_widget
@@ -796,18 +804,22 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             "arguments": {
                 "proposal_id": proposal_id,
                 "replayed_events": str(submitted),
-                "replay_verified": "True",
+                "replay_verified": str(verified),
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
         return {
-            "status": "PREFLIGHT_VERIFIED",
+            "status": "PREFLIGHT_VERIFIED" if verified else "PREFLIGHT_FAILED",
             "proposal_id": proposal.id,
-            "replay_verified": True,
+            "replay_verified": verified,
             "replayed_events": submitted,
             "replay_summary": proposal.preflight.replay_summary,
-            "message": f"Proposal {proposal.id} successfully verified with {submitted} empirical events. Gas Town proposal card updated.",
+            "message": (
+                f"Proposal {proposal.id} verified with {submitted} empirical events. Gas Town proposal card updated."
+                if verified else
+                f"Proposal {proposal.id} replay failed: {proposal.preflight.replay_summary}"
+            ),
             "widget": replay_widget,
         }
 
@@ -896,7 +908,7 @@ from agents.core.evidence_store import diff_iam_audits
 
         return {
             "status": "SUCCESS",
-            "project_id": project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas"),
+            "project_id": project_id or getattr(self.engine.adapter, "project_id", None),
             "total_chronicle_roles_assigned": len(bindings),
             "users_count": len(users),
             "users": sorted(list(users)),
@@ -942,7 +954,7 @@ from agents.core.evidence_store import diff_iam_audits
 
         return {
             "status": "SUCCESS",
-            "project_id": project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas"),
+            "project_id": project_id or getattr(self.engine.adapter, "project_id", None),
             "custom_roles_count": len(custom_roles),
             "custom_roles": roles_summary,
         }
@@ -984,7 +996,7 @@ from agents.core.evidence_store import diff_iam_audits
             project_id: Target GCP project ID.
             inventory_base_url: Base URL of SecOps Inventory service.
         """
-        proj = project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas")
+        proj = project_id or getattr(self.engine.adapter, "project_id", None)
         rep = self.engine.generate_identity_governance_report(
             project_id=proj,
             inventory_base_url=inventory_base_url,

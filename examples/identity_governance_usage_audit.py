@@ -11,7 +11,7 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 # Ensure project root is on PYTHONPATH
@@ -24,7 +24,7 @@ from engine.facade import SecOpsEngine
 
 def run_identity_usage_audit(
     inventory_base_url: str = "http://localhost:8000",
-    tenant_id: str = "37679061640",
+    tenant_id: Optional[str] = None,
     udm_window_days: int = 7,
     raw_log_lookback_hours: int = 48,
 ) -> None:
@@ -55,21 +55,13 @@ def run_identity_usage_audit(
                 for token in re.findall(r"`([^`]+@gserviceaccount\.com)`", line):
                     accounts.append((token, "Service Account", "Service Account"))
     except Exception as exc:
-        print(f"[!] Warning: Could not reach inventory report 299 ({exc}). Using canonical governance baseline.")
-        accounts = [
-            ("admin@1823127835827.altostrat.com", "Chronicle Admin", "User"),
-            ("jose.marin@1823127835827.altostrat.com", "Chronicle & SOAR Admin", "User"),
-            ("slichtenstein@1823127835827.altostrat.com", "Chronicle Admin", "User"),
-            ("sa-secops-inventory@webapps-397711.iam.gserviceaccount.com", "Chronicle Admin", "Service Account"),
-            ("sa-chronicle-api@sdl-preview-americas.iam.gserviceaccount.com", "Chronicle & SOAR Admin", "Service Account"),
-            ("sa-bp-to-secops-wif@sdl-preview-americas.iam.gserviceaccount.com", "Chronicle Admin", "Service Account"),
-            ("demoverse-be@secops-demoverse-main.iam.gserviceaccount.com", "Chronicle & SOAR Admin", "Service Account"),
-            ("sdl-preview-americas@sdl-preview-americas.iam.gserviceaccount.com", "Chronicle Admin", "Service Account"),
-            ("wiz-to-secops@sdl-preview-americas.iam.gserviceaccount.com", "Chronicle Admin", "Service Account"),
-            ("lieva@1823127835827.altostrat.com", "Chronicle Viewer", "User"),
-            ("sa-sdl-tag-agentic-ai@webapps-397711.iam.gserviceaccount.com", "Chronicle Editor", "Service Account"),
-            ("sa-sdl-et-replay@webapps-397711.iam.gserviceaccount.com", "Chronicle Viewer", "Service Account"),
-        ]
+        raise SystemExit(
+            f"[!] Could not reach inventory report 299 at {inventory_base_url} ({exc}). "
+            "Refusing to continue without live identity data."
+        )
+
+    if not accounts:
+        raise SystemExit("[!] Inventory report 299 returned no parseable identities; nothing to audit.")
 
     # De-duplicate preserving order
     seen = set()

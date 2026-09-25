@@ -113,8 +113,6 @@ fleet_scheduler = FleetScheduler(
 )
 
 
-# Ensure baseline remediation tasks exist in Evidence Fabric
-evidence_store.ensure_default_tasks()
 try:
     dedup_stats = evidence_store.deduplicate_todos()
     if dedup_stats.get("deleted", 0) > 0:
@@ -687,14 +685,12 @@ async def list_todos(
     target_agent: Optional[str] = Query(None, description="Target agent filter (e.g. @yaral-optimizer)"),
 ) -> List[Dict[str, Any]]:
     """Lists pending cross-agent remediation tasks and optimization requests."""
-    evidence_store.ensure_default_tasks()
     return evidence_store.list_todos(status=status, target_agent=target_agent)
 
 
 @app.get("/api/todos/{todo_id}")
 async def get_todo_by_id(todo_id: str) -> Dict[str, Any]:
     """Retrieves a single remediation task by ID."""
-    evidence_store.ensure_default_tasks()
     todo = evidence_store.get_todo(todo_id)
     if not todo:
         raise HTTPException(status_code=404, detail=f"Task {todo_id} not found")
@@ -722,7 +718,6 @@ async def update_todo_status_endpoint(
     body: UpdateTodoStatusRequest,
 ) -> Dict[str, Any]:
     """Updates the status of a remediation task."""
-    evidence_store.ensure_default_tasks()
     todo = evidence_store.get_todo(todo_id)
     if not todo:
         raise HTTPException(status_code=404, detail=f"Task {todo_id} not found")
@@ -788,7 +783,6 @@ async def update_agent_config(agent_handle: str, body: Dict[str, Any]) -> Dict[s
 @app.get("/api/gastown/overview")
 async def get_gastown_overview() -> Dict[str, Any]:
     """Returns Gas Town control center summary, active convoys, and escalations."""
-    evidence_store.ensure_default_tasks()
     open_props = proposal_manager.list_proposals(status="OPEN")
     merged_props = proposal_manager.list_proposals(status="MERGED")
     rejected_props = proposal_manager.list_proposals(status="REJECTED")

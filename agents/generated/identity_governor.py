@@ -106,7 +106,7 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
 
         return {
             "status": "SUCCESS",
-            "project_id": project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas"),
+            "project_id": project_id or getattr(self.engine.adapter, "project_id", None),
             "total_chronicle_roles_assigned": len(bindings),
             "users_count": len(users),
             "users": sorted(list(users)),
@@ -152,7 +152,7 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
 
         return {
             "status": "SUCCESS",
-            "project_id": project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas"),
+            "project_id": project_id or getattr(self.engine.adapter, "project_id", None),
             "custom_roles_count": len(custom_roles),
             "custom_roles": roles_summary,
         }
@@ -194,7 +194,7 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
             project_id: Target GCP project ID.
             inventory_base_url: Base URL of SecOps Inventory service.
         """
-        proj = project_id or getattr(self.engine.adapter, "project_id", "sdl-preview-americas")
+        proj = project_id or getattr(self.engine.adapter, "project_id", None)
         rep = self.engine.generate_identity_governance_report(
             project_id=proj,
             inventory_base_url=inventory_base_url,

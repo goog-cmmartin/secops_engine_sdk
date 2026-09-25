@@ -13,6 +13,8 @@ import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 import urllib.request
 
+from engine.config import SecOpsConfigurationError
+
 from engine.domain import (
     ChronicleCustomRole,
     ChronicleIamMember,
@@ -71,7 +73,12 @@ class IdentityGovernanceWorkflow:
     @property
     def default_project_id(self) -> str:
         """Resolves target GCP project ID from adapter or config."""
-        return getattr(self.adapter, "project_id", "sdl-preview-americas")
+        project_id = getattr(self.adapter, "project_id", None)
+        if not project_id:
+            raise SecOpsConfigurationError(
+                "No GCP project_id configured on the adapter; pass project_id explicitly or set SECOPS_PROJECT_ID."
+            )
+        return project_id
 
     def get_chronicle_iam_bindings(
         self,
@@ -164,7 +171,11 @@ class IdentityGovernanceWorkflow:
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Queries SecOps Inventory service on local port 8000 for SecOps Access audit or Identity reports."""
-        target_tenant = tenant_id or getattr(self.adapter, "tenant_id", "37679061640")
+        target_tenant = tenant_id or getattr(self.adapter, "tenant_id", None) or getattr(self.adapter, "project_id", None)
+        if not target_tenant:
+            raise SecOpsConfigurationError(
+                "No inventory tenant_id configured; pass tenant_id explicitly or configure the adapter project_id."
+            )
 
         # Resolve project name to numeric tenant ID if needed
         if not target_tenant.isdigit():

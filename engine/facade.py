@@ -564,7 +564,6 @@ from engine.workflows.briefing_aggregation import (
     compute_shift_delta,
     compute_knowledge_snapshot,
 )
-from agents.core.knowledge_store import get_knowledge_store
 
 
 
@@ -5877,6 +5876,8 @@ class SecOpsEngine:
         self, subject_type: str, subject_id: str
     ) -> Dict[str, Any]:
         """Synthesizes cross-agent observations, status, and knowledge gaps for an entity."""
+        from agents.core.knowledge_store import get_knowledge_store  # deferred: avoids engine<->agents.core cycle
+
         store = get_knowledge_store()
         return store.get_composite_entity(subject_type, subject_id)
 

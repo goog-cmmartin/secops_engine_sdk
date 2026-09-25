@@ -11,10 +11,12 @@ Invariant:
 - The LLM is used strictly as a presentation and prioritization layer, never as the database.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from engine.domain import (
     IssueLifecycleStatus,
@@ -25,11 +27,37 @@ from engine.domain import (
     ShiftBriefing,
     SubjectRef,
 )
-from agents.core.knowledge_store import BaseKnowledgeStore, get_knowledge_store
-from agents.core.materializer import IssueMaterializer
-from agents.core.work_queue import BaseWorkQueue, get_work_queue
+
+# agents.core.* imports engine.domain, and engine/__init__ imports this module via
+# engine.facade. Importing agents.core at module load creates an import cycle, so
+# runtime imports are deferred to call time (see _resolve_backends).
+if TYPE_CHECKING:
+    from agents.core.knowledge_store import BaseKnowledgeStore
+    from agents.core.materializer import IssueMaterializer
+    from agents.core.work_queue import BaseWorkQueue
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_backends(
+    work_queue: Optional[BaseWorkQueue],
+    knowledge_store: Optional[BaseKnowledgeStore],
+    materializer: Optional[IssueMaterializer],
+) -> Tuple[BaseWorkQueue, BaseKnowledgeStore, IssueMaterializer]:
+    """Returns supplied backends, lazily constructing defaults for any that are None."""
+    if work_queue is None:
+        from agents.core.work_queue import get_work_queue
+
+        work_queue = get_work_queue()
+    if knowledge_store is None:
+        from agents.core.knowledge_store import get_knowledge_store
+
+        knowledge_store = get_knowledge_store()
+    if materializer is None:
+        from agents.core.materializer import IssueMaterializer
+
+        materializer = IssueMaterializer()
+    return work_queue, knowledge_store, materializer
 
 
 def compute_shift_delta(
@@ -52,9 +80,7 @@ def compute_shift_delta(
     if not shift_name:
         shift_name = f"SecOps Shift Brief — {start_dt.strftime('%H:%M')}–{end_dt.strftime('%H:%M')} UTC"
 
-    wq = work_queue or get_work_queue()
-    ks = knowledge_store or get_knowledge_store()
-    mat = materializer or IssueMaterializer()
+    wq, ks, mat = _resolve_backends(work_queue, knowledge_store, materializer)
 
     # 1. Query Work Queue for all relevant issues
     all_issues = wq.list_issues(limit=200)
@@ -217,9 +243,7 @@ def compute_knowledge_snapshot(
 ) -> KnowledgeSnapshot:
     """Deterministically compiles the SOC Knowledge Snapshot and surfaces Knowledge Gaps / Unknowns."""
     now = datetime.now(timezone.utc)
-    ks = knowledge_store or get_knowledge_store()
-    wq = work_queue or get_work_queue()
-    mat = materializer or IssueMaterializer()
+    wq, ks, mat = _resolve_backends(work_queue, knowledge_store, materializer)
 
 
 

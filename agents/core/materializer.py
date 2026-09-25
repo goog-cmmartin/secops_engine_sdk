@@ -41,6 +41,7 @@ from engine.domain import (
     VerificationProof,
 )
 from agents.core.evidence_store import normalize_doc_id
+from agents.core.git_guard import git_commits_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,14 @@ class IssueMaterializer:
         return len(existing) + 1
 
     def _git_commit(self, file_paths: List[Path], message: str) -> Optional[str]:
-        """Safely commits materialized issue files to git if inside a git repository."""
+        """Safely commits materialized issue files to git if inside a git repository.
+
+        The commit is scoped to ``file_paths`` only, so unrelated staged changes
+        in the operator's index are never swept into an agent commit.
+        """
+        if not git_commits_enabled():
+            logger.debug("Git commits disabled via env; skipping: %s", message)
+            return None
         try:
             rel_paths = [str(p.relative_to(self.root_dir)) for p in file_paths]
             subprocess.run(
@@ -86,7 +94,7 @@ class IssueMaterializer:
                 text=True,
             )
             commit_res = subprocess.run(
-                ["git", "commit", "-m", message],
+                ["git", "commit", "-m", message, "--"] + rel_paths,
                 cwd=str(self.root_dir),
                 check=False,
                 capture_output=True,

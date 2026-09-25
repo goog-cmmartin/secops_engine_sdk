@@ -14,6 +14,8 @@ import subprocess
 from typing import Any, Dict, List, Optional
 import yaml
 
+from agents.core.git_guard import git_commits_enabled
+
 logger = logging.getLogger(__name__)
 
 
@@ -388,7 +390,14 @@ class ProposalManager:
         return proposal
 
     def _commit_merged_proposal(self, proposal: ChangeProposal) -> Optional[str]:
-        """Creates a git commit tracking the proposal merge."""
+        """Creates a git commit tracking the proposal merge.
+
+        The commit is scoped to ``.proposals/`` only, so unrelated staged changes
+        in the operator's index are never swept into an agent commit.
+        """
+        if not git_commits_enabled():
+            logger.debug("Git commits disabled via env; skipping merge commit for %s", proposal.id)
+            return None
         try:
             env = os.environ.copy()
             env.setdefault("GIT_AUTHOR_NAME", "SecOps Agent Fleet")
@@ -412,7 +421,7 @@ class ProposalManager:
             )
 
             res = subprocess.run(
-                ["git", "commit", "-m", commit_msg],
+                ["git", "commit", "-m", commit_msg, "--", ".proposals/"],
                 cwd=str(self.root_dir),
                 env=env,
                 capture_output=True,

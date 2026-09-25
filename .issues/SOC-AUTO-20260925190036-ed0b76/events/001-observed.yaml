@@ -1,0 +1,16 @@
+event_id: SOC-AUTO-20260925190036-ed0b76-evt-001
+issue_id: SOC-AUTO-20260925190036-ed0b76
+sequence: 1
+transition_type: OBSERVED
+transition: OBSERVED
+actor: '@tenant-posture-agent'
+timestamp: '2026-09-25T19:00:36.787441+00:00'
+details: &id001
+  title: 'governance: patrol_audit_tenant_posture'
+  observed_state: '{''status'': ''SUCCESS'', ''summary'': ''SUCCESS'', ''created_beads'':
+    1}'
+  desired_state: NOMINAL
+  severity: MEDIUM
+metadata: *id001
+evidence_refs: &id002 []
+evidence_references: *id002

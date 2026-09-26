@@ -4024,6 +4024,48 @@ const APPROVAL_TIER_LABELS = {
 };
 // Mirrors CODE_CHANGE_ACTIONS in agents/core/approval_policy.py (server is authoritative).
 const PREFLIGHT_GATED_ACTIONS = new Set(["PATCH_RULE", "UPDATE_RULE_TEXT", "PATCH_PARSER_CBN"]);
+// Mirrors supports_baseline() in agents/core/target_baseline.py.
+const BASELINE_CHECKED_ACTIONS = new Set([
+  "PATCH_RULE", "UPDATE_RULE_TEXT",
+  "UPDATE_RULE_DEPLOYMENT", "TOGGLE_RULE_DEPLOYMENT", "DEPLOY_RULE", "UNDEPLOY_RULE",
+]);
+
+function describeBaseline(proposal) {
+  if (!proposal || !BASELINE_CHECKED_ACTIONS.has(String(proposal.action_type || "").toUpperCase())) return null;
+  const base = proposal.base_revision;
+  if (!base) return "Not recorded. The target will be overwritten without checking for later edits.";
+  const when = base.captured_at ? ` (captured ${new Date(base.captured_at).toLocaleString()})` : "";
+  if (base.kind === "rule_text") {
+    const ref = base.revision_id ? `revision ${base.revision_id}` : `content ${String(base.text_sha256 || "").slice(0, 12)}`;
+    return `Checked before applying against ${ref}${when}`;
+  }
+  if (base.kind === "rule_deployment") {
+    return `Checked before applying: enabled=${!!base.enabled}, alerting=${!!base.alerting}${when}`;
+  }
+  return `Checked before applying${when}`;
+}
+
+async function showStaleTargetDialog(proposalId, detail) {
+  const exp = (detail && detail.expected) || {};
+  const cur = (detail && detail.current) || {};
+  const labels = { revision_id: "Revision", text_sha256: "Rule text", enabled: "Enabled", alerting: "Alerting" };
+  const show = (k, v) => (v === undefined || v === "" ? "—" : k === "text_sha256" ? String(v).slice(0, 12) : String(v));
+  const rows = Object.keys(labels)
+    .filter((k) => (k in exp || k in cur) && String(exp[k]) !== String(cur[k]))
+    .map((k) => `<dt>${labels[k]}</dt><dd>${escapeHtml(show(k, exp[k]))} → <strong>${escapeHtml(show(k, cur[k]))}</strong></dd>`)
+    .join("");
+  const bodyHtml = `<div class="action-dialog-error" role="note">${escapeHtml(formatApiError(detail, "Target changed"))}</div>`
+    + (rows ? `<dl class="about-grid">${rows}</dl>` : "");
+  const choice = await openActionDialog({
+    title: "Target changed since proposal",
+    message: `Nothing was applied. ${proposalId} is still open.`,
+    confirmLabel: "Reject proposal…",
+    variant: "danger",
+    bodyHtml,
+  });
+  if (choice) return handleRejectProposal(proposalId, "Target changed after the proposal was created; redo against the current version.");
+  return false;
+}
 
 function formatApiError(detail, fallback) {
   if (!detail) return String(fallback);
@@ -4048,6 +4090,8 @@ async function handleApproveProposal(proposalId) {
   if (tier) facts.push(["Authority", APPROVAL_TIER_LABELS[tier] || tier]);
   if (proposal && proposal.risk_level) facts.push(["Risk", proposal.risk_level]);
   if (proposal && proposal.author) facts.push(["Author", proposal.author]);
+  const baselineText = describeBaseline(proposal);
+  if (baselineText) facts.push(["Target check", baselineText]);
   const factsHtml = facts.length
     ? `<dl class="about-grid">${facts.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>`
     : "";
@@ -4092,6 +4136,15 @@ async function handleApproveProposal(proposalId) {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
+      const code = err.detail && err.detail.code;
+      if (code === "STALE_TARGET") {
+        await loadProposals();
+        return showStaleTargetDialog(proposalId, err.detail);
+      }
+      if (code === "TARGET_UNVERIFIABLE") {
+        showToast("error", `Not applied: ${formatApiError(err.detail, res.status)} Try again once SecOps is reachable.`);
+        return false;
+      }
       const prefix = res.status === 403 ? "Not permitted" : res.status === 422 ? "Blocked by policy" : "Approval failed";
       showToast("error", `${prefix}: ${formatApiError(err.detail, res.status)}`);
       return false;
@@ -4105,13 +4158,13 @@ async function handleApproveProposal(proposalId) {
   }
 }
 
-async function handleRejectProposal(proposalId) {
+async function handleRejectProposal(proposalId, defaultReason = "") {
   const result = await openActionDialog({
     title: "Reject proposal",
     message: `Rejecting ${proposalId} closes it without applying any change. The reason is sent back to the authoring agent.`,
     confirmLabel: "Reject",
     variant: "danger",
-    fields: [{ name: "reason", label: "Rejection reason", type: "textarea", required: true, minLength: 5 }],
+    fields: [{ name: "reason", label: "Rejection reason", type: "textarea", required: true, minLength: 5, value: defaultReason }],
   });
   if (!result) return false;
   const reason = result.reason;

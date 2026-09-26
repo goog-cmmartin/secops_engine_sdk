@@ -17,6 +17,7 @@ import yaml
 from agents.core.approval_policy import check_approval, required_tier
 from agents.core.git_guard import git_commits_enabled
 from agents.core.ledger import resolve_ledger_root
+from agents.core.target_baseline import capture_baseline, verify_unchanged
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ class ChangeProposal:
     approval_note: Optional[str] = None
     required_tier: str = ""
     preflight_override_reason: Optional[str] = None
+    # State of the target when the proposal was created; checked before applying.
+    base_revision: Optional[Dict[str, Any]] = None
+    base_verified_at_merge: Optional[bool] = None
     rationale: str = ""
     proposed_diff: str = ""
     issue_id: Optional[str] = None
@@ -110,6 +114,8 @@ class ProposalManager:
             "approval_note": proposal.approval_note,
             "required_tier": proposal.required_tier,
             "preflight_override_reason": proposal.preflight_override_reason,
+            "base_revision": proposal.base_revision,
+            "base_verified_at_merge": proposal.base_verified_at_merge,
             "preflight": asdict(proposal.preflight),
             "mutation_payload": proposal.mutation_payload,
         }
@@ -178,14 +184,20 @@ class ProposalManager:
                 frontmatter.get("action_type", ""), frontmatter.get("risk_level", "MEDIUM")
             ),
             preflight_override_reason=frontmatter.get("preflight_override_reason"),
+            base_revision=frontmatter.get("base_revision"),
+            base_verified_at_merge=frontmatter.get("base_verified_at_merge"),
             rationale=rationale,
             proposed_diff=diff,
             preflight=preflight,
             mutation_payload=frontmatter.get("mutation_payload", {}),
         )
 
-    def create_proposal(self, proposal: ChangeProposal) -> str:
-        """Creates an open proposal file and returns the proposal ID."""
+    def create_proposal(self, proposal: ChangeProposal, engine: Any = None) -> str:
+        """Creates an open proposal file and returns the proposal ID.
+
+        If ``engine`` is given and the proposal has no ``base_revision``, the
+        target's current state is captured so approval can detect later edits.
+        """
         if not proposal.id:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             proposal.id = f"prop-{timestamp}-{proposal.subsystem[:6]}"
@@ -195,6 +207,10 @@ class ProposalManager:
         proposal.required_tier = required_tier(proposal.action_type, proposal.risk_level)
         proposal.created_at = datetime.now(timezone.utc).isoformat()
         proposal.updated_at = proposal.created_at
+        if proposal.base_revision is None:
+            proposal.base_revision = capture_baseline(
+                engine, proposal.action_type, proposal.target_resource_id
+            )
 
         target_file = self.open_dir / f"{proposal.id}.md"
         content = self._format_markdown(proposal)
@@ -274,6 +290,8 @@ class ProposalManager:
             ValueError: proposal is not OPEN.
             ApprovalPolicyError: approver is not permitted to merge this proposal
                 (self-approval, tier requires a human, or failed preflight without override).
+            StaleTargetError: the target changed since the proposal was created,
+                or could not be read to check.
         """
         open_file = self.open_dir / f"{proposal_id}.md"
         if not open_file.is_file():
@@ -303,6 +321,11 @@ class ProposalManager:
         )
         if override_preflight and not proposal.preflight.syntax_verified:
             proposal.preflight_override_reason = (override_reason or "").strip()
+
+        # Stale-target gate: raises before any production mutation.
+        proposal.base_verified_at_merge = verify_unchanged(
+            engine, proposal.action_type, proposal.target_resource_id, proposal.base_revision
+        )
 
         execution_res = None
 
@@ -480,6 +503,14 @@ class ProposalManager:
                 commit_msg += f"Authority-Tier: {proposal.required_tier}\n"
             if proposal.preflight_override_reason:
                 commit_msg += f"Preflight-Override: {proposal.preflight_override_reason}\n"
+            if proposal.base_revision:
+                base = proposal.base_revision
+                ref = base.get("revision_id") or base.get("text_sha256", "")[:12] or base.get("kind", "")
+                state = "verified" if proposal.base_verified_at_merge else "unverified"
+                commit_msg += f"Target-Baseline: {ref} ({state})\n"
+            elif proposal.action_type in ("PATCH_RULE", "UPDATE_RULE_TEXT", "UPDATE_RULE_DEPLOYMENT",
+                                          "TOGGLE_RULE_DEPLOYMENT", "DEPLOY_RULE", "UNDEPLOY_RULE"):
+                commit_msg += "Target-Baseline: none (not checked)\n"
 
             res = subprocess.run(
                 ["git", "commit", "-m", commit_msg, "--", ".proposals/"],

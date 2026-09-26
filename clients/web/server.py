@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from agents.core.base_adk_agent import llm_credentials_status
 from agents.core.approval_policy import ApprovalPolicyError
+from agents.core.target_baseline import StaleTargetError
 from agents.core.proposal_manager import ProposalManager
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
@@ -509,6 +510,8 @@ async def list_proposals(
             "approval_note": p.approval_note,
             "required_tier": p.required_tier,
             "preflight_override_reason": p.preflight_override_reason,
+            "base_revision": p.base_revision,
+            "base_verified_at_merge": p.base_verified_at_merge,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -540,6 +543,8 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
             "approval_note": p.approval_note,
             "required_tier": p.required_tier,
             "preflight_override_reason": p.preflight_override_reason,
+            "base_revision": p.base_revision,
+            "base_verified_at_merge": p.base_verified_at_merge,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -576,6 +581,9 @@ async def approve_proposal(
             ApprovalPolicyError.OVERRIDE_REASON_REQUIRED,
         ) else 403
         raise HTTPException(status_code=status, detail=policy_err.to_dict())
+    except StaleTargetError as stale_err:
+        status = 409 if stale_err.code == StaleTargetError.STALE_TARGET else 503
+        raise HTTPException(status_code=status, detail=stale_err.to_dict())
     except ValueError as state_err:
         raise HTTPException(status_code=409, detail=str(state_err))
 

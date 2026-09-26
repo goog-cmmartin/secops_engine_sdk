@@ -979,7 +979,7 @@ class BaseSecOpsAdkAgent:
             issue_id=issue_id,
         )
 
-        proposal_id = self.proposal_manager.create_proposal(proposal)
+        proposal_id = self.proposal_manager.create_proposal(proposal, engine=getattr(self, "engine", None))
 
         # Notify topic with interactive HITL proposal widget
         widget = {

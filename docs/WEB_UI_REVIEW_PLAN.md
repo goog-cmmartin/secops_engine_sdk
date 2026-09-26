@@ -20,12 +20,12 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 12 | Diff modal: cancel in approve/reject dialog still closes modal; no Esc/backdrop/focus trap | 5 Trust | Done |
 | 13 | Unescaped values interpolated into inline onclick (kanban Triage/Inspect, escalation Resolve) | 5 Trust | Done |
 | 14 | Escalation "Ack" is a no-op toast — wire to backend or remove | 5 Trust | Done |
-| 15 | Send failure: input cleared before POST, text lost; optimistic msg stuck grey; alert() | 6 Chat | Todo |
-| 16 | "Sending…" CSS targets `.msg-meta` (doesn't exist; header is `.msg-header`) | 6 Chat | Todo |
-| 17 | Auto-scroll yanks reader to bottom on every message → stick-if-near-bottom + "New messages ↓" pill | 6 Chat | Todo |
+| 15 | Send failure: input cleared before POST, text lost; optimistic msg stuck grey; alert() | 6 Chat | Done |
+| 16 | "Sending…" CSS targets `.msg-meta` (doesn't exist; header is `.msg-header`) | 6 Chat | Done |
+| 17 | Auto-scroll yanks reader to bottom on every message → stick-if-near-bottom + "New messages ↓" pill | 6 Chat | Done |
 | 18 | Day separators + relative dates (history now persists across sessions) | 6 Chat | Todo |
 | 19 | Unread badges per topic/DM from SSE `new_message` for inactive channels | 6 Chat | Todo |
-| 20 | Composer auto-grow (rows=1, no resize) | 6 Chat | Todo |
+| 20 | Composer auto-grow (rows=1, no resize) | 6 Chat | Done |
 | 21 | Agent-status 180s timeout hides silently → show "no response yet — still running?" state | 6 Chat | Todo |
 | 22 | Back/forward: switchTopic/switchView use replaceState → pushState | 6 Chat | Todo |
 | 23 | Drawer proposals: click opens diff modal for any subsystem; default filter OPEN; drop ".proposals/" copy | 7 Actions | Todo |
@@ -45,6 +45,13 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Escalation acks: `POST /api/gastown/escalations/{id}/ack` → `.state/escalation_acks.json`. `summary.escalation_count` = unacked; `escalation_total` = all. Ages derived from `created_at`.
 - Defined missing `.badge-green/-yellow/-red/-blue/-gray` (previously unstyled). SOC issue modal now uses `.gt-modal-overlay`/`.gt-modal-card` (had no CSS).
 - Tests: `EscalationAckAndApprovalTrustTest` in tests/test_gas_town_coherence.py.
+
+## Group 6 notes (done 2026-09-26: #15, #16, #17, #20)
+- Send: `sendChatMessage()` tracks its own optimistic card; reconciles from POST response (id) or SSE (id, else content match). Failure → red card with Retry/Edit + error toast; no alert().
+- De-dupe: cards carry `data-id`; `appendMessageToTimeline()` skips ids already rendered.
+- Scroll: `appendMessageToTimeline(msg, {live|forceScroll})`; follows only when within 80px of bottom, otherwise `#newMessagesPill` counts unseen messages.
+- Composer: auto-grows 48→200px, including programmatic `input.value = …` prefills (value setter intercepted on the element).
+- Verified with a QuickJS DOM-stub harness (failure/edit/retry/dup/race/scroll); autosize needs a browser check.
 
 ## #5 terminology map (screen text only)
 | Current | Suggested |

@@ -95,6 +95,7 @@ function setupEventListeners() {
   const sendBtn = document.getElementById("sendBtn");
 
   sendBtn.addEventListener("click", handleSendMessage);
+  setupComposerAutosize(composerInput);
   composerInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       if (mentionState.active) {
@@ -340,6 +341,21 @@ function setupEventListeners() {
   // Setup Mention Autocomplete
   setupMentionAutocomplete();
 
+  // Scroll-follow: hide the "new messages" pill once the reader reaches the bottom.
+  const timelineEl = document.getElementById("messageTimeline");
+  if (timelineEl) {
+    timelineEl.addEventListener("scroll", () => {
+      if (isNearBottom(timelineEl)) resetNewMessagesPill();
+    }, { passive: true });
+  }
+  const newMessagesPill = document.getElementById("newMessagesPill");
+  if (newMessagesPill) {
+    newMessagesPill.addEventListener("click", () => {
+      resetNewMessagesPill();
+      scrollToBottom(true);
+    });
+  }
+
   // URL Hash Navigation
   const handleHashRouting = () => {
     const hash = window.location.hash.replace(/^#/, "");
@@ -411,8 +427,9 @@ function showAgentStatusIndicator(agentHandle, statusText, userHandle) {
     </div>
   `;
 
+  const wasNearBottom = isNearBottom(container);
   container.appendChild(card);
-  scrollToBottom();
+  if (wasNearBottom) scrollToBottom();
 
   if (agentStatusTimeout) clearTimeout(agentStatusTimeout);
   agentStatusTimeout = setTimeout(() => {
@@ -434,7 +451,8 @@ function updateAgentStatusIndicator(agentHandle, statusText, userHandle) {
       label.style.opacity = "1";
     }, 120);
   }
-  scrollToBottom();
+  const container = document.getElementById("messageTimeline");
+  if (container && isNearBottom(container)) scrollToBottom();
 }
 
 function hideAgentStatusIndicator() {
@@ -518,22 +536,17 @@ function initSSE() {
         const msg = data.message;
         // If message belongs to current stream and topic, handle timeline update
         if (msg.stream === state.activeStream && msg.topic === state.activeTopic) {
-          if (msg.sender_type === "user") {
-            const tempEl = document.querySelector(".message-card.optimistic-sending");
-            if (tempEl) {
-              tempEl.classList.remove("optimistic-sending");
-              tempEl.dataset.id = msg.id;
-            } else {
-              state.messages.push(msg);
-              appendMessageToTimeline(msg);
-              scrollToBottom();
-            }
-          } else {
+          if (msg.sender_type !== "user") {
             // Agent message arrived! Hide the status indicator
             hideAgentStatusIndicator();
+          }
+          if (findMessageCard(msg.id)) {
+            // Already rendered (e.g. reconciled from the POST response).
+          } else if (msg.sender_type === "user" && reconcilePendingByContent(msg)) {
+            // Matched our own optimistic message.
+          } else {
             state.messages.push(msg);
-            appendMessageToTimeline(msg);
-            scrollToBottom();
+            appendMessageToTimeline(msg, { live: true });
           }
         }
         // Refresh proposals list if message carries a proposal
@@ -638,11 +651,11 @@ async function switchTopic(stream, topic) {
   if (stream === "dm") {
     document.getElementById("currentStreamLabel").textContent = "Direct Message";
     document.getElementById("currentTopicLabel").textContent = topic;
-    document.getElementById("composerInput").placeholder = `Direct message ${topic}...`;
+    document.getElementById("composerInput").placeholder = `Direct message ${topic}… (Shift+Enter for new line)`;
   } else {
     document.getElementById("currentStreamLabel").textContent = `#${stream}`;
     document.getElementById("currentTopicLabel").textContent = topic;
-    document.getElementById("composerInput").placeholder = `Message #${stream} > ${topic}... (@agent to mention)`;
+    document.getElementById("composerInput").placeholder = `Message #${stream} > ${topic}… (@ to mention, Shift+Enter for new line)`;
   }
 
   const btnAuditHeader = document.getElementById("btnTriggerRuleAudit");
@@ -811,6 +824,7 @@ function insertMention(handle) {
 function renderTimeline() {
   const container = document.getElementById("messageTimeline");
   container.innerHTML = "";
+  resetNewMessagesPill();
 
   if (state.messages.length === 0) {
     const topicLabel = state.activeStream === "dm"
@@ -831,7 +845,8 @@ function renderTimeline() {
     return;
   }
 
-  state.messages.forEach(appendMessageToTimeline);
+  state.messages.forEach((m) => appendMessageToTimeline(m));
+  scrollToBottom();
 }
 
 function renderAvatar(senderType, senderHandle) {
@@ -857,10 +872,20 @@ function renderAvatar(senderType, senderHandle) {
     </div>`;
 }
 
-function appendMessageToTimeline(msg) {
+/**
+ * Appends a message card and returns it.
+ * opts.live: arrived via SSE -> follow only if reader is at the bottom, else bump the "new messages" pill.
+ * opts.forceScroll: always scroll to the new card (e.g. the operator's own send).
+ */
+function appendMessageToTimeline(msg, opts = {}) {
   const container = document.getElementById("messageTimeline");
+  const existing = findMessageCard(msg.id);
+  if (existing) return existing;
+
+  const wasNearBottom = isNearBottom(container);
   const card = document.createElement("div");
   card.className = "message-card";
+  if (msg.id && !String(msg.id).startsWith("temp-")) card.dataset.id = msg.id;
 
   const isAgent = msg.sender_type === "agent";
   const avatarHtml = renderAvatar(msg.sender_type, msg.sender_handle);
@@ -941,7 +966,12 @@ function appendMessageToTimeline(msg) {
   } else {
     container.appendChild(card);
   }
-  scrollToBottom();
+  if (opts.forceScroll || (opts.live && wasNearBottom)) {
+    scrollToBottom();
+  } else if (opts.live) {
+    bumpNewMessagesPill();
+  }
+  return card;
 }
 
 function renderProposalWidget(widget) {
@@ -3208,51 +3238,135 @@ async function handleSendMessage() {
   if (!content) return;
 
   input.value = "";
+  closeMentionDropdown();
+  await sendChatMessage(content);
+}
 
-  // 1. Optimistically append user message to timeline immediately
+let tempMessageSeq = 0;
+
+async function sendChatMessage(content) {
+  const stream = state.activeStream;
+  const topic = state.activeTopic;
+
+  // 1. Optimistically append the operator's message; track this exact card.
   const tempUserMsg = {
-    id: "temp-" + Date.now(),
-    stream: state.activeStream,
-    topic: state.activeTopic,
+    id: `temp-${Date.now()}-${++tempMessageSeq}`,
+    stream,
+    topic,
     sender_handle: "@operator",
     sender_type: "user",
-    content: content,
+    content,
     created_at: new Date().toISOString(),
   };
   state.messages.push(tempUserMsg);
-  appendMessageToTimeline(tempUserMsg);
-  const appendedCards = document.querySelectorAll(".message-card");
-  if (appendedCards.length > 0) {
-    appendedCards[appendedCards.length - 1].classList.add("optimistic-sending");
-  }
-  scrollToBottom();
+  const card = appendMessageToTimeline(tempUserMsg, { forceScroll: true });
+  card.classList.add("optimistic-sending");
+  card._pendingMsg = tempUserMsg;
 
-  // 2. Identify target agent mention and show Slack-style status indicator immediately
+  // 2. Show the Slack-style status indicator for the mentioned (or default) agent.
   const mentionMatch = content.match(/@([\w-]+)/);
   const targetAgent = mentionMatch ? `@${mentionMatch[1]}` : "@secops-dispatcher";
   showAgentStatusIndicator(targetAgent, "Reasoning with Gemini and evaluating workflows...", "@operator");
 
-  // 3. Post message to backend
+  // 3. Post to backend; reconcile from the response (SSE may also reconcile first).
+  let errorText;
   try {
     const res = await fetch("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        stream: state.activeStream,
-        topic: state.activeTopic,
-        content: content,
-        sender_handle: "@operator",
-      }),
+      body: JSON.stringify({ stream, topic, content, sender_handle: "@operator" }),
     });
-
-    if (!res.ok) {
-      hideAgentStatusIndicator();
-      alert("Failed to send message: " + (await res.text()));
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      reconcilePendingCard(card, data && data.message);
+      return;
     }
+    errorText = await readErrorDetail(res);
   } catch (err) {
-    hideAgentStatusIndicator();
-    console.error("Error posting message:", err);
+    errorText = (err && err.message) || String(err);
   }
+
+  if (state.activeStream === stream && state.activeTopic === topic) {
+    hideAgentStatusIndicator();
+  }
+  markMessageFailed(card, errorText);
+}
+
+async function readErrorDetail(res) {
+  const text = await res.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.detail) return typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+  } catch (_) { /* not JSON */ }
+  return text || `HTTP ${res.status}`;
+}
+
+function findMessageCard(id) {
+  if (!id || String(id).startsWith("temp-")) return null;
+  const container = document.getElementById("messageTimeline");
+  if (!container) return null;
+  return Array.from(container.querySelectorAll(".message-card[data-id]")).find((el) => el.dataset.id === String(id)) || null;
+}
+
+// Mark an optimistic card as persisted and swap the temp record for the server record.
+function reconcilePendingCard(card, savedMsg) {
+  if (!card || !card._pendingMsg) return;
+  const temp = card._pendingMsg;
+  card._pendingMsg = null;
+  card.classList.remove("optimistic-sending");
+  if (savedMsg && savedMsg.id) {
+    card.dataset.id = savedMsg.id;
+    const idx = state.messages.indexOf(temp);
+    if (idx !== -1) state.messages[idx] = savedMsg;
+  }
+}
+
+// SSE fallback: match the oldest pending card with identical content.
+function reconcilePendingByContent(msg) {
+  const container = document.getElementById("messageTimeline");
+  if (!container) return false;
+  const card = Array.from(container.querySelectorAll(".message-card.optimistic-sending"))
+    .find((el) => el._pendingMsg && el._pendingMsg.content === msg.content);
+  if (!card) return false;
+  reconcilePendingCard(card, msg);
+  return true;
+}
+
+function markMessageFailed(card, errorText) {
+  const temp = card && card._pendingMsg;
+  showToast("error", `Message not sent: ${errorText}`);
+  if (!card || !temp) return;
+  card._pendingMsg = null;
+  card.classList.remove("optimistic-sending");
+  card.classList.add("send-failed");
+
+  const bar = document.createElement("div");
+  bar.className = "msg-send-error";
+  bar.setAttribute("role", "alert");
+  bar.innerHTML = `
+    <span class="msg-send-error-text">Not sent — ${escapeHtml(errorText)}</span>
+    <button type="button" class="msg-send-error-btn" data-act="retry">Retry</button>
+    <button type="button" class="msg-send-error-btn" data-act="edit">Edit</button>
+  `;
+  const discard = () => {
+    const idx = state.messages.indexOf(temp);
+    if (idx !== -1) state.messages.splice(idx, 1);
+    card.remove();
+  };
+  bar.querySelector('[data-act="retry"]').addEventListener("click", () => {
+    discard();
+    sendChatMessage(temp.content);
+  });
+  bar.querySelector('[data-act="edit"]').addEventListener("click", () => {
+    const input = document.getElementById("composerInput");
+    discard();
+    if (input) {
+      input.value = input.value.trim() ? `${temp.content}\n${input.value}` : temp.content;
+      input.focus();
+    }
+  });
+  const body = card.querySelector(".msg-body") || card;
+  body.appendChild(bar);
 }
 
 async function handleClearTopic() {
@@ -3829,6 +3943,57 @@ function renderFleetDrawerItems() {
 }
 
 // --- Helpers ---
+const NEAR_BOTTOM_PX = 80;
+
+function isNearBottom(el) {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+}
+
+let newMessagesCount = 0;
+
+function bumpNewMessagesPill() {
+  const pill = document.getElementById("newMessagesPill");
+  if (!pill) return;
+  newMessagesCount += 1;
+  pill.textContent = `${newMessagesCount} new message${newMessagesCount === 1 ? "" : "s"} ↓`;
+  pill.hidden = false;
+}
+
+function resetNewMessagesPill() {
+  newMessagesCount = 0;
+  const pill = document.getElementById("newMessagesPill");
+  if (pill) pill.hidden = true;
+}
+
+const COMPOSER_MAX_HEIGHT = 200;
+
+function autosizeComposer(el) {
+  if (!el || !el.offsetParent) return; // hidden: measure when visible
+  el.style.height = "auto";
+  const borders = el.offsetHeight - el.clientHeight;
+  const needed = el.scrollHeight + borders;
+  el.style.height = `${Math.min(needed, COMPOSER_MAX_HEIGHT)}px`;
+  el.style.overflowY = needed > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+}
+
+function setupComposerAutosize(el) {
+  if (!el) return;
+  // Many features prefill the composer via `input.value = ...`; intercept the
+  // setter on this element so every programmatic change resizes too.
+  const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+  if (desc && desc.get && desc.set) {
+    Object.defineProperty(el, "value", {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) { desc.set.call(this, v); autosizeComposer(this); },
+    });
+  }
+  el.addEventListener("input", () => autosizeComposer(el));
+  el.addEventListener("focus", () => autosizeComposer(el));
+  window.addEventListener("resize", () => autosizeComposer(el));
+}
+
 function scrollToBottom(smooth = false) {
   const el = document.getElementById("messageTimeline");
   if (!el) return;

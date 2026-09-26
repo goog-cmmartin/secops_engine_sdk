@@ -210,6 +210,20 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.get("status"), "ERROR")
             self.assertIn("not found", result.get("message", "").lower())
 
+            # Lookups of unscheduled agents are read-only: no phantom schedules
+            # appear in list_schedules() / the Audits view / active_patrols.
+            placeholder = scheduler.get_schedule("@yaral-optimizer")
+            self.assertFalse(placeholder["enabled"])
+            self.assertFalse(scheduler.has_schedule("@yaral-optimizer"))
+            self.assertFalse(scheduler.has_schedule("@unknown-agent"))
+            self.assertEqual(len(scheduler.list_schedules()), 9)
+            self.assertEqual(scheduler.get_deacon_status()["active_patrols"], 9)
+
+            # update_schedule is the only way to create a schedule.
+            scheduler.update_schedule("@yaral-optimizer", {"enabled": False})
+            self.assertTrue(scheduler.has_schedule("@yaral-optimizer"))
+            self.assertEqual(len(scheduler.list_schedules()), 10)
+
     async def test_patrol_execution_and_bead_creation(self):
         """Verifies that running patrols creates beads in Evidence Fabric and posts to ChatStore."""
         with tempfile.TemporaryDirectory() as tmpdir:

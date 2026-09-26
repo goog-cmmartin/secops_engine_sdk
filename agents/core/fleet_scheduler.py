@@ -182,10 +182,19 @@ class FleetScheduler:
 
             self._schedules[handle] = merged
 
+    def has_schedule(self, agent_handle: str) -> bool:
+        """True if the agent has a configured (default or persisted) schedule."""
+        return agent_handle in self._schedules
+
     def get_schedule(self, agent_handle: str) -> Dict[str, Any]:
-        """Returns the current schedule for an agent handle."""
+        """Returns the current schedule for an agent handle.
+
+        Read-only: unscheduled agents get a disabled placeholder that is *not*
+        stored, so looking an agent up never adds it to ``list_schedules()``.
+        Use ``update_schedule()`` to create a schedule.
+        """
         if agent_handle not in self._schedules:
-            self._schedules[agent_handle] = {
+            return {
                 "agent_handle": agent_handle,
                 "enabled": False,
                 "interval_hours": 24,
@@ -222,7 +231,9 @@ class FleetScheduler:
 
     async def trigger_run_now(self, agent_handle: str) -> Dict[str, Any]:
         """Forces an immediate on-demand execution of an agent's scheduled task."""
-        sched = self.get_schedule(agent_handle)
+        # Run against the stored dict (not a copy) so last_run_at / last_status /
+        # next_run_at are reflected in list_schedules() and the Audits view.
+        sched = self._schedules.get(agent_handle) or self.get_schedule(agent_handle)
         return await self._execute_scheduled_task(sched, forced=True)
 
     def get_deacon_status(self) -> Dict[str, Any]:

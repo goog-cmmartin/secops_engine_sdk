@@ -2,9 +2,11 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -23,26 +25,98 @@ class _InertAdapterForChatTest:
                 return {"success": True, "diagnostics": []}
             if "get" in name:
                 rule_id = args[0] if args else kwargs.get("rule_id_or_name", "ru_0e378636")
-                return {
-                    "rule_id": rule_id,
-                    "name": rule_id,
-                    "rule_text": (
-                        f"rule {rule_id} {{\n"
-                        f"  meta:\n"
-                        f"    author = \"secops-team\"\n"
-                        f"  events:\n"
-                        f"    $e1.metadata.event_type = \"USER_LOGIN\"\n"
-                        f"    $e2.metadata.event_type = \"FILE_CREATION\"\n"
-                        f"  match:\n"
-                        f"    $e1.principal.user.userid over 1h\n"
-                        f"  condition:\n"
-                        f"    $e1 and $e2\n"
-                        f"}}"
-                    ),
-                }
+                text = (
+                    f"rule {rule_id} {{\n"
+                    f"  meta:\n"
+                    f"    author = \"secops-team\"\n"
+                    f"  events:\n"
+                    f"    $e1.metadata.event_type = \"USER_LOGIN\"\n"
+                    f"    $e2.metadata.event_type = \"FILE_CREATION\"\n"
+                    f"  match:\n"
+                    f"    $e1.principal.user.userid over 1h\n"
+                    f"  condition:\n"
+                    f"    $e1 and $e2\n"
+                    f"}}"
+                )
+                # Chronicle returns the YARA-L source as "text"; "rule_text" kept
+                # for callers that read the raw dict.
+                return {"rule_id": rule_id, "name": rule_id, "text": text, "rule_text": text}
             return {"status": "ok", "mock_check": False}
         return _no_op
 
+
+class _FakeGenAI:
+    """Offline stand-in for ``google.genai`` used by BaseSecOpsAdkAgent.chat().
+
+    ``script(prompt, tools_by_name, config)`` plays the model: it may call any
+    of the agent's real (budgeted) tools, as Automatic Function Calling would,
+    and returns the final response text. Every ``chats.create`` config is
+    recorded on ``self.configs`` for assertions.
+    """
+
+    def __init__(self, script):
+        self.script = script
+        self.configs = []
+        fake = self
+
+        class _Response:
+            def __init__(self, text):
+                self.text = text
+
+        class _Session:
+            def __init__(self, config):
+                self.config = config
+
+            def send_message(self, prompt):
+                tools = {t.__name__: t for t in (self.config.tools or [])}
+                return _Response(fake.script(prompt, tools, self.config))
+
+        class _Chats:
+            def create(self, model, config):
+                fake.configs.append(config)
+                return _Session(config)
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                self.chats = _Chats()
+
+        class _Config:
+            def __init__(self, tools=None, system_instruction=None, **kwargs):
+                self.tools = tools
+                self.system_instruction = system_instruction
+
+        class _Types:
+            GenerateContentConfig = _Config
+
+        self.Client = _Client
+        self.types = _Types
+
+    def patched(self):
+        """Patch genai/types in base_adk_agent and provide an API key, clear of ADC/project env."""
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GCP_PROJECT_ID", "SECOPS_PROJECT_ID", "GOOGLE_CLOUD_PROJECT")}
+        env["GOOGLE_API_KEY"] = "offline-test-key"
+        stack = [
+            patch("agents.core.base_adk_agent.genai", self),
+            patch("agents.core.base_adk_agent.types", self.types),
+            patch.dict(os.environ, env, clear=True),
+        ]
+        return _PatchStack(stack)
+
+
+class _PatchStack:
+    def __init__(self, patches):
+        self.patches = patches
+
+    def __enter__(self):
+        for p in self.patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self.patches):
+            p.stop()
+        return False
 
 class ChatStoreTest(unittest.TestCase):
     def setUp(self):
@@ -187,6 +261,14 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mentions, ["@secops-dispatcher", "@yaral-optimizer"])
 
     async def test_dispatch_to_secops_dispatcher(self):
+        """Un-mentioned message routes to @secops-dispatcher and runs its Gemini loop."""
+        def model(prompt, tools, config):
+            self.assertEqual(prompt, "What can the fleet do?")
+            self.assertIn("SecOps Dispatcher", config.system_instruction)
+            self.assertIn("list_fleet_agents", tools)
+            return "I am the SecOps Dispatcher. Route rule timeouts to @yaral-optimizer."
+
+        fake = _FakeGenAI(model)
         user_msg = self.store.add_message(
             stream="general",
             topic="dispatcher",
@@ -194,12 +276,58 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
             sender_type="user",
             content="What can the fleet do?",
         )
-        replies = await self.dispatcher.dispatch(user_msg)
+        with fake.patched():
+            replies = await self.dispatcher.dispatch(user_msg)
+
+        self.assertEqual(len(fake.configs), 1)
         self.assertEqual(len(replies), 1)
         self.assertEqual(replies[0].sender_handle, "@secops-dispatcher")
+        self.assertEqual(replies[0].stream, "general")
+        self.assertEqual(replies[0].topic, "dispatcher")
         self.assertIn("SecOps Dispatcher", replies[0].content)
+        self.assertNotIn("Agent Configuration Error", replies[0].content)
+
+    async def test_dispatch_without_llm_credentials_reports_configuration_error(self):
+        """No ADC/API key → explicit configuration error reply, never a fabricated answer."""
+        user_msg = self.store.add_message(
+            stream="general",
+            topic="dispatcher",
+            sender_handle="@operator",
+            sender_type="user",
+            content="What can the fleet do?",
+        )
+        env = {k: v for k, v in os.environ.items() if k not in (
+            "GCP_PROJECT_ID", "SECOPS_PROJECT_ID", "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_API_KEY", "GEMINI_API_KEY")}
+        with patch.dict(os.environ, env, clear=True):
+            replies = await self.dispatcher.dispatch(user_msg)
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(replies[0].sender_handle, "@secops-dispatcher")
+        self.assertIn("Agent Configuration Error", replies[0].content)
 
     async def test_dispatch_to_yaral_optimizer_creates_proposal(self):
+        """@yaral-optimizer calling submit_rule_proposal yields an OPEN proposal + HITL card."""
+        optimized = (
+            "rule ru_0e378636 {\n  meta:\n    author = \"secops-team\"\n  events:\n"
+            "    $e1.metadata.event_type = \"USER_LOGIN\"\n"
+            "    $e1.principal.user.userid = $user\n"
+            "  match:\n    $user over 10m\n  condition:\n    $e1\n}"
+        )
+
+        def model(prompt, tools, config):
+            self.assertIn("ru_0e378636", prompt)
+            self.assertIn("submit_rule_proposal", tools)
+            result = tools["submit_rule_proposal"](
+                title="Narrow match window for ru_0e378636",
+                target_resource_id="ru_0e378636",
+                rationale="Match window narrowed 1h → 10m and partitioned on $user to prevent timeouts.",
+                proposed_diff="",
+                optimized_rule_text=optimized,
+            )
+            self.assertEqual(result.get("status"), "PROPOSAL_CREATED", result)
+            return f"Submitted {result['proposal_id']} for review."
+
+        fake = _FakeGenAI(model)
         user_msg = self.store.add_message(
             stream="detections",
             topic="rule-proposals",
@@ -207,7 +335,8 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
             sender_type="user",
             content="@yaral-optimizer please optimize rule ru_0e378636 to prevent timeouts",
         )
-        replies = await self.dispatcher.dispatch(user_msg)
+        with fake.patched():
+            replies = await self.dispatcher.dispatch(user_msg)
         self.assertEqual(len(replies), 1)
         reply = replies[0]
 
@@ -216,6 +345,9 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(reply.widget)
         self.assertEqual(reply.widget["type"], "hitl_proposal_card")
         self.assertEqual(reply.widget["target_resource_id"], "ru_0e378636")
+        self.assertIn("submit_rule_proposal", reply.content)  # provenance block
+        # Diff was computed from the live (inert) rule text, not the placeholder.
+        self.assertIn("-    $e2.metadata.event_type", reply.widget["proposed_diff"])
 
         # Verify proposal was saved to disk by ProposalManager
         saved_prop = self.prop_mgr.get_proposal(reply.proposal_id)
@@ -554,7 +686,19 @@ class FastApiServerEndpointsTest(unittest.TestCase):
 
         # 4. Verify builtin tools & cadence
         self.assertTrue(any(bt["name"] == "get_task_status" for bt in decay_agent.get("builtin_tools", [])))
-        self.assertEqual(decay_agent.get("cadence"), "Every 12h")
+        # Cadence mirrors the live scheduler config (default or persisted override),
+        # not a hard-coded interval.
+        from clients.web.server import _format_cadence, fleet_scheduler
+        self.assertTrue(fleet_scheduler.has_schedule("@detection-decay-agent"))
+        self.assertEqual(
+            decay_agent.get("cadence"),
+            _format_cadence(fleet_scheduler.get_schedule("@detection-decay-agent")),
+        )
+        self.assertRegex(decay_agent["cadence"], r"^Every \d+(h|m)$")
+        # Agents without a schedule are on-demand, and looking them up must not
+        # register phantom schedules in the Audits view.
+        self.assertEqual(agent_map["@yaral-optimizer"]["cadence"], "On-Demand")
+        self.assertFalse(fleet_scheduler.has_schedule("@yaral-optimizer"))
 
         # 5. Fetch single agent by handle (with @ and without @)
         res_single = self.client.get("/api/agents/@detection-decay-agent")

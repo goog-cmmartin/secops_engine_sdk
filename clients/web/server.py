@@ -360,11 +360,33 @@ async def sse_event_stream() -> StreamingResponse:
     )
 
 
+def _format_cadence(sched: Optional[Dict[str, Any]]) -> str:
+    """Operator-facing cadence label.
+
+    "On-Demand" = agent has no schedule; "Manual" = schedule exists but is
+    disabled; otherwise "Every Nh" / "Every Nm" (sub-hour intervals).
+    """
+    if not sched:
+        return "On-Demand"
+    if not sched.get("enabled"):
+        return "Manual"
+    hours = sched.get("interval_hours")
+    try:
+        hours = float(hours)
+    except (TypeError, ValueError):
+        return "Manual"
+    if hours <= 0:
+        return "Manual"
+    if hours < 1:
+        return f"Every {round(hours * 60)}m"
+    return f"Every {hours:g}h"
+
+
 def _serialize_agent(agent: Any) -> Dict[str, Any]:
     """Serializes an ADK 2 agent into a full specification with prompt and bound SDK tools."""
     sched = None
     try:
-        if fleet_scheduler:
+        if fleet_scheduler and fleet_scheduler.has_schedule(agent.handle):
             sched = fleet_scheduler.get_schedule(agent.handle)
     except Exception:
         pass
@@ -428,7 +450,7 @@ def _serialize_agent(agent: Any) -> Dict[str, Any]:
         "builtin_tools": builtin_tools,
         "skills": applicable_skills,
         "last_loaded_skill": getattr(agent, "last_loaded_skill", None),
-        "cadence": f"Every {sched.get('interval_hours')}h" if (sched and sched.get("enabled") and sched.get("interval_hours")) else ("Manual" if (sched and not sched.get("enabled")) else "On-Demand"),
+        "cadence": _format_cadence(sched),
         "last_patrol_run_at": sched.get("last_run_at") if sched else None,
         "next_patrol_run_at": sched.get("next_run_at") if sched else None,
     }

@@ -84,6 +84,13 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Harness: `harness.js` gained `El.prototype.closest` — g7's 4 "failures" since #33 were the stub lacking it, not an app bug.
 - Verified: `.venv/_jscheck/g5check.sh` (26 headless-Chrome checks) + g3 (34), g4 (33), g7 (31), g9 (25), uxcheck (31) green; pytest unchanged (3 known cred failures).
 
+## Backend follow-ups (done 2026-09-26)
+- **Phantom audit schedules:** `FleetScheduler.get_schedule()` stored a disabled placeholder for every unknown handle, so one `GET /api/agents` grew `list_schedules()` 9 → 22 and the Audits view showed 13 "Every 24h" cards for on-demand agents. `get_schedule()` is now read-only; added `has_schedule()`; `trigger_run_now()` runs against the stored dict so last/next run show up in the Audits view.
+- **Cadence label:** `_format_cadence()` in server.py: no schedule → "On-Demand" (was "Manual" for all 13), disabled → "Manual", sub-hour → "Every 30m" (was "Every 0.5h").
+- **test_agent_library_endpoints:** asserted "Every 12h"; the decay agent default has been 24h since 400dbff. Now asserts against the live scheduler config, plus On-Demand / no-phantom checks.
+- **Dispatcher tests:** `_FakeGenAI` offline stand-in for `google.genai` (plays the model and calls the agent's real budgeted tools as AFC would). The yaral test runs `submit_rule_proposal` end to end (preflight, computed diff, OPEN proposal, HITL card). Added a no-credentials → "Agent Configuration Error" test. Inert adapter now returns `text` (the Chronicle field `_map_rule_detail` reads) as well as `rule_text`.
+- Result: test_chat_server 23/23; full suite 41 → 38 failures (all tenant-config), 0 new.
+
 ## #5 terminology map (screen text only)
 | Current | Suggested |
 |---|---|
@@ -100,7 +107,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Backend: `POST /api/mitre/audit` and MITRE ATT&CK coverage assessment engine/endpoints now merged and operational.
 - ~~Diff modal raw diff~~ — already uses formatUnifiedDiff() (verified 2026-09-26)
 - ~~Hardcoded counts in copy~~ — none left; patrol pill is data-driven (verified 2026-09-26)
-- 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
+- ~~3 failures in tests/test_chat_server.py~~ — fixed 2026-09-26, see "Backend follow-ups" below
+- Suite-wide: 38 tests fail with `SecOpsConfigurationError` without a tenant `.env` (construct the live engine directly instead of via `tests/test_helpers.get_live_engine()`, which skips). Not UI-related; untouched.
 - Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live
 
 ## #7 / #8 notes (2026-09-26)

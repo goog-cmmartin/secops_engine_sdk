@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.4">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.5">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -173,6 +173,11 @@
           <!-- Floating Mention Dropdown Menu for Autocomplete -->
           <div id="mentionDropdown" class="mention-dropdown" style="display:none;"></div>
           <button id="newMessagesPill" class="new-messages-pill" type="button" hidden aria-live="polite">New messages ↓</button>
+          <div id="llmConfigNotice" class="composer-notice" role="status" hidden>
+            <strong>Agents can't reason yet.</strong>
+            No LLM credentials are configured on the server, so agents will reply with a configuration error.
+            Set Google Cloud ADC (<code>GCP_PROJECT_ID</code>) or <code>GOOGLE_API_KEY</code> and restart the server.
+          </div>
           <div class="composer-input-row">
             <textarea
               id="composerInput" aria-label="Message"
@@ -1365,6 +1370,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.6.6"></script>
+  <script src="/static/app.js?v=2.6.7"></script>
 </body>
 </html>

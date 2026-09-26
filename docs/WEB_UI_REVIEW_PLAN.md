@@ -145,6 +145,6 @@ Root cause of the chat noise found in the audit (133 unread, repeated "Agent Con
 | # | Item | Status |
 |---|------|--------|
 | 36 | Unread: exclude routine autonomous patrol posts (e.g. `@feed-agent` ✓ status) from counts; still count warnings/failures | Todo |
-| 37 | Missing credentials: show one persistent chat banner instead of a config-error reply per message | Todo |
+| 37 | Missing credentials: show one persistent chat banner instead of a config-error reply per message | Done — `/api/health.llm_configured` (bool only) + composer notice; creds logic shared via `llm_credentials_status()` |
 | 38 | 390px viewport overflows to 484px — find and fix the wide element | Todo |
 | 39 | Kanban Triage: collapse/group empty scheduled-audit tasks | Todo |

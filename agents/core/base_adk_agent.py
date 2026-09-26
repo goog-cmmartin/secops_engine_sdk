@@ -66,6 +66,21 @@ EXCLUDED_SERIALIZATION_KEYS = {
 }
 
 
+def llm_credentials_status() -> Dict[str, Any]:
+    """Resolves LLM credentials from the environment (single source of truth).
+
+    Returns ``project_id`` / ``api_key`` (may be None) and ``configured``.
+    Callers that surface status to users must not expose ``api_key``.
+    """
+    project_id = (
+        os.getenv("GCP_PROJECT_ID")
+        or os.getenv("SECOPS_PROJECT_ID")
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+    )
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    return {"project_id": project_id, "api_key": api_key, "configured": bool(project_id or api_key)}
+
+
 def get_model_token_limit(model_name: str, client: Optional[Any] = None) -> int:
     """Discovers the input token limit for the given model, checking API metadata or canonical registry."""
     clean_model = model_name.split("/")[-1]
@@ -672,12 +687,9 @@ class BaseSecOpsAdkAgent:
         self.last_submitted_proposal = None
         turn_start_idx = len(self.executed_tool_calls)
 
-        project_id = (
-            os.getenv("GCP_PROJECT_ID")
-            or os.getenv("SECOPS_PROJECT_ID")
-            or os.getenv("GOOGLE_CLOUD_PROJECT")
-        )
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        creds = llm_credentials_status()
+        project_id = creds["project_id"]
+        api_key = creds["api_key"]
 
         # Dynamic config resolution from EvidenceFabricStore
         active_system_instruction = self.system_instruction

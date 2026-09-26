@@ -208,6 +208,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   renderUnreadIndicators();
   initSSE();
+  checkLlmConfig();
   // Top-bar escalation count needs the overview even when Actions isn't open.
   if (state.currentView !== "gastown") loadGastownOverview();
   setInterval(() => {
@@ -216,6 +217,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 const TOPBAR_REFRESH_MS = 60000;
+
+// #37: one persistent notice instead of a config-error reply per message.
+async function checkLlmConfig() {
+  const notice = document.getElementById("llmConfigNotice");
+  if (!notice) return;
+  try {
+    const res = await fetch("/api/health");
+    if (!res.ok) return;
+    const health = await res.json();
+    notice.hidden = health.llm_configured !== false;
+  } catch (_) { /* connection state is covered by the live banner */ }
+}
 
 function setupEventListeners() {
   const composerInput = document.getElementById("composerInput");

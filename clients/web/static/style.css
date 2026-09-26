@@ -1250,6 +1250,26 @@ body.view-gastown-active .main-content-area {
   flex-shrink: 0;
 }
 
+.composer-notice {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-amber);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.composer-notice[hidden] {
+  display: none;
+}
+
+.composer-notice strong {
+  color: var(--text-main);
+}
+
 .composer-input-row {
   display: flex;
   gap: 10px;

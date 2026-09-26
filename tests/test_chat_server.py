@@ -438,6 +438,8 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         self.assertTrue(data["version"])  # shown in the UI About dialog
         self.assertGreaterEqual(data["agents_online"], 4)
         self.assertGreaterEqual(data["engine_capabilities"], 160)
+        # UI shows a composer notice when false; value must be a bare boolean.
+        self.assertIsInstance(data["llm_configured"], bool)
 
     def test_streams_and_agents_endpoints(self):
         res_streams = self.client.get("/api/streams")

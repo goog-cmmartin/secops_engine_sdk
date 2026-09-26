@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agents.core.base_adk_agent import llm_credentials_status
 from agents.core.proposal_manager import ProposalManager
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
@@ -258,6 +259,8 @@ async def health_check() -> Dict[str, Any]:
         "open_proposals": len(open_props),
         "engine_capabilities": len(engine.registry.list_capabilities()),
         "evidence_fabric_store": evidence_store.__class__.__name__,
+        # Booleans only — never expose the credential values themselves.
+        "llm_configured": llm_credentials_status()["configured"],
     }
 
 

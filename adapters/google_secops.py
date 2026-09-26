@@ -1273,6 +1273,24 @@ class GoogleSecOpsAdapter:
             return res["featuredContentRules"][0]
         return {}
 
+    def list_featured_content_rules(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists Curated Rules and their executable YARA-L logic from Content Hub Marketplace."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/contentHub/featuredContentRules"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        res = self._request("GET", path, params=params)
+        if isinstance(res, dict):
+            return res
+        return {"featuredContentRules": []}
+
     def count_curated_ruleset_detections(
         self,
         start_time: str,

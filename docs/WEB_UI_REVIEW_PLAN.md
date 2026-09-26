@@ -63,7 +63,7 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | Telemetry Hooks | Data Sources |
 
 ## Medium priority (backlog)
-- Backend: `POST /api/mitre/audit` is called by the MITRE Coverage header button but no route exists in server.py (404). UI now surfaces the error; implement the route or hide the button
+- Backend: `POST /api/mitre/audit` and MITRE ATT&CK coverage assessment engine/endpoints now merged and operational.
 - Remaining native confirm()/alert(): noise-exclusion deploy, clear-topic, send failure — migrate to openActionDialog()/showToast()
 - Diff modal shows raw diff text; chat widget uses coloured formatUnifiedDiff() — unify
 - Work-queue filter change wipes table with "Refreshing…" — keep rows, show inline spinner

@@ -102,6 +102,13 @@ DEFAULT_STREAMS = [
         "description": "Natural language queries, GoogleSQL compilations, aggregations, and metrics",
         "default_topics": ["sql-queries", "reports", "udm-aggregations"],
     },
+    {
+        "id": "threat_intel",
+        "name": "threat_intel",
+        "display_name": "Threat Intel & MITRE ATT&CK",
+        "description": "Tactical mapping, threat profiles, detection resilience, and blind spot discovery",
+        "default_topics": ["mitre-coverage", "threat-profiles", "blind-spots"],
+    },
 ]
 
 
@@ -513,6 +520,8 @@ class AgentDispatcher:
                 resolved_handle = "@raw-log-agent"
             elif h_lower in ("@namespace-label-agent", "@namespace-agent", "@ingestion-label-agent", "@label-agent", "@namespacelabelagent", "@namespacelabels", "@namespace", "@ingestion-labels"):
                 resolved_handle = "@namespace-label-agent"
+            elif h_lower in ("@mitre-attack-agent", "@mitre-agent", "@mitreagent", "@mitre", "@attack-agent", "@mitreattackagent"):
+                resolved_handle = "@mitre-attack-agent"
             else:
                 resolved_handle = handle
             agent = self.fleet.get(resolved_handle)
@@ -774,6 +783,18 @@ class AgentDispatcher:
 
         # Handle @raw-log-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & Raw Log Search)
         elif agent.handle in ("@raw-log-agent", "@raw-logs", "@log-search-agent", "@raw-log", "@rawlogs", "@rawlogagent"):
+            agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
+            widget = agent_msg.widget or getattr(agent, "last_widget", None)
+            if hasattr(agent, "last_widget"):
+                agent.last_widget = None
+            return {
+                "content": agent_msg.content,
+                "proposal_id": agent_msg.proposal_id,
+                "widget": widget,
+            }
+
+        # Handle @mitre-attack-agent (Live Autonomous Google ADK 2 Agent with Gemini 3.8 Flash & MITRE ATT&CK)
+        elif agent.handle in ("@mitre-attack-agent", "@MitreAttackAgent", "@mitre-agent", "@mitre", "@attack-agent"):
             agent_msg = await agent.chat(prompt, stream=message.stream, topic=message.topic)
             widget = agent_msg.widget or getattr(agent, "last_widget", None)
             if hasattr(agent, "last_widget"):

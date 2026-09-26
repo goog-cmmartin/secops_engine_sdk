@@ -23,8 +23,12 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 * **Client Interfaces & Integration:**
   * **CLI (`clients.cli.secops`)**: Feature-complete terminal CLI with rich tabular formatting, streaming output, and provenance tracking (including `secops detection baseline|cardinality|cases|test-refinement|tune`).
   * **Native Desktop GUI (`clients.desktop`)**: Qt / PySide6 desktop application with virtualized table models, faceted search, and async background workers.
-  * **Autonomous ADK 2 Agent Fleet (`agents/`)**: 18 specialized AI agents governed by Gas Town human-in-the-loop (HITL) proposal reviews, evidence stores, and real-time streaming chat across `#general`, `#detections`, `#ingestion`, and `#identity`:
+  * **Autonomous ADK 2 Agent Fleet (`agents/`)**: 22 specialized AI agents governed by Gas Town human-in-the-loop (HITL) proposal reviews, evidence stores, and real-time streaming chat across `#general`, `#detections`, `#ingestion`, `#identity`, `#briefings`, and `#infrastructure`:
     * `@secops-dispatcher`: Orchestrator and task delegator.
+    * `@cloud-status-agent`: Upstream Google Cloud & Google SecOps status incident auditor, regional disruption monitor, and telemetry correlation specialist.
+    * `@mitre-attack-agent`: MITRE ATT&CK Enterprise Matrix (v18.1) cartographer, contextual coverage scorer, and strategic gap analyst.
+    * `@soc-briefing-agent`: Deterministic SOC shift briefing synthesizer and institutional posture tracker.
+    * `@tenant-cartographer`: Tenant telemetry cartographer and UDM identity fidelity density profiler.
     * `@rule-troubleshooter`: Detection latency, timeout, and execution auditor.
     * `@yaral-optimizer`: High-performance YARAL refactoring engineer.
     * `@logjammer-agent`: Ingestion burst and quota anomaly investigator.
@@ -36,7 +40,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
     * `@log-cost-agent`: Multi-tier FinOps pricing analysis and telemetry volume bloat optimizer.
     * `@raw-log-agent`: Unparsed log discovery, product source volume profiling, and raw payload investigator.
     * `@namespace-label-agent`: Ingestion label consistency, UDM namespace hygiene, and Data RBAC alignment auditor.
-  * **Universal Capability Registry (`engine.facade`)**: 192 modular registered capabilities across 48 workflow modules for direct Python SDK and AI agent integration.
+  * **Universal Capability Registry (`engine.facade`)**: 206 modular registered capabilities across 52 workflow modules for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---

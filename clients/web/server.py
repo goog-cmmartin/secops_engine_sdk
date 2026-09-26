@@ -72,15 +72,14 @@ def _build_engine() -> SecOpsEngine:
 
 # Core singleton instances
 chat_store = ChatStore(root_dir=REPO_ROOT)
-proposal_manager = ProposalManager()  # ledger: SECOPS_LEDGER_ROOT
+proposal_manager = ProposalManager()
 engine = _build_engine()
 evidence_store = get_evidence_store(root_dir=str(REPO_ROOT))
 work_queue = get_work_queue(root_dir=str(REPO_ROOT))
-issue_materializer = IssueMaterializer()  # ledger: SECOPS_LEDGER_ROOT
+issue_materializer = IssueMaterializer()
 lifecycle_manager = SOCLifecycleManager(
     work_queue=work_queue,
     materializer=issue_materializer,
-    root_dir=REPO_ROOT,
 )
 fleet = create_agent_fleet(
     engine=engine,
@@ -1842,6 +1841,164 @@ async def list_observations_endpoint(limit: int = Query(50, ge=1, le=200)) -> Di
         }
     except Exception as e:
         logger.error(f"Error listing observations: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+# --- MITRE ATT&CK Strategic Mapping Endpoints ---
+
+@app.get("/api/mitre/profiles")
+async def list_mitre_profiles_endpoint() -> Dict[str, Any]:
+    """Lists available MITRE ATT&CK threat profiles."""
+    try:
+        profiles = engine.list_mitre_threat_profiles()
+        return {
+            "status": "SUCCESS",
+            "profiles": profiles,
+            "total": len(profiles),
+        }
+    except Exception as e:
+        logger.error(f"Error listing MITRE threat profiles: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/mitre/coverage")
+async def get_mitre_coverage_endpoint(
+    profile: str = Query("global_baseline"),
+    lookback_days: int = Query(7, ge=1, le=90),
+) -> Dict[str, Any]:
+    """Evaluates tenant detection rules and live telemetry against MITRE ATT&CK."""
+    try:
+        assessment = engine.analyze_mitre_coverage(
+            profile_id=profile,
+            sync_cache_if_empty=True,
+            time_unit="DAY",
+            time_value=str(lookback_days),
+        )
+        return {
+            "status": "SUCCESS",
+            "assessment": assessment.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"Error evaluating MITRE ATT&CK coverage: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.post("/api/mitre/audit")
+async def run_mitre_audit_endpoint(
+    profile: str = Query("global_baseline", description="Target industry threat profile"),
+    time_unit: str = Query("DAY", description="Telemetry lookback unit"),
+    time_value: str = Query("7", description="Lookback quantity string"),
+) -> Dict[str, Any]:
+    """Executes a strategic MITRE ATT&CK coverage assessment and posts the dashboard card to Fleet Chat."""
+    try:
+        assessment = engine.analyze_mitre_coverage(
+            profile_id=profile,
+            sync_cache_if_empty=True,
+            time_unit=time_unit,
+            time_value=time_value,
+        )
+        rep_dict = assessment.to_dict()
+        widget = {
+            "type": "mitre_coverage_card",
+            "title": f"MITRE ATT&CK Coverage: {assessment.profile_name}",
+            "profile_id": assessment.profile_id,
+            "profile_name": assessment.profile_name,
+            "coverage_score": round(assessment.coverage_score, 2),
+            "validated_technique_count": assessment.validated_technique_count,
+            "total_rules_evaluated": assessment.total_rules_evaluated,
+            "enabled_rules_count": assessment.enabled_rules_count,
+            "visibility_tactics_count": assessment.visibility_tactics_count,
+            "detection_tactics_count": assessment.detection_tactics_count,
+            "blind_tactics": assessment.blind_tactics,
+            "critical_techniques_count": len(assessment.critical_techniques),
+            "critical_techniques": assessment.critical_techniques[:5],
+            "resilient_techniques_count": len(assessment.resilient_techniques),
+            "fragile_techniques_count": len(assessment.fragile_techniques),
+            "visibility_gaps_count": len(assessment.visibility_gaps),
+            "detection_gaps_count": len(assessment.detection_gaps),
+            "created_at": assessment.created_at,
+        }
+        chat_store.add_message(
+            stream="threat_intel",
+            topic="mitre-coverage",
+            sender_handle="@mitre-attack-agent",
+            sender_type="agent",
+            content=(
+                f"🎯 **MITRE ATT&CK Strategic Posture Assessment Completed** for **{assessment.profile_name}**\n\n"
+                f"- **Contextual Coverage Score**: **{assessment.coverage_score:.1f}%**\n"
+                f"- **Covered Techniques**: `{assessment.validated_technique_count}` across `{assessment.total_rules_evaluated:,}` evaluated rules\n"
+                f"- **Tactical Visibility**: `{assessment.visibility_tactics_count} / 14` tactics\n"
+                f"- **Detection Coverage**: `{assessment.detection_tactics_count} / 14` tactics\n"
+                f"- **Resilient Techniques (≥2 rules)**: `{len(assessment.resilient_techniques)}`\n"
+                f"- **Fragile Detections (Single Point of Failure)**: `{len(assessment.fragile_techniques)}`\n"
+                f"- **Visibility Gaps**: `{len(assessment.visibility_gaps)}` | **Detection Gaps**: `{len(assessment.detection_gaps)}`\n"
+                f"- **Blind Tactics**: `{len(assessment.blind_tactics)}`"
+                + (f" (`{', '.join(assessment.blind_tactics)}`)" if assessment.blind_tactics else " (None)")
+                + "\n\nInteractive posture matrix and tactical breakdown rendered below."
+            ),
+            widget=widget,
+        )
+        return {
+            "status": "SUCCESS",
+            "assessment": rep_dict,
+            "widget": widget,
+        }
+    except Exception as e:
+        logger.error(f"Error running MITRE ATT&CK audit: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"MITRE audit failed: {e}")
+
+
+@app.post("/api/mitre/sync")
+async def sync_mitre_rules_endpoint(
+    force: bool = Query(False),
+    include_curated: bool = Query(True),
+    max_rules: Optional[int] = Query(None),
+) -> Dict[str, Any]:
+    """Synchronizes customer and curated detection rules into Firestore with parsed MITRE technique IDs."""
+    try:
+        res = engine.sync_mitre_rules(
+            force_refresh=force,
+            include_curated=include_curated,
+            max_rules=max_rules,
+        )
+        return {
+            "status": "SUCCESS",
+            "result": res,
+        }
+    except Exception as e:
+        logger.error(f"Error synchronizing MITRE rules: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/mitre/report")
+async def get_mitre_report_endpoint(
+    profile: str = Query("global_baseline"),
+) -> Dict[str, Any]:
+    """Generates executive Markdown report for MITRE ATT&CK posture."""
+    try:
+        rep = engine.generate_mitre_report(profile_id=profile)
+        return {
+            "status": "SUCCESS",
+            "report": rep,
+        }
+    except Exception as e:
+        logger.error(f"Error generating MITRE report: {e}", exc_info=True)
+        return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/mitre/technique/{technique_id}")
+async def get_technique_rules_endpoint(technique_id: str) -> Dict[str, Any]:
+    """Retrieves all detection rules mapped to a specific MITRE ATT&CK technique."""
+    try:
+        rules = engine.get_technique_rules(technique_id)
+        return {
+            "status": "SUCCESS",
+            "technique_id": technique_id,
+            "rules": rules,
+            "count": len(rules),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching rules for technique {technique_id}: {e}", exc_info=True)
         return {"status": "ERROR", "message": str(e)}
 
 

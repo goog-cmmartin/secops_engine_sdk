@@ -1134,6 +1134,56 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     cart_vol.add_argument("--limit", "-l", type=int, default=50, help="Display limit (default: 50)")
     cart_vol.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    # MITRE ATT&CK Strategic Mapping & Gap Analysis command
+    mitre_parser = subparsers.add_parser(
+        "mitre", help="Map detection rules and telemetry against MITRE ATT&CK matrix and threat profiles"
+    )
+    mitre_sub = mitre_parser.add_subparsers(dest="mitre_action", required=True)
+
+    mitre_audit = mitre_sub.add_parser("audit", help="Audit tenant MITRE ATT&CK coverage, score, and gaps")
+    mitre_audit.add_argument("--profile", "-p", default="global_baseline", help="Threat profile ID (default: global_baseline)")
+    mitre_audit.add_argument("--days", "-d", type=int, default=7, help="Ingestion telemetry lookback in days (default: 7)")
+    mitre_audit.add_argument("--sync", action="store_true", help="Force sync rules cache before audit")
+    mitre_audit.add_argument("--json", action="store_true", help="Output raw JSON")
+    mitre_audit.add_argument("--report", "-r", action="store_true", help="Generate executive Markdown report")
+
+    mitre_sync = mitre_sub.add_parser("sync", help="Sync custom and curated detection rules into Firestore cache")
+    mitre_sync.add_argument("--force", "-f", action="store_true", help="Force full refresh")
+    mitre_sync.add_argument("--no-curated", action="store_true", help="Exclude Google curated rules")
+    mitre_sync.add_argument("--limit", "-l", type=int, default=None, help="Limit max rules processed")
+    mitre_sync.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    mitre_profiles = mitre_sub.add_parser("profiles", help="List available threat profiles and high-risk weights")
+    mitre_profiles.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    mitre_tech = mitre_sub.add_parser("technique", help="List rules covering a specific MITRE ATT&CK technique")
+    mitre_tech.add_argument("--id", "-i", required=True, help="MITRE Technique ID (e.g. T1059.001)")
+    mitre_tech.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # Cloud Status command
+    status_parser = subparsers.add_parser(
+        "cloud-status",
+        help="Monitor Google Cloud SecOps service status, outages, and regional incidents from status.cloud.google.com",
+    )
+    status_sub = status_parser.add_subparsers(dest="status_action", required=True)
+
+    status_incidents = status_sub.add_parser("incidents", help="Query live Google Cloud Security Status incidents")
+    status_incidents.add_argument("--service", "-s", default="Google SecOps", help="Service name filter (default: 'Google SecOps')")
+    status_incidents.add_argument("--active-only", "-a", action="store_true", help="Filter for only active disruptions")
+    status_incidents.add_argument("--region", "-r", default=None, help="Filter by cloud region (e.g. europe-west3, us)")
+    status_incidents.add_argument("--days", "-d", type=int, default=30, help="Lookback window in days (default: 30)")
+    status_incidents.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    status_report = status_sub.add_parser("report", help="Audit overall Google SecOps platform health and disruptions")
+    status_report.add_argument("--service", "-s", default="Google SecOps", help="Service name filter (default: 'Google SecOps')")
+    status_report.add_argument("--region", "-r", default=None, help="Filter by cloud region")
+    status_report.add_argument("--days", "-d", type=int, default=14, help="Recent incidents lookback in days (default: 14)")
+    status_report.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    status_correlate = status_sub.add_parser("correlate", help="Correlate a status incident with tenant telemetry and guidance")
+    status_correlate.add_argument("incident_id", help="Cloud status incident ID (e.g. XAZXzkY1Yg2GwXWnFw6M)")
+    status_correlate.add_argument("--json", action="store_true", help="Output raw JSON")
+
     args = parser.parse_args()
 
     if args.command == "search":
@@ -1266,6 +1316,187 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_ingestion_hygiene_cli(args)
     elif args.command == "cartography":
         run_cartography_cli(args)
+    elif args.command == "mitre":
+        run_mitre_cli(args)
+    elif args.command == "cloud-status":
+        run_cloud_status_cli(args)
+
+
+def run_mitre_cli(args):
+    import json
+    engine = SecOpsEngine()
+
+    if args.mitre_action == "sync":
+        print("\n[CLI] Synchronizing detection rules into MITRE cache...")
+        res = engine.sync_mitre_rules(
+            force_refresh=args.force,
+            include_curated=not args.no_curated,
+            max_rules=args.limit,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(res, indent=2, default=str))
+            return
+        print(f"Status: {res.get('status')}")
+        print(f"Rules Processed: {res.get('rules_processed')}")
+        print(f"Techniques Found: {res.get('techniques_found')}")
+        print(f"Tactics Found: {res.get('tactics_found')}")
+        print(f"Curated Rules: {res.get('curated_rules_count')}")
+        print(f"Custom Rules: {res.get('custom_rules_count')}")
+
+    elif args.mitre_action == "profiles":
+        profiles = engine.list_mitre_threat_profiles()
+        if getattr(args, "json", False):
+            print(json.dumps(profiles, indent=2, default=str))
+            return
+        print("\n" + "=" * 70)
+        print(" MITRE ATT&CK THREAT PROFILES")
+        print("=" * 70)
+        for p in profiles:
+            pid = p.get('id') or p.get('profile_id', 'unknown')
+            print(f"- {pid:<24} | {p.get('name')}")
+            print(f"  Description: {p.get('description')}")
+            print(f"  Baseline Techniques: {p.get('relevant_techniques', 0)}")
+            print(f"  High-Risk Weights:   {p.get('high_risk_techniques_count', 0)}\n")
+
+    elif args.mitre_action == "technique":
+        rules = engine.get_technique_rules(args.id)
+        if getattr(args, "json", False):
+            print(json.dumps(rules, indent=2, default=str))
+            return
+        print(f"\n[CLI] Rules mapped to MITRE Technique {args.id}: {len(rules)} found\n")
+        for r in rules:
+            rid = r.get("rule_id", "Unknown")
+            name = r.get("display_name", rid)
+            is_curated = "CURATED" if r.get("is_curated") else "CUSTOM"
+            enabled = "ENABLED" if r.get("enabled") else "DISABLED"
+            print(f"- [{is_curated}] [{enabled}] {name} ({rid})")
+            if r.get("mitre_tactics"):
+                print(f"  Tactics: {', '.join(r.get('mitre_tactics'))}")
+
+    elif args.mitre_action == "audit":
+        if args.sync:
+            print("[CLI] Syncing rules cache before audit...")
+            engine.sync_mitre_rules(force_refresh=True)
+
+        print(f"\n[CLI] Auditing MITRE ATT&CK coverage (profile='{args.profile}', lookback={args.days}d)...")
+        assessment = engine.analyze_mitre_coverage(
+            profile_id=args.profile,
+            sync_cache_if_empty=True,
+            time_unit="DAY",
+            time_value=str(args.days),
+        )
+
+        if getattr(args, "report", False):
+            rep = engine.generate_mitre_report(assessment=assessment, profile_id=args.profile)
+            if getattr(args, "json", False):
+                print(json.dumps(rep, indent=2, default=str))
+            else:
+                print("\n" + rep.get("markdown", ""))
+            return
+
+        if getattr(args, "json", False):
+            print(json.dumps(assessment.to_dict(), indent=2, default=str))
+            return
+
+        print("\n" + "=" * 70)
+        print(f" MITRE ATT&CK STRATEGIC COVERAGE: {assessment.profile_name.upper()}")
+        print("=" * 70)
+        print(f" Contextual Coverage Score:   {assessment.coverage_score:.1f}%")
+        print(f" Validated Covered Techniques:{assessment.validated_technique_count}")
+        print(f" Active Rules Evaluated:      {assessment.enabled_rules_count} / {assessment.total_rules_evaluated}")
+        print(f" Tactical Visibility:        {assessment.visibility_tactics_count} / 14 tactics")
+        print(f" Tactical Detections:         {assessment.detection_tactics_count} / 14 tactics")
+        print("-" * 70)
+        print(f" Resilient Techniques (>=2 rules): {len(assessment.resilient_techniques)}")
+        print(f" Fragile Techniques (1 rule):      {len(assessment.fragile_techniques)}")
+        print(f" Visibility Gaps (Telemetry Missing): {len(assessment.visibility_gaps)}")
+        print(f" Detection Gaps (Rules Missing):      {len(assessment.detection_gaps)}")
+        print(f" Blind Tactics:                       {len(assessment.blind_tactics)} {assessment.blind_tactics}")
+        print(f" Critical Technique Gaps:             {len(assessment.critical_techniques)}")
+        print("=" * 70 + "\n")
+
+
+def run_cloud_status_cli(args):
+    import json
+    engine = SecOpsEngine()
+
+    if args.status_action == "incidents":
+        incidents = engine.query_cloud_status_incidents(
+            service_name=args.service if args.service != "all" else None,
+            only_active=args.active_only,
+            region=args.region,
+            lookback_days=args.days,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps([i.to_dict() for i in incidents], indent=2, default=str))
+            return
+
+        print("\n" + "=" * 78)
+        print(" GOOGLE CLOUD SECURITY STATUS INCIDENTS")
+        print("=" * 78)
+        print(f"Service Filter: {args.service or 'ALL'} | Active Only: {args.active_only} | Lookback: {args.days}d")
+        print(f"Found: {len(incidents)} incident(s)\n")
+
+        for inc in incidents:
+            state_str = "⚠️ ACTIVE" if inc.is_active else "✓ RESOLVED"
+            print(f"- [{state_str}] {inc.id} | Severity: {inc.severity} | Impact: {inc.status_impact}")
+            print(f"  Description: {inc.external_desc}")
+            print(f"  Begin: {inc.begin} | End: {inc.end or 'Ongoing'}")
+            if inc.currently_affected_locations:
+                locs = ", ".join(l.id for l in inc.currently_affected_locations)
+                print(f"  Affected Locations: {locs}")
+            print(f"  URL: {inc.public_url}\n")
+
+    elif args.status_action == "report":
+        report = engine.audit_cloud_service_status(
+            service_name=args.service,
+            region=args.region,
+            lookback_days=args.days,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(report.to_dict(), indent=2, default=str))
+            return
+
+        health_icon = "✓" if report.overall_health == "HEALTHY" else "⚠️"
+        print("\n" + "=" * 78)
+        print(f" GOOGLE CLOUD SECOPS PLATFORM HEALTH REPORT: {health_icon} {report.overall_health}")
+        print("=" * 78)
+        print(f"As of:              {report.as_of}")
+        print(f"Status Summary:     {report.status_summary}")
+        print(f"Active Incidents:   {len(report.active_incidents)}")
+        print(f"Recent Resolved:    {len(report.recent_resolved)} (past {args.days} days)")
+        print(f"Total Evaluated:    {report.total_incidents}\n")
+
+        if report.active_incidents:
+            print("ACTIVE DISRUPTIONS:")
+            for inc in report.active_incidents:
+                print(f"  ⚠️ {inc.id}: {inc.external_desc}")
+                print(f"     Severity: {inc.severity} | Impact: {inc.status_impact} | URL: {inc.public_url}")
+            print()
+
+        if report.recent_resolved:
+            print("RECENTLY RESOLVED INCIDENTS:")
+            for inc in report.recent_resolved[:5]:
+                print(f"  ✓ {inc.id}: {inc.external_desc}")
+                print(f"    Resolved: {inc.end} | URL: {inc.public_url}")
+            print()
+
+    elif args.status_action == "correlate":
+        res = engine.correlate_cloud_incident(args.incident_id)
+        if getattr(args, "json", False):
+            print(json.dumps(res, indent=2, default=str))
+            return
+
+        print("\n" + "=" * 78)
+        print(f" CLOUD INCIDENT TELEMETRY CORRELATION: {args.incident_id}")
+        print("=" * 78)
+        print(f"Status:             {'⚠️ ACTIVE' if res.get('is_active') else '✓ RESOLVED'}")
+        print(f"Severity:           {res.get('severity')} | Impact: {res.get('status_impact')}")
+        print(f"Description:        {res.get('external_desc')}")
+        print(f"Affected Regions:   {', '.join(res.get('affected_regions', [])) or 'Global/Unspecified'}")
+        print(f"Public URL:         {res.get('public_url')}\n")
+        print("OPERATIONAL GUIDANCE & RECOMMENDATION:")
+        print(f"  -> {res.get('correlated_recommendation')}\n")
 
 
 def run_cartography_cli(args):

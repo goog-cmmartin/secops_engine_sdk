@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-25 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-09-26 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**199 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**206 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-09-25 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 39 |
-| primitive | 28 |
-| query | 132 |
-| **total** | **199** |
+| workflow | 41 |
+| primitive | 29 |
+| query | 136 |
+| **total** | **206** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 57 |
-| bounded | 12 |
+| single | 58 |
+| bounded | 15 |
 | unbounded | 63 |
-| (n/a — workflows/primitive) | 67 |
+| (n/a — workflows/primitive) | 70 |
 
 ## Workflows
 
@@ -56,6 +56,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `feed.timestamp_integrity_audit` | feed | Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief. |
 | `ingestion.labels_and_namespaces.analyze` | ingestion | Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes. |
 | `log_cost.analyze` | log | Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations. |
+| `mitre.analyze_coverage` | threat_intelligence | Evaluates cached detection rules and live ingestion telemetry against MITRE ATT&CK matrix and threat profiles to determine coverage score and gaps. |
+| `mitre.generate_report` | threat_intelligence | Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture. |
 | `parser.audit_health` | parser | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
 | `parser.diagnose_unparsed` | parser | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
 | `playbook.audit_health` | playbook | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
@@ -190,6 +192,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `data_table.list` | query | `unbounded` | `list_data_tables` | Lists all structured Data Tables defined in Chronicle SIEM. |
 | `data_table.list_rows` | query | `unbounded` | `list_data_table_rows` | Queries and filters rows contained within a Chronicle SIEM Data Table. |
 
+### detection_engineering  (1: primitive=1)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `mitre.sync_cache` | primitive | — | `sync_mitre_rules_cache` | Synchronizes customer and curated Google SecOps detection rules into Firestore cache with parsed MITRE technique IDs and tactics. |
+
 ### enrichment  (3: query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
@@ -235,6 +243,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `gcp_monitoring.time_series` | query | `bounded` | `query_gcp_cloud_metrics` | Queries Google Cloud Monitoring time series for Chronicle ingestion, normalizer, agent, and API metrics. |
+
+### gcp_status  (2: query=2)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `gcp_status.incidents.query` | query | `bounded` | `query_cloud_status_incidents` | Queries Google Cloud Security Status feed for active and historical disruptions, maintenance, and outages affecting Google SecOps. |
+| `gcp_status.report.audit` | query | `single` | `audit_cloud_service_status` | Audits overall Google SecOps service health, active incidents, recent resolutions, and regional impact from Google Cloud Status. |
 
 ### identity  (3: query=3)
 
@@ -424,3 +439,12 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `tenant.profile.graph_lineage` | workflow | — | `get_entity_graph_lineage` | Executes native GoogleSQL pipe aggregation against live graph table to map entity resolution provenance and longevity. |
 | `tenant.profile.identity_fidelity` | workflow | — | `get_identity_fidelity` | Executes native GoogleSQL pipe aggregation against live events to measure distinct user identity density per log type. |
 | `tenant.profile.volume_pareto` | workflow | — | `get_log_source_volume_pareto` | Executes native GoogleSQL pipe aggregation against live events to rank log sources by raw ingestion volume. |
+
+### threat_intelligence  (4: workflow=2, query=2)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `mitre.analyze_coverage` | workflow | — | `analyze_mitre_coverage` | Evaluates cached detection rules and live ingestion telemetry against MITRE ATT&CK matrix and threat profiles to determine coverage score and gaps. |
+| `mitre.generate_report` | workflow | — | `generate_mitre_report` | Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture. |
+| `mitre.get_technique_rules` | query | `bounded` | `get_technique_rules` | Retrieves all custom and curated detection rules mapped to a specific MITRE ATT&CK technique ID. |
+| `mitre.list_threat_profiles` | query | `bounded` | `list_mitre_threat_profiles` | Lists available threat profiles with baseline technique counts and high-risk weight mappings. |

@@ -4827,6 +4827,16 @@ class Provenance:
             "details": self.details,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Provenance:
+        if not data or not isinstance(data, dict):
+            return cls()
+        return cls(
+            source=str(data.get("source", "")),
+            timestamp=str(data.get("timestamp", datetime.now(timezone.utc).isoformat())),
+            details=dict(data.get("details", {})),
+        )
+
 
 class RuleConflictType:
     """Standardized conflict and overlap classifications for YARA-L detection rules."""
@@ -5986,9 +5996,12 @@ class Observation:
     issue_id: Optional[str] = None
     communication: CommunicationPolicy = field(default_factory=CommunicationPolicy)
     policy: Optional[CommunicationPolicy] = None
+    communication_policy: Optional[CommunicationPolicy] = None
 
     def __post_init__(self):
-        if self.policy is not None:
+        if self.communication_policy is not None:
+            self.communication = self.communication_policy
+        elif self.policy is not None:
             self.communication = self.policy
         if not self.observation_id:
             now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -6168,5 +6181,270 @@ class ShiftBriefing:
         )
 
 
+@dataclass
+class MitreCoverageAssessment:
+    """Comprehensive strategic MITRE ATT&CK coverage assessment and gap analysis."""
 
+    assessment_id: str = ""
+    profile_id: str = "global_baseline"
+    profile_name: str = "Global Baseline"
+    coverage_score: float = 0.0
+    total_baseline_techniques: int = 100
+    validated_technique_count: int = 0
+    total_rules_evaluated: int = 0
+    enabled_rules_count: int = 0
+    visibility_tactics_count: int = 0
+    detection_tactics_count: int = 0
+    visibility_tactics: List[str] = field(default_factory=list)
+    covered_tactics: List[str] = field(default_factory=list)
+    visibility_gaps: List[str] = field(default_factory=list)
+    detection_gaps: List[str] = field(default_factory=list)
+    blind_tactics: List[str] = field(default_factory=list)
+    critical_techniques: List[Dict[str, Any]] = field(default_factory=list)
+    resilient_techniques: List[Dict[str, Any]] = field(default_factory=list)
+    fragile_techniques: List[Dict[str, Any]] = field(default_factory=list)
+    categorized_logs: Dict[str, List[str]] = field(default_factory=dict)
+    score_breakdown: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    provenance: Optional[Provenance] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "assessment_id": self.assessment_id,
+            "profile_id": self.profile_id,
+            "profile_name": self.profile_name,
+            "coverage_score": self.coverage_score,
+            "total_baseline_techniques": self.total_baseline_techniques,
+            "validated_technique_count": self.validated_technique_count,
+            "total_rules_evaluated": self.total_rules_evaluated,
+            "enabled_rules_count": self.enabled_rules_count,
+            "visibility_tactics_count": self.visibility_tactics_count,
+            "detection_tactics_count": self.detection_tactics_count,
+            "visibility_tactics": self.visibility_tactics,
+            "covered_tactics": self.covered_tactics,
+            "visibility_gaps": self.visibility_gaps,
+            "detection_gaps": self.detection_gaps,
+            "blind_tactics": self.blind_tactics,
+            "critical_techniques": self.critical_techniques,
+            "resilient_techniques": self.resilient_techniques,
+            "fragile_techniques": self.fragile_techniques,
+            "categorized_logs": self.categorized_logs,
+            "score_breakdown": self.score_breakdown,
+            "created_at": self.created_at,
+            "provenance": self.provenance.to_dict() if self.provenance and hasattr(self.provenance, "to_dict") else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> MitreCoverageAssessment:
+        prov = None
+        if data.get("provenance") and isinstance(data["provenance"], dict):
+            try:
+                prov = Provenance.from_dict(data["provenance"])
+            except Exception:
+                pass
+        return cls(
+            assessment_id=str(data.get("assessment_id", "")),
+            profile_id=str(data.get("profile_id", "global_baseline")),
+            profile_name=str(data.get("profile_name", "Global Baseline")),
+            coverage_score=float(data.get("coverage_score", 0.0)),
+            total_baseline_techniques=int(data.get("total_baseline_techniques", 100)),
+            validated_technique_count=int(data.get("validated_technique_count", 0)),
+            total_rules_evaluated=int(data.get("total_rules_evaluated", 0)),
+            enabled_rules_count=int(data.get("enabled_rules_count", 0)),
+            visibility_tactics_count=int(data.get("visibility_tactics_count", 0)),
+            detection_tactics_count=int(data.get("detection_tactics_count", 0)),
+            visibility_tactics=list(data.get("visibility_tactics", [])),
+            covered_tactics=list(data.get("covered_tactics", [])),
+            visibility_gaps=list(data.get("visibility_gaps", [])),
+            detection_gaps=list(data.get("detection_gaps", [])),
+            blind_tactics=list(data.get("blind_tactics", [])),
+            critical_techniques=list(data.get("critical_techniques", [])),
+            resilient_techniques=list(data.get("resilient_techniques", [])),
+            fragile_techniques=list(data.get("fragile_techniques", [])),
+            categorized_logs=dict(data.get("categorized_logs", {})),
+            score_breakdown=dict(data.get("score_breakdown", {})),
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+            provenance=prov,
+        )
+
+
+@dataclass
+class CloudStatusLocation:
+    """A geographic location or multi-region affected by a cloud incident."""
+    id: str
+    title: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"id": self.id, "title": self.title}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CloudStatusLocation:
+        return cls(
+            id=str(data.get("id", "")),
+            title=str(data.get("title", "")),
+        )
+
+
+@dataclass
+class CloudStatusUpdate:
+    """A chronological update message within a Google Cloud status incident."""
+    created: str
+    modified: str
+    when: str
+    text: str
+    status: str
+    affected_locations: List[CloudStatusLocation] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "created": self.created,
+            "modified": self.modified,
+            "when": self.when,
+            "text": self.text,
+            "status": self.status,
+            "affected_locations": [loc.to_dict() for loc in self.affected_locations],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CloudStatusUpdate:
+        locs = [
+            CloudStatusLocation.from_dict(l) if isinstance(l, dict) else CloudStatusLocation(id=str(l), title=str(l))
+            for l in data.get("affected_locations", [])
+        ]
+        return cls(
+            created=str(data.get("created", "")),
+            modified=str(data.get("modified", "")),
+            when=str(data.get("when", "")),
+            text=str(data.get("text", "")),
+            status=str(data.get("status", "")),
+            affected_locations=locs,
+        )
+
+
+@dataclass
+class CloudStatusIncident:
+    """An incident published on status.cloud.google.com/security/incidents.json."""
+    id: str
+    number: str = ""
+    begin: str = ""
+    end: Optional[str] = None
+    created: str = ""
+    modified: str = ""
+    external_desc: str = ""
+    status_impact: str = "SERVICE_INFORMATION"
+    severity: str = "medium"
+    service_key: str = "FHwvkSZ6RzzDYAvDZXMM"
+    service_name: str = "Google SecOps"
+    affected_products: List[Dict[str, str]] = field(default_factory=list)
+    currently_affected_locations: List[CloudStatusLocation] = field(default_factory=list)
+    previously_affected_locations: List[CloudStatusLocation] = field(default_factory=list)
+    updates: List[CloudStatusUpdate] = field(default_factory=list)
+    most_recent_update: Optional[CloudStatusUpdate] = None
+    uri: str = ""
+
+    @property
+    def is_active(self) -> bool:
+        """Determines if the incident is currently ongoing."""
+        return not bool(self.end) and self.status_impact != "AVAILABLE"
+
+    @property
+    def public_url(self) -> str:
+        """Fully-qualified URL to the incident dashboard page."""
+        clean_uri = self.uri.lstrip("/")
+        return f"https://status.cloud.google.com/security/{clean_uri}" if clean_uri else f"https://status.cloud.google.com/security/incidents/{self.id}"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "number": self.number,
+            "begin": self.begin,
+            "end": self.end,
+            "created": self.created,
+            "modified": self.modified,
+            "external_desc": self.external_desc,
+            "status_impact": self.status_impact,
+            "severity": self.severity,
+            "service_key": self.service_key,
+            "service_name": self.service_name,
+            "affected_products": self.affected_products,
+            "currently_affected_locations": [loc.to_dict() for loc in self.currently_affected_locations],
+            "previously_affected_locations": [loc.to_dict() for loc in self.previously_affected_locations],
+            "updates": [u.to_dict() for u in self.updates],
+            "most_recent_update": self.most_recent_update.to_dict() if self.most_recent_update else None,
+            "uri": self.uri,
+            "is_active": self.is_active,
+            "public_url": self.public_url,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CloudStatusIncident:
+        curr_locs = [
+            CloudStatusLocation.from_dict(l) if isinstance(l, dict) else CloudStatusLocation(id=str(l), title=str(l))
+            for l in data.get("currently_affected_locations", [])
+        ]
+        prev_locs = [
+            CloudStatusLocation.from_dict(l) if isinstance(l, dict) else CloudStatusLocation(id=str(l), title=str(l))
+            for l in data.get("previously_affected_locations", [])
+        ]
+        upds = [
+            CloudStatusUpdate.from_dict(u) if isinstance(u, dict) else u
+            for u in data.get("updates", [])
+        ]
+        mru = None
+        if data.get("most_recent_update") and isinstance(data["most_recent_update"], dict):
+            mru = CloudStatusUpdate.from_dict(data["most_recent_update"])
+        elif upds:
+            mru = upds[-1]
+
+        return cls(
+            id=str(data.get("id", "")),
+            number=str(data.get("number", "")),
+            begin=str(data.get("begin", "")),
+            end=data.get("end"),
+            created=str(data.get("created", "")),
+            modified=str(data.get("modified", "")),
+            external_desc=str(data.get("external_desc", "")),
+            status_impact=str(data.get("status_impact", "SERVICE_INFORMATION")),
+            severity=str(data.get("severity", "medium")),
+            service_key=str(data.get("service_key", "FHwvkSZ6RzzDYAvDZXMM")),
+            service_name=str(data.get("service_name", "Google SecOps")),
+            affected_products=list(data.get("affected_products", [])),
+            currently_affected_locations=curr_locs,
+            previously_affected_locations=prev_locs,
+            updates=upds,
+            most_recent_update=mru,
+            uri=str(data.get("uri", "")),
+        )
+
+
+@dataclass
+class CloudStatusReport:
+    """Holistic status report of Google SecOps platform health and external incidents."""
+    as_of: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    total_incidents: int = 0
+    active_incidents: List[CloudStatusIncident] = field(default_factory=list)
+    recent_resolved: List[CloudStatusIncident] = field(default_factory=list)
+    status_summary: str = "All Google SecOps systems operational."
+    overall_health: str = "HEALTHY"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "as_of": self.as_of,
+            "total_incidents": self.total_incidents,
+            "active_incidents": [inc.to_dict() for inc in self.active_incidents],
+            "recent_resolved": [inc.to_dict() for inc in self.recent_resolved],
+            "status_summary": self.status_summary,
+            "overall_health": self.overall_health,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CloudStatusReport:
+        return cls(
+            as_of=data.get("as_of", datetime.now(timezone.utc).isoformat()),
+            total_incidents=int(data.get("total_incidents", 0)),
+            active_incidents=[CloudStatusIncident.from_dict(i) for i in data.get("active_incidents", [])],
+            recent_resolved=[CloudStatusIncident.from_dict(i) for i in data.get("recent_resolved", [])],
+            status_summary=str(data.get("status_summary", "")),
+            overall_health=str(data.get("overall_health", "HEALTHY")),
+        )
 

@@ -287,6 +287,10 @@ from engine.domain import (
     StatsSearchSession,
     StatsValueCount,
     ValidationResult,
+    CloudStatusLocation,
+    CloudStatusUpdate,
+    CloudStatusIncident,
+    CloudStatusReport,
 )
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
@@ -544,6 +548,10 @@ __all__ = [
     "RuleConflictPair",
     "RuleConflictAuditResult",
     "BatchRuleConflictAuditResult",
+    "CloudStatusLocation",
+    "CloudStatusUpdate",
+    "CloudStatusIncident",
+    "CloudStatusReport",
     "detect_entity",
     "DetectedEntity",
     "EntityCategory",

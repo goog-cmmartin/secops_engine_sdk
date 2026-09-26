@@ -136,9 +136,29 @@ class EvidenceFabricStore(ABC):
     def list_rule_states(
         self,
         filter_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
-        limit: int = 100,
+        limit: int = 1000,
     ) -> List[Dict[str, Any]]:
         """Lists rule states matching an optional filter."""
+        pass
+
+    @abstractmethod
+    def batch_save_rule_states(self, states: List[Dict[str, Any]]) -> int:
+        """Batch saves or merges multiple rule states into the store."""
+        pass
+
+    @abstractmethod
+    def save_mitre_assessment(self, assessment_dict: Dict[str, Any]) -> str:
+        """Persists a MITRE ATT&CK coverage assessment snapshot."""
+        pass
+
+    @abstractmethod
+    def get_latest_mitre_assessment(self) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest MITRE ATT&CK coverage assessment."""
+        pass
+
+    @abstractmethod
+    def list_mitre_assessments(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Lists historical MITRE ATT&CK coverage assessments."""
         pass
 
     @abstractmethod
@@ -675,12 +695,74 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
     def list_rule_states(
         self,
         filter_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
-        limit: int = 100,
+        limit: int = 1000,
     ) -> List[Dict[str, Any]]:
         docs = self.db.collection("secops_rules").limit(limit).stream()
         results = [d.to_dict() for d in docs]
         if filter_fn:
             results = [r for r in results if filter_fn(r)]
+        return results
+
+    def batch_save_rule_states(self, states: List[Dict[str, Any]], chunk_size: int = 400) -> int:
+        from google.cloud import firestore
+
+        if not states:
+            return 0
+        saved_count = 0
+        for i in range(0, len(states), chunk_size):
+            chunk = states[i : i + chunk_size]
+            batch = self.db.batch()
+            for item in chunk:
+                rid = item.get("rule_id", "")
+                clean_id = normalize_doc_id(rid)
+                if not clean_id:
+                    continue
+                payload = dict(item)
+                payload["rule_id"] = clean_id
+                payload["updated_at"] = firestore.SERVER_TIMESTAMP
+                doc_ref = self.db.collection("secops_rules").document(clean_id)
+                batch.set(doc_ref, sanitize_for_firestore(payload), merge=True)
+                saved_count += 1
+            batch.commit()
+        return saved_count
+
+    def save_mitre_assessment(self, assessment_dict: Dict[str, Any]) -> str:
+        from google.cloud import firestore
+
+        aid = assessment_dict.get("assessment_id") or f"mitre_assess_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S_%f')}"
+        clean_id = normalize_doc_id(aid)
+        payload = dict(assessment_dict)
+        payload["assessment_id"] = clean_id
+        payload["updated_at"] = firestore.SERVER_TIMESTAMP
+        if "created_at" not in payload:
+            payload["created_at"] = datetime.now(timezone.utc).isoformat()
+
+        sanitized = sanitize_for_firestore(payload)
+        self.db.collection("mitre_assessments").document("latest").set(sanitized, merge=False)
+        self.db.collection("mitre_assessments").document(clean_id).set(sanitized, merge=False)
+        return clean_id
+
+    def get_latest_mitre_assessment(self) -> Optional[Dict[str, Any]]:
+        doc = self.db.collection("mitre_assessments").document("latest").get()
+        if doc.exists:
+            return doc.to_dict()
+        assessments = self.list_mitre_assessments(limit=1)
+        return assessments[0] if assessments else None
+
+    def list_mitre_assessments(self, limit: int = 20) -> List[Dict[str, Any]]:
+        from google.cloud import firestore
+
+        query = self.db.collection("mitre_assessments").order_by(
+            "created_at", direction=firestore.Query.DESCENDING
+        ).limit(limit)
+        results = []
+        for d in query.stream():
+            if d.id == "latest":
+                continue
+            data = d.to_dict()
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            results.append(data)
         return results
 
     def save_todo(self, todo_id: str, task_dict: Dict[str, Any]) -> None:
@@ -1355,9 +1437,11 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
     def list_rule_states(
         self,
         filter_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
-        limit: int = 100,
+        limit: int = 1000,
     ) -> List[Dict[str, Any]]:
         dir_path = os.path.join(self.base_dir, "secops_rules")
+        if not os.path.isdir(dir_path):
+            return []
         results = []
         for fname in sorted(os.listdir(dir_path))[:limit]:
             if not fname.endswith(".json"):
@@ -1367,6 +1451,59 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
                 if not filter_fn or filter_fn(data):
                     results.append(data)
         return results
+
+    def batch_save_rule_states(self, states: List[Dict[str, Any]]) -> int:
+        count = 0
+        for item in states:
+            rid = item.get("rule_id", "")
+            if rid:
+                self.save_rule_state(rid, item)
+                count += 1
+        return count
+
+    def save_mitre_assessment(self, assessment_dict: Dict[str, Any]) -> str:
+        aid = assessment_dict.get("assessment_id") or f"mitre_assess_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S_%f')}"
+        clean_id = normalize_doc_id(aid)
+        payload = dict(assessment_dict)
+        payload["assessment_id"] = clean_id
+        if "created_at" not in payload:
+            payload["created_at"] = datetime.now(timezone.utc).isoformat()
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        sanitized = sanitize_for_firestore(payload)
+        # 1. Overwrite latest
+        latest_path = self._col_path("mitre_assessments", "latest")
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(sanitized, f, indent=2, default=str)
+        # 2. Historical snapshot
+        path = self._col_path("mitre_assessments", clean_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sanitized, f, indent=2, default=str)
+        return clean_id
+
+    def get_latest_mitre_assessment(self) -> Optional[Dict[str, Any]]:
+        latest_path = self._col_path("mitre_assessments", "latest")
+        if not os.path.exists(latest_path):
+            assessments = self.list_mitre_assessments(limit=1)
+            return assessments[0] if assessments else None
+        with open(latest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_mitre_assessments(self, limit: int = 20) -> List[Dict[str, Any]]:
+        col_dir = os.path.join(self.base_dir, "mitre_assessments")
+        if not os.path.isdir(col_dir):
+            return []
+        records = []
+        for fname in os.listdir(col_dir):
+            if fname.endswith(".json") and fname != "latest.json":
+                fpath = os.path.join(col_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        records.append(json.load(f))
+                except Exception:
+                    pass
+        records.sort(key=lambda x: str(x.get("created_at", "") or x.get("timestamp", "")), reverse=True)
+        return records[:limit]
 
     def save_todo(self, todo_id: str, task_dict: Dict[str, Any]) -> None:
         clean_id = normalize_doc_id(todo_id)

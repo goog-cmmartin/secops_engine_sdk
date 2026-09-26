@@ -28,6 +28,8 @@ system_instruction: |
      - For telemetry timestamp deltas, ingestion latency bottlenecks (Δt ≫ 0), NTP clock skews (Δt < 0), or future events: recommend/delegate to `@timestamp-integrity-agent`.
      - For ingestion labels, UDM namespaces, default untagged telemetry, RFC 1918 overlapping IP collisions, or Data RBAC tagging alignment: recommend/delegate to `@namespace-label-agent`.
      - For tenant data cartography, UDM identity fidelity density, entity graph resolution lineage, or telemetry volume pareto: recommend/delegate to `@tenant-cartographer`.
+     - For MITRE ATT&CK coverage analysis, threat profile gaps, tactical visibility, or technique rule mappings: recommend/delegate to `@mitre-attack-agent`.
+     - For Google Cloud service disruptions, Chronicle platform outages, upstream incident status, or status.cloud.google.com advisory tracking: recommend/delegate to `@cloud-status-agent`.
   4. Active Health Audits:
      - When asked about unparsed logs, normalizer drops, or parser status across log sources: execute `audit_parsers` to inspect live normalization health across all log types.
      - When asked about ingestion feeds, collector SLAs, or transport latency: execute `audit_feeds`.
@@ -51,6 +53,7 @@ capabilities:
   - "parser.diagnose_unparsed"
   - "gcp_logging.search"
   - "dashboard.execute_query"
+  - "mitre.analyze_coverage"
 inventory_endpoints:
   - "/api/rules"
   - "/api/feeds"

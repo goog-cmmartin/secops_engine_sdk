@@ -9,6 +9,7 @@ from agents.core.proposal_manager import ProposalManager
 from agents.core.base_adk_agent import BaseSecOpsAdkAgent
 from agents.core.evidence_store import EvidenceFabricStore
 
+from agents.generated.cloud_status import CloudStatusAgent
 from agents.generated.detection_decay_agent import DetectionDecayAgentAgent
 from agents.generated.detection_tuning_agent import DetectionTuningAgentAgent
 from agents.generated.feed_health_agent import FeedHealthAgentAgent
@@ -16,6 +17,7 @@ from agents.generated.gcp_telemetry import GcpTelemetryAgent
 from agents.generated.identity_governor import IdentityGovernorAgent
 from agents.generated.log_cost_agent import LogCostAgentAgent
 from agents.generated.logjammer_agent import LogjammerAgentAgent
+from agents.generated.mitre_attack_agent import MitreAttackAgentAgent
 from agents.generated.namespace_label_agent import NamespaceLabelAgentAgent
 from agents.generated.parser_health_agent import ParserHealthAgentAgent
 from agents.generated.playbook_decay import PlaybookDecayAgent
@@ -30,7 +32,7 @@ from agents.generated.tenant_posture import TenantPostureAgent
 from agents.generated.timestamp_integrity import TimestampIntegrityAgent
 from agents.generated.yaral_optimizer import YaralOptimizerAgent
 
-__all__ = ["DetectionDecayAgentAgent", "DetectionTuningAgentAgent", "FeedHealthAgentAgent", "GcpTelemetryAgent", "IdentityGovernorAgent", "LogCostAgentAgent", "LogjammerAgentAgent", "NamespaceLabelAgentAgent", "ParserHealthAgentAgent", "PlaybookDecayAgent", "RawLogAgentAgent", "RuleConflictAgentAgent", "RuleTroubleshooterAgent", "SecopsDispatcherAgent", "SocBriefingAgentAgent", "SqlAnalystAgent", "TenantCartographerAgent", "TenantPostureAgent", "TimestampIntegrityAgent", "YaralOptimizerAgent", "create_agent_fleet"]
+__all__ = ["CloudStatusAgent", "DetectionDecayAgentAgent", "DetectionTuningAgentAgent", "FeedHealthAgentAgent", "GcpTelemetryAgent", "IdentityGovernorAgent", "LogCostAgentAgent", "LogjammerAgentAgent", "MitreAttackAgentAgent", "NamespaceLabelAgentAgent", "ParserHealthAgentAgent", "PlaybookDecayAgent", "RawLogAgentAgent", "RuleConflictAgentAgent", "RuleTroubleshooterAgent", "SecopsDispatcherAgent", "SocBriefingAgentAgent", "SqlAnalystAgent", "TenantCartographerAgent", "TenantPostureAgent", "TimestampIntegrityAgent", "YaralOptimizerAgent", "create_agent_fleet"]
 
 
 def create_agent_fleet(
@@ -43,6 +45,7 @@ def create_agent_fleet(
 ) -> Dict[str, BaseSecOpsAdkAgent]:
     """Instantiates the complete registered fleet of SecOps ADK 2 agents."""
     fleet: Dict[str, BaseSecOpsAdkAgent] = {
+        "@cloud-status-agent": CloudStatusAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@detection-decay-agent": DetectionDecayAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@detection-tuning-agent": DetectionTuningAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@feed-agent": FeedHealthAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
@@ -50,6 +53,7 @@ def create_agent_fleet(
         "@identity-governor": IdentityGovernorAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@log-cost-agent": LogCostAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@logjammer-agent": LogjammerAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
+        "@mitre-attack-agent": MitreAttackAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@namespace-label-agent": NamespaceLabelAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@parser-doctor": ParserHealthAgentAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),
         "@playbook-decay-agent": PlaybookDecayAgent(engine=engine, proposal_manager=proposal_manager, inventory_client=inventory_client, evidence_store=evidence_store, work_queue=work_queue, lifecycle_manager=lifecycle_manager),

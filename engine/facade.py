@@ -281,6 +281,8 @@ from engine.domain import (
     TimestampIntegrityReport,
     TimestampMetricRow,
     TimestampProgressionState,
+    CloudStatusIncident,
+    CloudStatusReport,
 )
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
 from engine.workflows.alert_investigation import InvestigateAlertWorkflow
@@ -550,6 +552,7 @@ from engine.domain import (
     TenantTelemetryProfile,
     ShiftBriefing,
     KnowledgeSnapshot,
+    MitreCoverageAssessment,
 )
 from engine.workflows.rule_audit import AuditRulesWorkflow
 from engine.workflows.log_cost import AnalyzeLogCostWorkflow, GetLatestLogCostWorkflow
@@ -564,6 +567,13 @@ from engine.workflows.briefing_aggregation import (
     compute_shift_delta,
     compute_knowledge_snapshot,
 )
+from engine.workflows.mitre_attack import (
+    SyncMitreRulesWorkflow,
+    AnalyzeMitreCoverageWorkflow,
+    GenerateMitreReportWorkflow,
+)
+from engine.mitre_catalog import MitreCatalog
+
 
 
 
@@ -805,6 +815,9 @@ class SecOpsEngine:
         "_audit_data_rbac_alignment_wf": lambda e: AuditDataRbacAlignmentWorkflow(e.adapter, store=e.evidence_store),
         "_analyze_namespace_labels_wf": lambda e: AnalyzeNamespaceLabelsCompositeWorkflow(e.adapter, store=e.evidence_store),
         "_tenant_profiling_wf": lambda e: TenantProfilingWorkflow(e.adapter),
+        "_sync_mitre_rules_wf": lambda e: SyncMitreRulesWorkflow(e.adapter, store=e.evidence_store),
+        "_analyze_mitre_coverage_wf": lambda e: AnalyzeMitreCoverageWorkflow(e.adapter, store=e.evidence_store),
+        "_generate_mitre_report_wf": lambda e: GenerateMitreReportWorkflow(e.adapter, store=e.evidence_store),
     }
 
     def __getattr__(self, name: str) -> Any:
@@ -3099,6 +3112,34 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="gcp_status.incidents.query",
+                name="Query Google Cloud SecOps Service Status Incidents",
+                description="Queries Google Cloud Security Status feed for active and historical disruptions, maintenance, and outages affecting Google SecOps.",
+                category="gcp_status",
+                handler=self.query_cloud_status_incidents,
+                mcp_tool_name="query_cloud_status_incidents",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/gcp_status/incidents",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="gcp_status.report.audit",
+                name="Audit Google Cloud SecOps Platform Health",
+                description="Audits overall Google SecOps service health, active incidents, recent resolutions, and regional impact from Google Cloud Status.",
+                category="gcp_status",
+                handler=self.audit_cloud_service_status,
+                mcp_tool_name="audit_cloud_service_status",
+                composed=False,
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/gcp_status/report",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="identity.iam.bindings",
                 name="Audit GCP IAM Bindings for Chronicle",
                 description="Inspects project IAM policy for predefined Chronicle roles and custom role assignments.",
@@ -3322,6 +3363,73 @@ class SecOpsEngine:
                 kind="query",
                 cardinality="single",
                 evidence_path="evidence/operational_intelligence/entity_dossier",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="mitre.sync_cache",
+                name="Sync MITRE Rules to Cache",
+                description="Synchronizes customer and curated Google SecOps detection rules into Firestore cache with parsed MITRE technique IDs and tactics.",
+                category="detection_engineering",
+                handler=self.sync_mitre_rules,
+                mcp_tool_name="sync_mitre_rules_cache",
+                composed=False,
+                side_effects=["write_rule_cache"],
+                evidence_path="evidence/mitre/sync_rules",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="mitre.analyze_coverage",
+                name="Analyze MITRE ATT&CK Strategic Coverage",
+                description="Evaluates cached detection rules and live ingestion telemetry against MITRE ATT&CK matrix and threat profiles to determine coverage score and gaps.",
+                category="threat_intelligence",
+                handler=self.analyze_mitre_coverage,
+                mcp_tool_name="analyze_mitre_coverage",
+                composed=True,
+                uses=("mitre.sync_cache",),
+                evidence_path="evidence/mitre/coverage_analysis",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="mitre.get_technique_rules",
+                name="Get Rules for MITRE Technique",
+                description="Retrieves all custom and curated detection rules mapped to a specific MITRE ATT&CK technique ID.",
+                category="threat_intelligence",
+                handler=self.get_technique_rules,
+                mcp_tool_name="get_technique_rules",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/mitre/technique_rules",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="mitre.list_threat_profiles",
+                name="List MITRE Threat Profiles",
+                description="Lists available threat profiles with baseline technique counts and high-risk weight mappings.",
+                category="threat_intelligence",
+                handler=self.list_mitre_threat_profiles,
+                mcp_tool_name="list_mitre_threat_profiles",
+                composed=False,
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/mitre/threat_profiles",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="mitre.generate_report",
+                name="Generate MITRE Strategic Coverage Report",
+                description="Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture.",
+                category="threat_intelligence",
+                handler=self.generate_mitre_report,
+                mcp_tool_name="generate_mitre_report",
+                composed=True,
+                uses=("mitre.analyze_coverage",),
+                evidence_path="evidence/mitre/coverage_report",
             )
         )
 
@@ -5880,6 +5988,108 @@ class SecOpsEngine:
 
         store = get_knowledge_store()
         return store.get_composite_entity(subject_type, subject_id)
+
+    def sync_mitre_rules(
+        self,
+        force_refresh: bool = False,
+        include_curated: bool = True,
+        max_rules: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Synchronizes customer and curated detection rules into Firestore with parsed MITRE technique IDs."""
+        return self._sync_mitre_rules_wf.execute(
+            force_refresh=force_refresh,
+            include_curated=include_curated,
+            max_rules=max_rules,
+        )
+
+    def analyze_mitre_coverage(
+        self,
+        profile_id: str = "global_baseline",
+        sync_cache_if_empty: bool = True,
+        time_unit: str = "DAY",
+        time_value: str = "7",
+    ) -> MitreCoverageAssessment:
+        """Evaluates detection rules and ingestion telemetry against MITRE ATT&CK matrix and threat profile."""
+        return self._analyze_mitre_coverage_wf.execute(
+            profile_id=profile_id,
+            sync_cache_if_empty=sync_cache_if_empty,
+            time_unit=time_unit,
+            time_value=time_value,
+        )
+
+    def get_technique_rules(self, technique_id: str) -> List[Dict[str, Any]]:
+        """Retrieves all detection rules mapped to a specific MITRE ATT&CK technique."""
+        catalog = MitreCatalog.get_instance()
+        clean_tid = catalog.normalize_technique_id(technique_id)
+        store = self.evidence_store
+        if store is None:
+            from agents.core.evidence_store import get_evidence_store
+            store = get_evidence_store()
+        rules = store.list_rule_states(limit=10000)
+        matching = []
+        for r in rules:
+            techs = [catalog.normalize_technique_id(t) for t in r.get("mitre_techniques", [])]
+            if clean_tid in techs:
+                matching.append(r)
+        return matching
+
+    def list_mitre_threat_profiles(self) -> List[Dict[str, Any]]:
+        """Lists available MITRE threat profiles."""
+        catalog = MitreCatalog.get_instance()
+        return catalog.list_threat_profiles()
+
+    def generate_mitre_report(
+        self,
+        assessment: Optional[MitreCoverageAssessment] = None,
+        profile_id: str = "global_baseline",
+    ) -> Dict[str, Any]:
+        """Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture."""
+        return self._generate_mitre_report_wf.execute(
+            assessment=assessment,
+            profile_id=profile_id,
+        )
+
+    def query_cloud_status_incidents(
+        self,
+        service_name: Optional[str] = "Google SecOps",
+        only_active: bool = False,
+        region: Optional[str] = None,
+        lookback_days: int = 30,
+    ) -> List[CloudStatusIncident]:
+        """Queries Google Cloud Security Status feed for service incidents."""
+        from engine.workflows.cloud_status import fetch_security_incidents
+        return fetch_security_incidents(
+            service_name=service_name,
+            only_active=only_active,
+            region=region,
+            lookback_days=lookback_days,
+        )
+
+    def audit_cloud_service_status(
+        self,
+        service_name: str = "Google SecOps",
+        region: Optional[str] = None,
+        lookback_days: int = 14,
+    ) -> CloudStatusReport:
+        """Audits overall Google SecOps platform health and external incidents."""
+        from engine.workflows.cloud_status import audit_cloud_service_status
+        return audit_cloud_service_status(
+            service_name=service_name,
+            region=region,
+            lookback_days=lookback_days,
+        )
+
+    def correlate_cloud_incident(
+        self,
+        incident_id: str,
+    ) -> Dict[str, Any]:
+        """Correlates an external Google Cloud status incident with tenant telemetry and forwarder latency."""
+        from engine.workflows.cloud_status import correlate_incident_with_telemetry
+        return correlate_incident_with_telemetry(
+            incident_id=incident_id,
+            engine=self,
+        )
+
 
 
 

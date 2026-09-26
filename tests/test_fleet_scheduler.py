@@ -139,6 +139,16 @@ class PatrolAgentFixture:
             "widget": None,
         }
 
+    def audit_cloud_service_status(self, lookback_days: int = 14):
+        return {
+            "overall_health": "HEALTHY",
+            "active_incidents": [],
+            "recent_resolved": [],
+            "total_incidents": 0,
+            "status_summary": "All Google SecOps services operating normally.",
+            "as_of": "2026-09-25T18:00:00Z",
+        }
+
 
 class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
     """Verifies agent schedule management and periodic Deacon patrol triggers."""
@@ -166,6 +176,7 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 "@tenant-posture-agent",
                 "@playbook-decay-agent",
                 "@timestamp-integrity-agent",
+                "@cloud-status-agent",
             ]
             for handle in expected_handles:
                 sched = scheduler.get_schedule(handle)
@@ -178,7 +189,7 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
 
             # Check Deacon Status
             status = scheduler.get_deacon_status()
-            self.assertEqual(status["active_patrols"], 8)
+            self.assertEqual(status["active_patrols"], 9)
             self.assertEqual(status["total_patrols_run"], 0)
             self.assertIn("Active", status["deacon_heartbeat"])
 
@@ -305,6 +316,7 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 "@tenant-posture-agent": PatrolAgentFixture("Tenant Posture Governor", "@tenant-posture-agent"),
                 "@playbook-decay-agent": PatrolAgentFixture("SOAR Playbook Decay Agent", "@playbook-decay-agent"),
                 "@timestamp-integrity-agent": PatrolAgentFixture("Timestamp Integrity Agent", "@timestamp-integrity-agent"),
+                "@cloud-status-agent": PatrolAgentFixture("Cloud Status Agent", "@cloud-status-agent"),
             }
 
             scheduler = FleetScheduler(
@@ -316,9 +328,9 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
 
             bulk_res = await scheduler.trigger_patrol_all()
             self.assertEqual(bulk_res["status"], "SUCCESS")
-            self.assertEqual(bulk_res["executed_count"], 8)
-            self.assertEqual(len(bulk_res["results"]), 8)
-            self.assertEqual(bulk_res["deacon_status"]["total_patrols_run"], 8)
+            self.assertEqual(bulk_res["executed_count"], 9)
+            self.assertEqual(len(bulk_res["results"]), 9)
+            self.assertEqual(bulk_res["deacon_status"]["total_patrols_run"], 9)
 
 
 if __name__ == "__main__":

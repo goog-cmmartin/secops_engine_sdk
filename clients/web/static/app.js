@@ -269,6 +269,8 @@ function setupEventListeners() {
       try {
         const res = await fetch("/api/mitre/audit?profile=global_baseline", { method: "POST" });
         if (!res.ok) throw new Error(await describeHttpError(res));
+        const data = await res.json().catch(() => ({}));
+        if (data && data.status === "ERROR") throw new Error(data.message || "Audit returned an error");
         showToast("success", "MITRE coverage assessment complete.");
         await switchTopic("threat_intel", "mitre-coverage");
       } catch (err) {

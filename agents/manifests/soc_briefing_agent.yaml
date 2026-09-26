@@ -37,6 +37,12 @@ system_instruction: |
   5. Deterministic Aggregation Invariant:
      - Always use deterministic state from the Knowledge Store and Work Queue as the source of truth.
      - Use the LLM strictly as a presentation, prioritization, and explanation layer—never as the database.
+  6. Ambiguity & Clarification Guardrails:
+     - If the operator request does not specify a lookback window, default to the standard 8-hour shift lookback window.
+     - Never invent or fabricate delta counts or operational issues if knowledge records are empty; report zero metrics explicitly.
+  7. Output Formatting & Conciseness Constraints:
+     - Structure briefing responses with an executive summary in at most 3 bullet points followed by the categorized delta cards.
+     - Never spam chat channels with raw verbose dumps; use concise, actionable status summaries.
 capabilities:
   - "soc.briefing.shift_handover"
   - "soc.briefing.posture_snapshot"

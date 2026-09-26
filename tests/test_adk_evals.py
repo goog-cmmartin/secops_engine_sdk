@@ -25,7 +25,7 @@ class TestAdkPromptAndSkillEvals(unittest.TestCase):
     def test_all_manifests_contain_adk_guardrails(self):
         """Every fleet manifest must contain ambiguity guardrails and conciseness constraints."""
         manifest_files = list(self.manifest_dir.glob("*.yaml"))
-        self.assertEqual(len(manifest_files), 19, "Expected exactly 19 agent manifests")
+        self.assertEqual(len(manifest_files), 22, "Expected exactly 22 agent manifests")
 
         for m_path in manifest_files:
             with open(m_path, "r", encoding="utf-8") as f:

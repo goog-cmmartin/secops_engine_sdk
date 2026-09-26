@@ -3286,6 +3286,98 @@ from typing import Any, Dict, List, Optional
         records = self.evidence_store.list_rule_conflicts(min_cos=min_cos, limit=limit)
         return {"status": "SUCCESS", "count": len(records), "records": records}
 '''
+    elif key == "mitre_attack_agent":
+        custom_imports = "from datetime import datetime, timezone\nfrom typing import Dict, List, Optional, Any\n"
+        custom_binds = """        self._tools["audit_mitre_coverage"] = self.audit_mitre_coverage
+        self._tools["sync_rules_cache"] = self.sync_rules_cache
+        self._tools["get_latest_assessment"] = self.get_latest_assessment
+"""
+        custom_methods = '''
+    def audit_mitre_coverage(
+        self,
+        profile_id: str = "global_baseline",
+        time_unit: str = "DAY",
+        time_value: str = "7",
+    ) -> Dict[str, Any]:
+        """Evaluates tenant detection rules and live ingestion telemetry against MITRE ATT&CK.
+
+        Args:
+            profile_id: Target threat profile (e.g. 'global_baseline', 'financial_services', 'cloud_native', 'ransomware_defense').
+            time_unit: Lookback time unit ('DAY', 'HOUR').
+            time_value: Lookback count.
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+
+        assessment = self.engine.analyze_mitre_coverage(
+            profile_id=profile_id,
+            sync_cache_if_empty=True,
+            time_unit=time_unit,
+            time_value=time_value,
+        )
+
+        widget = {
+            "type": "mitre_coverage_card",
+            "title": f"MITRE ATT&CK Coverage: {assessment.profile_name}",
+            "coverage_score": assessment.coverage_score,
+            "validated_technique_count": assessment.validated_technique_count,
+            "total_rules_evaluated": assessment.total_rules_evaluated,
+            "enabled_rules_count": assessment.enabled_rules_count,
+            "visibility_tactics_count": assessment.visibility_tactics_count,
+            "detection_tactics_count": assessment.detection_tactics_count,
+            "blind_tactics": assessment.blind_tactics,
+            "critical_techniques_count": len(assessment.critical_techniques),
+            "resilient_techniques_count": len(assessment.resilient_techniques),
+            "fragile_techniques_count": len(assessment.fragile_techniques),
+        }
+        self.last_widget = widget
+
+        self.executed_tool_calls.append({
+            "agent": self.handle,
+            "tool": "audit_mitre_coverage",
+            "capability_id": "mitre.analyze_coverage",
+            "arguments": {"profile_id": profile_id, "time_unit": time_unit, "time_value": time_value},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        return {
+            "status": "SUCCESS",
+            "assessment": assessment.to_dict(),
+            "widget": widget,
+        }
+
+    def sync_rules_cache(
+        self,
+        force: bool = False,
+        include_curated: bool = True,
+        max_rules: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Synchronizes custom and curated detection rules into Firestore with parsed MITRE technique IDs.
+
+        Args:
+            force: Force full refresh.
+            include_curated: Include Google curated detection rules.
+            max_rules: Limit total rules processed.
+        """
+        if not self.engine:
+            return {"status": "ERROR", "message": "SecOpsEngine not configured"}
+        res = self.engine.sync_mitre_rules(
+            force_refresh=force,
+            include_curated=include_curated,
+            max_rules=max_rules,
+        )
+        return {"status": "SUCCESS", **res}
+
+    def get_latest_assessment(self) -> Dict[str, Any]:
+        """Retrieves the latest cached MITRE ATT&CK assessment from Evidence Fabric."""
+        if not self.evidence_store:
+            return {"status": "ERROR", "message": "EvidenceFabricStore not configured"}
+        assessment = self.evidence_store.get_latest_mitre_assessment()
+        if not assessment:
+            return {"status": "NOT_FOUND", "message": "No MITRE assessment found in Evidence Fabric"}
+        return {"status": "SUCCESS", "assessment": assessment}
+'''
+
 
 
 

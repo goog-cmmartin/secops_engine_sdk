@@ -320,7 +320,8 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         self.assertIn("@yaral-optimizer", handles)
         self.assertIn("@identity-governor", handles)
         self.assertIn("@tenant-cartographer", handles)
-        self.assertEqual(len(agents), 19)
+        self.assertIn("@cloud-status-agent", handles)
+        self.assertEqual(len(agents), 22)
 
     def test_post_message_endpoint(self):
         res = self.client.post(

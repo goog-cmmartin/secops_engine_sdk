@@ -185,11 +185,26 @@ def compute_shift_delta(
                 subsystems_failing.add(agent)
                 subsystems_failing.add(subj_id)
 
-    for subj in ("ingestion", "telemetry", "parsers", "rules", "soar", "identity", "timestamp"):
+    for subj in ("ingestion", "telemetry", "parsers", "rules", "soar", "identity", "timestamp", "infrastructure"):
         if subj in subsystems_observed and subj not in subsystems_failing:
             no_action_required.append(subj)
 
+    # External Platform Health Check
+    for obs in recent_obs:
+        if obs.observed_by.agent == "@cloud-status-agent" and obs.predicate == "patrol_audit_cloud_service_status":
+            val = obs.value
+            if isinstance(val, dict) and str(val.get("status")).upper() in ("DEGRADED", "OUTAGE", "ADVISORY"):
+                requires_attention.append({
+                    "issue_id": "google-cloud-status",
+                    "title": f"Upstream Google Cloud SecOps Disruption ({val.get('status')})",
+                    "severity": "CRITICAL" if str(val.get("status")).upper() == "OUTAGE" else "HIGH",
+                    "status": "ACTIVE_OUTAGE",
+                    "subsystem": "infrastructure",
+                })
+
     # Standard clean baselines
+    if "@cloud-status-agent" in subsystems_observed and "@cloud-status-agent" not in subsystems_failing:
+        no_action_required.append("Google Cloud SecOps platform status operational (No active outages)")
     if "@timestamp-integrity-agent" in subsystems_observed and "@timestamp-integrity-agent" not in subsystems_failing:
         no_action_required.append("Timestamp integrity healthy (Zero future clock skew)")
     if "@feed-agent" in subsystems_observed and "@feed-agent" not in subsystems_failing:
@@ -202,6 +217,8 @@ def compute_shift_delta(
         no_action_required.append("SOAR playbooks and automation integrations healthy")
     if "@detection-decay-agent" in subsystems_observed and "@detection-decay-agent" not in subsystems_failing:
         no_action_required.append("Detection repository AST and rule executions healthy")
+    if "@mitre-attack-agent" in subsystems_observed and "@mitre-attack-agent" not in subsystems_failing:
+        no_action_required.append("MITRE ATT&CK coverage aligned with target threat profile")
 
     if not no_action_required:
         no_action_required.append("All scheduled Deacons completed patrols without critical regressions")

@@ -116,6 +116,16 @@ DEFAULT_AGENT_SCHEDULES: Dict[str, Dict[str, Any]] = {
         "action": "audit_timestamp_integrity",
         "description": "12-hourly ingestion timestamp delta auditing, clock drift tracking, and telemetry hygiene patrol",
     },
+    "@cloud-status-agent": {
+        "agent_handle": "@cloud-status-agent",
+        "enabled": True,
+        "interval_hours": 0.5,
+        "lookback_days": 14,
+        "stream": "infrastructure",
+        "topic": "service-status",
+        "action": "audit_cloud_service_status",
+        "description": "30-minute Google Cloud SecOps service status, upstream disruption, and outage monitor patrol",
+    },
 }
 
 
@@ -594,6 +604,102 @@ class FleetScheduler:
                         reason="Deacon timestamp patrol observed 0 clock-skewed events and 0 latency anomalies.",
                     )
 
+            # 9. Google Cloud Status & Upstream Service Incidents
+            elif handle == "@cloud-status-agent" or action == "audit_cloud_service_status":
+                active_incidents = result.get("active_incidents", [])
+                overall_health = result.get("overall_health", "HEALTHY")
+                todo_id = "todo_cloud_status_active"
+                if active_incidents:
+                    severities = [i.get("severity", "medium") for i in active_incidents]
+                    is_critical = "high" in severities or overall_health == "OUTAGE"
+                    desc_snippets = "; ".join(i.get("external_desc", "")[:60] for i in active_incidents[:2])
+                    task = {
+                        "todo_id": todo_id,
+                        "title": f"Track {len(active_incidents)} Upstream Google Cloud Disruption(s) ({overall_health})",
+                        "target_agent": "@cloud-status-agent",
+                        "target_resource_id": "status.cloud.google.com",
+                        "action_type": "status_disruption_tracking",
+                        "stream": "infrastructure",
+                        "topic": "service-status",
+                        "priority": "CRITICAL" if is_critical else "HIGH",
+                        "status": "PENDING",
+                        "action_prompt": "@cloud-status-agent audit",
+                        "rationale": f"Deacon status patrol identified {len(active_incidents)} active cloud incident(s): {desc_snippets}",
+                        "created_at": start_time,
+                    }
+                    self.evidence_store.upsert_todo(todo_id, task)
+                    created_bead_ids.append(todo_id)
+
+                    # Also open / update Gas Town SOCIssue if lifecycle_manager is available
+                    if self.lifecycle_manager and hasattr(self.lifecycle_manager, "open_issue"):
+                        try:
+                            from engine.domain import (
+                                SOCIssue,
+                                IssueProblem,
+                                IssueRouting,
+                                IssueGovernance,
+                                OperationalPlane,
+                                IssueSeverity,
+                                AuthorityTier,
+                            )
+                            sev = IssueSeverity.CRITICAL.value if is_critical else IssueSeverity.HIGH.value
+                            cloud_issue = SOCIssue(
+                                id="issue_upstream_cloud_status",
+                                plane=OperationalPlane.DATA.value,
+                                severity=sev,
+                                problem=IssueProblem(
+                                    title=f"Upstream Google Cloud Disruption: {active_incidents[0].get('external_desc', 'Service Incident')}",
+                                    observed_state={
+                                        "active_incident_count": len(active_incidents),
+                                        "incident_descriptions": desc_snippets,
+                                        "public_url": active_incidents[0].get("public_url"),
+                                    },
+                                    desired_state={
+                                        "active_incident_count": 0,
+                                        "status": "HEALTHY",
+                                    },
+                                    affected_objects=[inc.get("service_name", "gcp") for inc in active_incidents],
+                                ),
+                                routing=IssueRouting(
+                                    requires_capabilities={
+                                        "cloud.audit_status": 1,
+                                    },
+                                ),
+                                governance=IssueGovernance(
+                                    required_authority_tier=AuthorityTier.TIER_2_PEER_REVIEW.value,
+                                    validation_criteria=[
+                                        "cloud_status == HEALTHY",
+                                        "active_incidents == 0",
+                                    ],
+                                ),
+                            )
+                            self.lifecycle_manager.open_issue(
+                                issue=cloud_issue,
+                                deacon_id="deacon.cloud_status_patrol",
+                                commit=False,
+                            )
+                        except Exception as ex:
+                            logger.warning("Could not open SOCIssue for cloud status: %s", ex)
+                else:
+                    self.evidence_store.resolve_todo(
+                        todo_id,
+                        reason="Deacon status patrol observed 0 active Google Cloud disruptions (HEALTHY).",
+                    )
+                    if self.lifecycle_manager and hasattr(self.lifecycle_manager, "verify_and_close"):
+                        try:
+                            from engine.domain import VerificationProof
+                            proof = VerificationProof(
+                                verifier_actor="deacon.cloud_status_patrol",
+                                telemetry_proof_query="cloud.audit_status()",
+                                metric_before="active_incidents > 0",
+                                metric_after="active_incidents=0, status=HEALTHY",
+                                verified_at=start_time,
+                                success=True,
+                            )
+                            self.lifecycle_manager.verify_and_close("issue_upstream_cloud_status", proof)
+                        except Exception:
+                            pass
+
         except Exception as e:
             logger.error("Failed to auto-create patrol beads for %s: %s", handle, e)
 
@@ -822,6 +928,32 @@ class FleetScheduler:
                 msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
             return msg
 
+        # 9. Google Cloud Status & Disruption Patrol
+        elif handle == "@cloud-status-agent" or action == "audit_cloud_service_status":
+            overall_health = result.get("overall_health", "HEALTHY")
+            active_incidents = result.get("active_incidents", [])
+            active_count = len(active_incidents)
+            recent_resolved = len(result.get("recent_resolved", []))
+            status_icon = "⚠️" if active_count > 0 else "✓"
+
+            msg = (
+                f"☁️ **Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
+                f"- **Patrol Status**: `{status_icon} COMPLETED`\n"
+                f"- **Trigger**: `{trigger_label}`\n"
+                f"- **Platform Health**: `{overall_health}`\n"
+                f"- **Active Disruptions**: `{active_count}`\n"
+                f"- **Recently Resolved (14d)**: `{recent_resolved}`\n"
+                f"- **Summary**: {result.get('status_summary', 'All services operational.')}\n"
+            )
+            if active_count > 0:
+                msg += "\n⚠️ **Active Incident Details**:\n"
+                for inc in active_incidents[:3]:
+                    msg += f"  - **{inc.get('id')}**: {inc.get('external_desc')}\n    *Severity*: `{inc.get('severity')}` | *Impact*: `{inc.get('status_impact')}` | [Status Page]({inc.get('public_url')})\n"
+            if created_beads:
+                bead_list = ", ".join(f"`{b}`" for b in created_beads[:3])
+                msg += f"\n📋 **Autonomous Beads Dispatched**: {bead_list}"
+            return msg
+
         # Generic Fallback
         return (
             f"**Deacon Autonomous Patrol: {agent_name}** (`{handle}`)\n\n"
@@ -887,6 +1019,18 @@ class FleetScheduler:
                     result = agent.audit_playbook_decay(lookback_days=lookback)
                 elif hasattr(agent, "engine") and agent.engine and hasattr(agent.engine, "audit_playbook_decay"):
                     result = agent.engine.audit_playbook_decay(lookback_days=lookback)
+            elif action == "audit_cloud_service_status":
+                lookback = sched.get("lookback_days", 14)
+                if hasattr(agent, "engine") and agent.engine and hasattr(agent.engine, "audit_cloud_service_status"):
+                    rep = agent.engine.audit_cloud_service_status(lookback_days=lookback)
+                    result = rep.to_dict()
+                elif hasattr(agent, "audit_cloud_service_status"):
+                    rep = agent.audit_cloud_service_status(lookback_days=lookback)
+                    result = rep.to_dict() if hasattr(rep, "to_dict") else rep
+                else:
+                    from engine.workflows.cloud_status import audit_cloud_service_status
+                    rep = audit_cloud_service_status(lookback_days=lookback)
+                    result = rep.to_dict()
             elif hasattr(agent, action or ""):
                 method = getattr(agent, action)
                 result = method()
@@ -946,15 +1090,15 @@ class FleetScheduler:
 
             # Classify communication priority and build structured Observation
             comm_class = CommunicationClass.INFORMATIONAL
-            if status in ("ERROR", "FAILED") or any(b.get("severity") == "CRITICAL" for b in created_beads):
+            if status in ("ERROR", "FAILED") or any((b.get("severity") if isinstance(b, dict) else None) == "CRITICAL" for b in created_beads):
                 comm_class = CommunicationClass.URGENT
             elif created_beads:
                 comm_class = CommunicationClass.OPERATIONAL
 
             obs = Observation(
                 observation_id=f"obs-{handle.replace('@', '')}-{int(datetime.now(timezone.utc).timestamp())}",
-                subject=SubjectRef(subject_type="subsystem", subject_id=stream),
-                observed_by=ObserverRef(agent=handle, version="1.0.0", action=action or "patrol"),
+                subject=SubjectRef(type="subsystem", id=stream),
+                observed_by=ObserverRef(agent=handle, run_id=f"run-{int(datetime.now(timezone.utc).timestamp())}", deacon="deacon-scheduler"),
                 predicate=f"patrol_{action or 'audit'}",
                 value={"status": status, "summary": str(result.get("status") or ""), "created_beads": len(created_beads)},
                 communication_policy=CommunicationPolicy(

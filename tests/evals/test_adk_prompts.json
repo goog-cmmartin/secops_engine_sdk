@@ -238,5 +238,26 @@
     "assertions": {
       "prompt_contains_directive": "provide an executive summary in at most 3 bullet points"
     }
+  },
+  {
+    "eval_id": "eval-adk-routing-11",
+    "category": "routing_precision",
+    "agent_handle": "@secops-dispatcher",
+    "input_prompt": "What is our MITRE ATT&CK coverage across tactics and where are our technique gaps?",
+    "expected_behavior": "SecOps Dispatcher must route MITRE coverage and threat profile gaps to @mitre-attack-agent.",
+    "assertions": {
+      "target_agent": "@mitre-attack-agent",
+      "prompt_contains_routing": "MITRE ATT&CK coverage analysis, threat profile gaps, tactical visibility, or technique rule mappings: recommend/delegate to `@mitre-attack-agent`"
+    }
+  },
+  {
+    "eval_id": "eval-adk-skill-07",
+    "category": "skill_matching",
+    "agent_handle": "@mitre-attack-agent",
+    "input_prompt": "Audit our strategic MITRE ATT&CK coverage against the financial services threat profile",
+    "expected_behavior": "SkillCatalog must match query to task.detection_engineer.audit_mitre_coverage.",
+    "assertions": {
+      "expected_skill_id": "task.detection_engineer.audit_mitre_coverage"
+    }
   }
 ]

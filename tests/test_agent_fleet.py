@@ -37,8 +37,8 @@ class AgentFleetTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_fleet_contains_twenty_specialized_agents(self):
-        self.assertGreaterEqual(len(self.fleet), 20)
+    def test_fleet_contains_twenty_one_specialized_agents(self):
+        self.assertGreaterEqual(len(self.fleet), 21)
         expected_handles = [
             "@secops-dispatcher",
             "@rule-troubleshooter",
@@ -60,11 +60,24 @@ class AgentFleetTest(unittest.TestCase):
             "@namespace-label-agent",
             "@tenant-cartographer",
             "@soc-briefing-agent",
+            "@mitre-attack-agent",
         ]
         for handle in expected_handles:
             self.assertIn(handle, self.fleet)
             agent = self.fleet[handle]
             self.assertIsInstance(agent, BaseSecOpsAdkAgent)
+
+    def test_mitre_attack_agent_tool_bindings(self):
+        agent = self.fleet["@mitre-attack-agent"]
+        tools = agent.get_tools()
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        self.assertIn("analyze_mitre_coverage", tool_names)
+        self.assertIn("sync_mitre_rules_cache", tool_names)
+        self.assertIn("get_technique_rules", tool_names)
+        self.assertIn("list_mitre_threat_profiles", tool_names)
+        self.assertIn("generate_mitre_report", tool_names)
+        self.assertEqual(agent.default_stream, "threat_intel")
+        self.assertEqual(agent.default_topic, "mitre-coverage")
 
     def test_soc_briefing_agent_tool_bindings(self):
         agent = self.fleet["@soc-briefing-agent"]

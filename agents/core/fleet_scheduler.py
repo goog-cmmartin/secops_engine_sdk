@@ -644,18 +644,10 @@ class FleetScheduler:
                     # Also open / update Gas Town SOCIssue if lifecycle_manager is available
                     if self.lifecycle_manager and hasattr(self.lifecycle_manager, "open_issue"):
                         try:
-                            from engine.domain import (
-                                SOCIssue,
-                                IssueProblem,
-                                IssueRouting,
-                                IssueGovernance,
-                                OperationalPlane,
-                                IssueSeverity,
-                                AuthorityTier,
-                            )
                             sev = IssueSeverity.CRITICAL.value if is_critical else IssueSeverity.HIGH.value
                             cloud_issue = SOCIssue(
                                 id="issue_upstream_cloud_status",
+                                type="upstream_cloud_disruption",
                                 plane=OperationalPlane.DATA.value,
                                 severity=sev,
                                 problem=IssueProblem(
@@ -698,7 +690,6 @@ class FleetScheduler:
                     )
                     if self.lifecycle_manager and hasattr(self.lifecycle_manager, "verify_and_close"):
                         try:
-                            from engine.domain import VerificationProof
                             proof = VerificationProof(
                                 verifier_actor="deacon.cloud_status_patrol",
                                 telemetry_proof_query="cloud.audit_status()",

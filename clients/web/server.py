@@ -50,6 +50,11 @@ from tests.test_helpers import get_live_engine
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Runtime state (chat history, .state, evidence, work queue, knowledge store).
+# Defaults to the repo root; tests point it at a temp dir so they never write
+# into the operator's live chat history.
+STATE_ROOT_ENV_VAR = "SECOPS_WEB_STATE_ROOT"
+STATE_ROOT = Path(os.environ.get(STATE_ROOT_ENV_VAR, "").strip() or REPO_ROOT).expanduser().resolve()
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -71,11 +76,11 @@ def _build_engine() -> SecOpsEngine:
 
 
 # Core singleton instances
-chat_store = ChatStore(root_dir=REPO_ROOT)
+chat_store = ChatStore(root_dir=STATE_ROOT)
 proposal_manager = ProposalManager()
 engine = _build_engine()
-evidence_store = get_evidence_store(root_dir=str(REPO_ROOT))
-work_queue = get_work_queue(root_dir=str(REPO_ROOT))
+evidence_store = get_evidence_store(root_dir=str(STATE_ROOT))
+work_queue = get_work_queue(root_dir=str(STATE_ROOT))
 issue_materializer = IssueMaterializer()
 lifecycle_manager = SOCLifecycleManager(
     work_queue=work_queue,
@@ -95,7 +100,7 @@ dispatcher = AgentDispatcher(
     proposal_manager=proposal_manager,
     evidence_store=evidence_store,
 )
-knowledge_store = get_knowledge_store(root_dir=REPO_ROOT)
+knowledge_store = get_knowledge_store(root_dir=STATE_ROOT)
 communication_router = get_communication_router(
     work_queue=work_queue,
     chat_store=chat_store,
@@ -205,7 +210,7 @@ class AckEscalationRequest(BaseModel):
 # --- Escalation acknowledgements ---
 # Escalations are derived on each /api/gastown/overview call, so operator
 # acknowledgements are persisted separately, keyed by escalation id.
-ESCALATION_ACKS_PATH = REPO_ROOT / ".state" / "escalation_acks.json"
+ESCALATION_ACKS_PATH = STATE_ROOT / ".state" / "escalation_acks.json"
 
 
 def _load_escalation_acks() -> Dict[str, Dict[str, Any]]:
@@ -1855,7 +1860,7 @@ async def trigger_briefing(hours: int = Query(8, ge=1, le=72)) -> Dict[str, Any]
 async def list_observations_endpoint(limit: int = Query(50, ge=1, le=200)) -> Dict[str, Any]:
     """Lists recent operational assertions recorded in the SOC Knowledge Store."""
     try:
-        store = get_knowledge_store(root_dir=REPO_ROOT)
+        store = get_knowledge_store(root_dir=STATE_ROOT)
         obs_list = store.list_observations(limit=limit)
         return {
             "status": "SUCCESS",

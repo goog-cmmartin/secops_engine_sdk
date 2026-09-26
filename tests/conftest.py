@@ -7,6 +7,9 @@ singletons on import.
 - Disables agent-driven git commits, so the suite never commits anywhere.
 - Points the SOC ledger at a throwaway temp directory, so the suite never writes
   issue/proposal records into the operator's real ledger (~/.secops/ledger).
+- Points the web server's runtime state (chat history, .state, work queue,
+  evidence, knowledge store) at a temp directory, so API tests never post
+  messages into the operator's live chat.
 """
 
 import atexit
@@ -22,3 +25,7 @@ os.environ[DISABLE_ENV_VAR] = "1"
 _LEDGER_TMP = tempfile.mkdtemp(prefix="secops-test-ledger-")
 os.environ[LEDGER_ROOT_ENV_VAR] = _LEDGER_TMP
 atexit.register(shutil.rmtree, _LEDGER_TMP, ignore_errors=True)
+
+_WEB_STATE_TMP = tempfile.mkdtemp(prefix="secops-test-webstate-")
+os.environ["SECOPS_WEB_STATE_ROOT"] = _WEB_STATE_TMP
+atexit.register(shutil.rmtree, _WEB_STATE_TMP, ignore_errors=True)

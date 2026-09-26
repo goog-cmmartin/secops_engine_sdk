@@ -135,3 +135,16 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - `TOPIC_PROMPTS` / `renderEmptyTimeline()`: chips prefill the composer with an @mention of the owning agent (editable before send); hidden if the agent isn't registered.
 - Quick switcher: combobox/listbox ARIA, ↑↓/Enter/Esc, focus restore, recent channels in localStorage (`secops_recent_channels_v1`). `anyModalOpen()` checks rendered visibility. The old `:not([hidden])` guard counted the `display:none` diff/SOC modals as open, which blocked Ctrl+K everywhere.
 - Verified: `.venv/_jscheck/g3check.sh` (34 headless-Chrome checks: main / fetch-failure / 800px), ovfcheck at 1440/1024/760 with no overflow, uxcheck/g7check/g9check green.
+
+## Session 2026-09-26 (UX re-review, part 3)
+Root cause of the chat noise found in the audit (133 unread, repeated "Agent Configuration Error" posts): the pytest API tests were writing into the live `.chat/messages.jsonl` via the server singletons.
+- Done: `SECOPS_WEB_STATE_ROOT` env var (`clients/web/server.py`), defaults to repo root; `tests/conftest.py` points it at a temp dir. Verified: full suite leaves `.chat/messages.jsonl` unchanged; failure set unchanged (38 pre-existing, all capability-registry/live-credential tests).
+- Pending operator decision: purge historical test posts (44 × "Test post message from operator" + paired dispatcher config-error replies + test "Change Proposal Merged" posts) from `.chat/messages.jsonl`.
+
+### Queued UX items
+| # | Item | Status |
+|---|------|--------|
+| 36 | Unread: exclude routine autonomous patrol posts (e.g. `@feed-agent` ✓ status) from counts; still count warnings/failures | Todo |
+| 37 | Missing credentials: show one persistent chat banner instead of a config-error reply per message | Todo |
+| 38 | 390px viewport overflows to 484px — find and fix the wide element | Todo |
+| 39 | Kanban Triage: collapse/group empty scheduled-audit tasks | Todo |

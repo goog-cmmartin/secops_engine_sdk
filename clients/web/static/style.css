@@ -4754,3 +4754,39 @@ td.load-error-cell { padding: 0 !important; }
   #fleetStatusTag { display: none; }
   .search-input { min-width: 0; width: 100%; }
 }
+
+/* #38 narrow viewports: nothing may push the page wider than the screen. */
+@media (max-width: 760px) {
+  .page-container { padding: 16px; }
+  .page-actions,
+  .gastown-tabs-bar { flex-wrap: wrap; gap: 8px; }
+  .gastown-tabs,
+  .subpage-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .subtab { flex-shrink: 0; white-space: nowrap; }
+  .briefing-page-container { min-width: 0; width: 100%; }
+}
+
+/* Phone widths: drop the brand mark and tighten spacing; every control stays visible. */
+@media (max-width: 560px) {
+  .app-topbar { padding: 0 6px; gap: 4px; }
+  .topbar-brand { display: none; }
+  .topbar-nav { padding: 2px; gap: 1px; min-width: 0; }
+  .nav-tab { padding: 6px 8px; }
+  .topbar-meta { gap: 4px; }
+
+  .chat-header {
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+  }
+  .chat-actions { flex-wrap: wrap; gap: 6px; }
+
+  .gt-mayor-banner { flex-wrap: wrap; gap: 10px; padding: 12px; }
+  .gt-mayor-stats { flex-wrap: wrap; }
+}

@@ -448,9 +448,41 @@ function hideAgentStatusIndicator() {
   }
 }
 
+function setLiveStatus(status) {
+  const titles = {
+    connected: "Live: connected to event stream",
+    connecting: "Connecting to event stream…",
+    disconnected: "Disconnected from event stream — data may be stale. Reconnecting…",
+  };
+  document.querySelectorAll(".live-indicator").forEach((el) => {
+    el.classList.remove("is-connected", "is-connecting", "is-disconnected");
+    el.classList.add(`is-${status}`);
+    el.title = titles[status];
+    el.setAttribute("aria-label", titles[status]);
+  });
+  const banner = document.getElementById("connectionBanner");
+  if (banner) banner.hidden = status !== "disconnected";
+}
+
 function initSSE() {
   if (state.evtSource) state.evtSource.close();
+  if (state.sseReconnectTimer) {
+    clearTimeout(state.sseReconnectTimer);
+    state.sseReconnectTimer = null;
+  }
+  setLiveStatus("connecting");
   state.evtSource = new EventSource("/api/events");
+
+  state.evtSource.onopen = () => {
+    const wasDisconnected = state.sseWasDisconnected;
+    state.sseWasDisconnected = false;
+    setLiveStatus("connected");
+    if (wasDisconnected) {
+      // Events may have been missed while offline; resync the key views.
+      loadProposals();
+      if (typeof loadGastownOverview === "function") loadGastownOverview();
+    }
+  };
 
   state.evtSource.onmessage = (e) => {
     try {
@@ -516,7 +548,16 @@ function initSSE() {
 
   state.evtSource.onerror = () => {
     console.debug("SSE disconnected, attempting reconnection in 3s...");
-    setTimeout(initSSE, 3000);
+    state.sseWasDisconnected = true;
+    setLiveStatus("disconnected");
+    // Close so the browser's built-in retry doesn't race our own.
+    state.evtSource.close();
+    if (!state.sseReconnectTimer) {
+      state.sseReconnectTimer = setTimeout(() => {
+        state.sseReconnectTimer = null;
+        initSSE();
+      }, 3000);
+    }
   };
 }
 
@@ -2152,7 +2193,7 @@ function renderPlaybookHealthWidget(widget) {
             <div id="${cardId}_dag" style="display:none; margin-top:8px; padding:8px; background:rgba(0,0,0,0.5); border-radius:4px; border:1px solid rgba(255,255,255,0.1);">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                 <span style="font-size:10px; color:var(--text-muted); font-weight:600;">Mermaid.js Flowchart DAG</span>
-                <button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(mermaidDag)}')); showToast('Mermaid DAG copied to clipboard');" 
+                <button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(mermaidDag)}')); showToast('success', 'Mermaid DAG copied to clipboard');" 
                         class="btn btn-secondary" style="font-size:9.5px; padding:2px 6px;">Copy Syntax</button>
               </div>
               <pre class="mermaid" style="font-family:var(--font-mono); font-size:10px; color:#93c5fd; white-space:pre-wrap; margin:0; overflow-x:auto;">${escapeHtml(mermaidDag)}</pre>
@@ -2858,7 +2899,7 @@ function renderRawLogSearchCard(w) {
                     </span>
                     ${time ? `<span style="color:var(--text-muted);">${escapeHtml(time)}</span>` : ''}
                   </div>
-                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:9px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
+                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('success', 'Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:9px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
                     📋 Copy Raw Log
                   </button>
                 </div>
@@ -3243,65 +3284,182 @@ async function handleClearTopic() {
   }
 }
 
+// --- Action Dialog (replaces native confirm()/prompt() for HITL actions) ---
+/**
+ * Opens an accessible modal dialog and resolves with the field values on confirm,
+ * or null on cancel / Escape / backdrop click.
+ * fields: [{ name, label, type: "text"|"textarea", required, value, placeholder, minLength }]
+ */
+function openActionDialog({ title, message = "", confirmLabel = "Confirm", variant = "primary", fields = [] }) {
+  return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "action-dialog-overlay";
+    const titleId = `actionDialogTitle-${Date.now()}`;
+
+    const fieldsHtml = fields.map((f, i) => {
+      const id = `actionDialogField-${i}`;
+      const req = f.required ? ' required aria-required="true"' : "";
+      const minLen = f.minLength ? ` minlength="${f.minLength}"` : "";
+      const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : "";
+      const input = f.type === "textarea"
+        ? `<textarea id="${id}" name="${escapeHtml(f.name)}" rows="3"${req}${minLen}${ph}>${escapeHtml(f.value || "")}</textarea>`
+        : `<input id="${id}" name="${escapeHtml(f.name)}" type="text" value="${escapeHtml(f.value || "")}"${req}${minLen}${ph} />`;
+      return `
+        <label class="action-dialog-label" for="${id}">
+          ${escapeHtml(f.label)}${f.required ? ' <span class="action-dialog-req" aria-hidden="true">*</span>' : ' <span class="action-dialog-opt">(optional)</span>'}
+        </label>
+        ${input}`;
+    }).join("");
+
+    overlay.innerHTML = `
+      <form class="action-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}" novalidate>
+        <h2 id="${titleId}" class="action-dialog-title">${escapeHtml(title)}</h2>
+        ${message ? `<p class="action-dialog-message">${escapeHtml(message)}</p>` : ""}
+        ${fieldsHtml}
+        <div class="action-dialog-error" role="alert" hidden></div>
+        <div class="action-dialog-actions">
+          <button type="button" class="btn btn-secondary" data-action="cancel">Cancel</button>
+          <button type="submit" class="btn ${variant === "danger" ? "btn-danger" : "btn-primary"}">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </form>`;
+
+    const form = overlay.querySelector("form");
+    const errorEl = overlay.querySelector(".action-dialog-error");
+
+    const close = (result) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      if (previouslyFocused && typeof previouslyFocused.focus === "function") previouslyFocused.focus();
+      resolve(result);
+    };
+
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close(null);
+      } else if (e.key === "Tab") {
+        // Simple focus trap
+        const focusables = form.querySelectorAll("input, textarea, button");
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const values = {};
+      for (const f of fields) {
+        const el = form.elements[f.name];
+        const v = (el.value || "").trim();
+        if (f.required && !v) {
+          errorEl.textContent = `${f.label} is required.`;
+          errorEl.hidden = false;
+          el.focus();
+          return;
+        }
+        if (f.minLength && v && v.length < f.minLength) {
+          errorEl.textContent = `${f.label} must be at least ${f.minLength} characters.`;
+          errorEl.hidden = false;
+          el.focus();
+          return;
+        }
+        values[f.name] = v;
+      }
+      close(values);
+    });
+    overlay.querySelector('[data-action="cancel"]').addEventListener("click", () => close(null));
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
+    document.addEventListener("keydown", onKey, true);
+
+    document.body.appendChild(overlay);
+    const firstInput = form.querySelector("input, textarea");
+    (firstInput || form.querySelector('button[type="submit"]')).focus();
+    if (firstInput && firstInput.select) firstInput.select();
+  });
+}
+
 // --- Proposal Approvals & Rejections ---
 async function handleApproveProposal(proposalId) {
-  if (!confirm(`Are you sure you want to approve proposal ${proposalId} and execute the live production mutation?`)) {
-    return;
-  }
+  const result = await openActionDialog({
+    title: "Approve & apply change",
+    message: `Approving ${proposalId} executes a live production mutation in SecOps. This is recorded in the audit trail.`,
+    confirmLabel: "Approve & Apply",
+    fields: [{ name: "note", label: "Approval note", type: "textarea", placeholder: "Why is this change safe to apply?" }],
+  });
+  if (!result) return false;
 
   try {
-    const res = await fetch(`/api/proposals/${proposalId}/approve`, {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ merged_by: "secops-operator" }),
+      body: JSON.stringify({ merged_by: "secops-operator", approval_note: result.note || null }),
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      showToast(`Approval failed: ${err.detail || "Unknown error"}`, "error");
-    } else {
-      showToast(`Proposal ${proposalId} approved and merged to production!`, "success");
-      await Promise.all([loadProposals(), loadGastownOverview()]);
+      const err = await res.json().catch(() => ({}));
+      showToast("error", `Approval failed: ${err.detail || res.status}`);
+      return false;
     }
+    showToast("success", `Proposal ${proposalId} approved and merged to production!`);
+    await Promise.all([loadProposals(), loadGastownOverview()]);
+    return true;
   } catch (err) {
-    showToast("Network error approving proposal: " + err, "error");
+    showToast("error", "Network error approving proposal: " + err);
+    return false;
   }
 }
 
 async function handleRejectProposal(proposalId) {
-  const reason = prompt("Enter reason for rejecting this proposal:", "Not required at this time");
-  if (!reason) return;
+  const result = await openActionDialog({
+    title: "Reject proposal",
+    message: `Rejecting ${proposalId} closes it without applying any change. The reason is sent back to the authoring agent.`,
+    confirmLabel: "Reject",
+    variant: "danger",
+    fields: [{ name: "reason", label: "Rejection reason", type: "textarea", required: true, minLength: 5 }],
+  });
+  if (!result) return false;
+  const reason = result.reason;
 
   try {
-    const res = await fetch(`/api/proposals/${proposalId}/reject`, {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: reason, rejected_by: "secops-operator" }),
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      showToast(`Rejection failed: ${err.detail || "Unknown error"}`, "error");
-    } else {
-      showToast(`Proposal ${proposalId} rejected.`, "info");
-      await Promise.all([loadProposals(), loadGastownOverview()]);
+      const err = await res.json().catch(() => ({}));
+      showToast("error", `Rejection failed: ${err.detail || res.status}`);
+      return false;
     }
+    showToast("info", `Proposal ${proposalId} rejected.`);
+    await Promise.all([loadProposals(), loadGastownOverview()]);
+    return true;
   } catch (err) {
-    showToast("Network error rejecting proposal: " + err, "error");
+    showToast("error", "Network error rejecting proposal: " + err);
+    return false;
   }
 }
 
 window.handleProposalAction = async function (proposalId, action) {
-  if (action === "approve") {
-    await handleApproveProposal(proposalId);
-  } else if (action === "reject") {
-    await handleRejectProposal(proposalId);
-  }
+  if (action === "approve") return handleApproveProposal(proposalId);
+  if (action === "reject") return handleRejectProposal(proposalId);
+  return false;
 };
 
 async function handleDismissTodo(todoId) {
-  const reason = prompt(`Enter dismissal / resolution reason for ${todoId}:`, "Not required at this time");
-  if (reason === null) return;
+  const result = await openActionDialog({
+    title: "Dismiss task",
+    message: `Mark ${todoId} as resolved.`,
+    confirmLabel: "Dismiss",
+    fields: [{ name: "reason", label: "Resolution reason", type: "textarea", required: true, minLength: 5 }],
+  });
+  if (!result) return;
+  const reason = result.reason;
 
   try {
     const res = await fetch(`/api/todos/${encodeURIComponent(todoId)}`, {
@@ -3316,10 +3474,10 @@ async function handleDismissTodo(todoId) {
     if (!res.ok) {
       await fetch(`/api/todos/${encodeURIComponent(todoId)}`, { method: "DELETE" });
     }
-    showToast(`Task ${todoId} dismissed.`, "info");
+    showToast("info", `Task ${todoId} dismissed.`);
     await loadGastownOverview();
   } catch (err) {
-    showToast("Error dismissing task: " + err, "error");
+    showToast("error", "Error dismissing task: " + err);
   }
 }
 window.handleDismissTodo = handleDismissTodo;
@@ -3686,6 +3844,16 @@ function scrollToBottom(smooth = false) {
   }, 50);
 }
 
+/**
+ * Encodes a value as a JS string literal that is safe to embed inside a
+ * double-quoted inline HTML event attribute, e.g. onclick="fn(${jsArg(x)})".
+ * JSON.stringify handles quotes/backslashes/newlines; escapeHtml then protects
+ * the attribute boundary (the HTML parser decodes &quot; back before JS runs).
+ */
+function jsArg(value) {
+  return escapeHtml(JSON.stringify(value == null ? "" : String(value)));
+}
+
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -3944,7 +4112,7 @@ function showToast(type, message, duration = 4500) {
   if (!container) return;
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  const icon = type === "success" ? "✅" : type === "error" ? "❌" : "ℹ️";
+  const icon = type === "success" ? "✅" : type === "error" ? "❌" : type === "warning" ? "⚠️" : "ℹ️";
   toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span style="flex:1;">${escapeHtml(message)}</span>`;
   container.appendChild(toast);
   setTimeout(() => {
@@ -5018,6 +5186,9 @@ async function loadGastownOverview(force = false) {
       fetch("/api/gastown/overview"),
       fetch("/api/proposals"),
     ]);
+    if (!resOverview.ok || !resProposals.ok) {
+      throw new Error(`HTTP ${resOverview.status}/${resProposals.status}`);
+    }
     gastownState.overview = await resOverview.json();
     gastownState.proposals = await resProposals.json();
 
@@ -5025,6 +5196,38 @@ async function loadGastownOverview(force = false) {
     renderGastownCurrentSubtab();
   } catch (err) {
     console.error("Failed loading Gas Town overview:", err);
+    markGastownHeaderStale();
+  }
+}
+
+const UNKNOWN_METRIC = "—";
+
+// Replace header metrics with explicit "unknown" markers when the overview
+// endpoint cannot be reached, so stale or placeholder values are never shown
+// as live.
+function markGastownHeaderStale() {
+  [
+    "gtStatPolecats",
+    "gtStatHooks",
+    "gtStatWork",
+    "gtStatLeases",
+    "gtStatConvoys",
+    "gtStatEscalations",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = UNKNOWN_METRIC;
+  });
+  const hb = document.getElementById("gtDeaconHeartbeat");
+  if (hb) {
+    hb.textContent = "Deacon Heartbeat: unavailable";
+    hb.className = "gt-stat-val unknown";
+  }
+  const fleet = document.getElementById("gtFleetOnline");
+  if (fleet) fleet.textContent = "Agents Online: unavailable";
+  const alert = document.getElementById("gtAlertItem");
+  if (alert) {
+    alert.textContent = "⚠ Overview unavailable — pending review count unknown";
+    alert.className = "gt-alert-pill gt-alert-unknown";
   }
 }
 
@@ -5040,17 +5243,24 @@ function renderGastownHeader() {
 
   // Health
   const gtDeaconHeartbeat = document.getElementById("gtDeaconHeartbeat");
-  if (gtDeaconHeartbeat && ov.health) {
-    gtDeaconHeartbeat.textContent = `✓ Deacon Heartbeat (${ov.health.deacon_heartbeat || "<1m"})`;
+  if (gtDeaconHeartbeat) {
+    const hb = ov.health && ov.health.deacon_heartbeat;
+    if (hb) {
+      gtDeaconHeartbeat.textContent = `✓ Deacon Heartbeat (${hb})`;
+      gtDeaconHeartbeat.className = "gt-stat-val healthy";
+    } else {
+      gtDeaconHeartbeat.textContent = "Deacon Heartbeat: unknown";
+      gtDeaconHeartbeat.className = "gt-stat-val unknown";
+    }
   }
 
-  // Summary Metrics
+  // Summary Metrics — never substitute fabricated numbers for missing data.
   const summary = ov.summary || {};
-  const polecatCount = summary.polecat_count ?? 9;
-  const hookCount = summary.hook_count ?? 103;
-  const issueCount = summary.issue_count ?? 3;
-  const convoyCount = summary.convoy_count ?? 4;
-  const escalationCount = summary.escalation_count ?? 1;
+  const polecatCount = summary.polecat_count ?? UNKNOWN_METRIC;
+  const hookCount = summary.hook_count ?? UNKNOWN_METRIC;
+  const issueCount = summary.issue_count ?? UNKNOWN_METRIC;
+  const convoyCount = summary.convoy_count ?? UNKNOWN_METRIC;
+  const escalationCount = summary.escalation_count ?? UNKNOWN_METRIC;
 
   const statPolecats = document.getElementById("gtStatPolecats");
   const statFleetOnline = document.getElementById("gtFleetOnline");
@@ -5061,10 +5271,13 @@ function renderGastownHeader() {
   const statEscalations = document.getElementById("gtStatEscalations");
 
   if (statPolecats) statPolecats.textContent = polecatCount;
-  if (statFleetOnline) statFleetOnline.textContent = `${polecatCount} Agents Online`;
+  if (statFleetOnline) {
+    statFleetOnline.textContent =
+      polecatCount === UNKNOWN_METRIC ? "Agents Online: unknown" : `${polecatCount} Agents Online`;
+  }
   if (statHooks) statHooks.textContent = hookCount;
   if (statWork) statWork.textContent = issueCount;
-  if (statLeases) statLeases.textContent = summary.soc_leases_active ?? 0;
+  if (statLeases) statLeases.textContent = summary.soc_leases_active ?? UNKNOWN_METRIC;
   if (statConvoys) statConvoys.textContent = convoyCount;
   if (statEscalations) statEscalations.textContent = escalationCount;
 
@@ -5152,7 +5365,7 @@ function renderSocKanbanCard(iss) {
   const holder = iss.lease?.holder_agent || "unassigned";
 
   return `
-    <div class="kanban-card" onclick="viewSocIssueDetail('${id}')" style="border-left: 3px solid #6366f1;">
+    <div class="kanban-card" onclick="viewSocIssueDetail(${jsArg(iss.issue_id)})" style="border-left: 3px solid #6366f1;">
       <div class="kanban-card-head">
         <span class="kanban-card-id" style="color:#a5b4fc;">${id}</span>
         <div style="display:flex; align-items:center; gap:4px;">
@@ -5163,8 +5376,8 @@ function renderSocKanbanCard(iss) {
       <div class="kanban-card-title">${title}</div>
       <div class="kanban-card-target">${target}</div>
       <div class="kanban-card-footer">
-        <span class="kanban-card-author">${getAgentAvatarSvg(holder, 13)} ${holder}</span>
-        <button class="kanban-card-action-btn" onclick="event.stopPropagation(); viewSocIssueDetail('${id}')">Ledger 📜</button>
+        <span class="kanban-card-author">${getAgentAvatarSvg(holder, 13)} ${escapeHtml(holder)}</span>
+        <button class="kanban-card-action-btn" onclick="event.stopPropagation(); viewSocIssueDetail(${jsArg(iss.issue_id)})">Ledger 📜</button>
       </div>
     </div>
   `;
@@ -5202,7 +5415,7 @@ function renderGastownKanban() {
         return `
           <div class="kanban-card">
             <div class="kanban-card-head">
-              <span class="kanban-card-id">${id}</span>
+              <span class="kanban-card-id">${escapeHtml(id)}</span>
               <div style="display:flex; align-items:center; gap:6px;">
                 ${sightingBadge}
                 <span class="kanban-card-badge ${badgeClass}">${priority} PRIORITY</span>
@@ -5211,10 +5424,10 @@ function renderGastownKanban() {
             <div class="kanban-card-title">${escapeHtml(item.title || "Remediation Task")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
-              <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
+              <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
               <div style="display:flex; gap:6px;">
-                <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Triage</button>
-                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo('${id}')" title="Dismiss or resolve this task">Dismiss</button>
+                <button class="kanban-card-action-btn" onclick="switchTopicAndChat(${jsArg(stream)}, ${jsArg(topic)}, ${jsArg(prompt)})">Triage</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo(${jsArg(id)})" title="Dismiss or resolve this task">Dismiss</button>
               </div>
             </div>
           </div>
@@ -5251,7 +5464,7 @@ function renderGastownKanban() {
         return `
           <div class="kanban-card">
             <div class="kanban-card-head">
-              <span class="kanban-card-id">${id}</span>
+              <span class="kanban-card-id">${escapeHtml(id)}</span>
               <div style="display:flex; align-items:center; gap:6px;">
                 ${sightingBadge}
                 <span class="kanban-card-badge ${badgeClass}">ACTIVE</span>
@@ -5260,10 +5473,10 @@ function renderGastownKanban() {
             <div class="kanban-card-title">${escapeHtml(item.title || "Optimization Task")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
-              <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
+              <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
               <div style="display:flex; gap:6px;">
-                <button class="kanban-card-action-btn" onclick="switchTopicAndChat('${stream}', '${topic}', '${prompt}')">Inspect</button>
-                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo('${id}')" title="Dismiss or resolve this task">Dismiss</button>
+                <button class="kanban-card-action-btn" onclick="switchTopicAndChat(${jsArg(stream)}, ${jsArg(topic)}, ${jsArg(prompt)})">Inspect</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo(${jsArg(id)})" title="Dismiss or resolve this task">Dismiss</button>
               </div>
             </div>
           </div>
@@ -5290,17 +5503,17 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" onclick="openGastownDiffModal('${p.id}')">
+          <div class="kanban-card" onclick="openGastownDiffModal(${jsArg(p.id)})">
             <div class="kanban-card-head">
-              <span class="kanban-card-id">${p.id}</span>
+              <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${riskClass}">${p.risk_level || "PROPOSAL"}</span>
             </div>
             <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Rule update proposal")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
-              <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
-              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal('${p.id}')">Review Diff ↗</button>
-              <button class="kanban-card-action-btn" style="margin-left:4px;" onclick="event.stopPropagation(); switchTopicAndChat('detections', 'rule-proposals', '${author} review proposal ${p.id}')">Discuss 💬</button>
+              <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
+              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal(${jsArg(p.id)})">Review Diff ↗</button>
+              <button class="kanban-card-action-btn" style="margin-left:4px;" onclick="event.stopPropagation(); switchTopicAndChat('detections', 'rule-proposals', ${jsArg(`${author} review proposal ${p.id}`)})">Discuss 💬</button>
             </div>
           </div>
         `;
@@ -5326,16 +5539,16 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" onclick="openGastownDiffModal('${p.id}')" style="opacity:0.85;">
+          <div class="kanban-card" onclick="openGastownDiffModal(${jsArg(p.id)})" style="opacity:0.85;">
             <div class="kanban-card-head">
-              <span class="kanban-card-id">${p.id}</span>
+              <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}">${p.status}</span>
             </div>
             <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Resolved mutation")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
-              <span class="kanban-card-author">${renderAvatar("agent", author)} ${author}</span>
-              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal('${p.id}')">View Details</button>
+              <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
+              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal(${jsArg(p.id)})">View Details</button>
             </div>
           </div>
         `;
@@ -5388,7 +5601,7 @@ function renderGastownConvoys() {
         </div>
       </td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="switchTopicAndChat('${c.stream || "detections"}', '${c.topic || "rule-proposals"}', '${c.action_prompt || `${c.primary_agent || "@secops-dispatcher"} status convoy ${c.id}`}')">Inspect</button>
+        <button class="btn btn-secondary btn-sm" onclick="switchTopicAndChat(${jsArg(c.stream || "detections")}, ${jsArg(c.topic || "rule-proposals")}, ${jsArg(c.action_prompt || `${c.primary_agent || "@secops-dispatcher"} status convoy ${c.id}`)})">Inspect</button>
       </td>
     </tr>
   `;
@@ -5410,13 +5623,16 @@ function renderGastownRefinery() {
     const author = p.author || p.author_agent || "@secops-dispatcher";
     const target = p.target_resource_id || p.target_resource || "SecOps Resource";
     const diff = p.proposed_diff || p.diff || "";
-    const preflight = p.preflight_proof || p.preflight || {};
-    const gatesPassed = (preflight.syntax_verified ? 1 : 0) + (preflight.replay_verified ? 1 : 0) + 1;
-    const totalGates = 3;
+    const gates = getPreflightGates(p);
+    const gatesPassed = gates.filter((g) => g.ok).length;
+    const totalGates = gates.length;
+    const gateBadge = gatesPassed === totalGates ? "badge-green" : (gatesPassed === 0 ? "badge-red" : "badge-yellow");
+    const gateTitle = gates.map((g) => `${g.ok ? "✓" : "✗"} ${g.label}`).join("\n");
+    const stats = getDiffStats(diff);
     return `
       <tr>
         <td>
-          <code style="font-size:11px; color:#59c2ff;">${p.id}</code>
+          <code style="font-size:11px; color:#59c2ff;">${escapeHtml(p.id)}</code>
         </td>
         <td>
           <div style="font-size:12.5px; font-weight:600; color:var(--text-main);">${escapeHtml(p.title || target)}</div>
@@ -5424,25 +5640,27 @@ function renderGastownRefinery() {
         </td>
         <td>
           <span style="display:flex; align-items:center; gap:5px; font-size:12px;">
-            ${renderAvatar("agent", author)} ${author}
+            ${renderAvatar("agent", author)} ${escapeHtml(author)}
           </span>
         </td>
         <td>
-          <span class="badge badge-green">✓ ${gatesPassed}/${totalGates} GATES PASSED</span>
+          <span class="badge ${gateBadge}" title="${escapeHtml(gateTitle)}">${gatesPassed}/${totalGates} gates passed</span>
         </td>
         <td>
           <span class="badge ${isMerged ? 'badge-green' : (isRejected ? 'badge-red' : 'badge-blue')}">${p.status}</span>
         </td>
         <td>
-          <span style="font-family:var(--font-mono); font-size:11px; color:#c2d94c;">+${diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).length || 3}</span>
-          <span style="font-family:var(--font-mono); font-size:11px; color:#f07178; margin-left:4px;">-${diff.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---')).length || 1}</span>
+          ${diff ? `
+          <span style="font-family:var(--font-mono); font-size:11px; color:#c2d94c;">+${stats.added}</span>
+          <span style="font-family:var(--font-mono); font-size:11px; color:#f07178; margin-left:4px;">-${stats.removed}</span>
+          ` : `<span style="font-size:11px; color:var(--text-dim);">No diff</span>`}
         </td>
         <td>
           <div style="display:flex; gap:6px;">
-            <button class="btn btn-secondary btn-sm" onclick="openGastownDiffModal('${p.id}')">Inspect</button>
+            <button class="btn btn-secondary btn-sm" onclick="openGastownDiffModal(${jsArg(p.id)})">Inspect</button>
             ${p.status === 'OPEN' ? `
-              <button class="btn btn-primary btn-sm" onclick="handleProposalAction('${p.id}', 'approve')">Approve</button>
-              <button class="btn btn-danger btn-sm" onclick="handleProposalAction('${p.id}', 'reject')">Reject</button>
+              <button class="btn btn-primary btn-sm" onclick="handleProposalAction(${jsArg(p.id)}, 'approve')">Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="handleProposalAction(${jsArg(p.id)}, 'reject')">Reject</button>
             ` : ''}
           </div>
         </td>
@@ -5464,10 +5682,14 @@ function renderGastownEscalations() {
     const escStream = esc.stream || (esc.target && esc.target.startsWith("ru_") ? "detections" : "ingestion");
     const escTopic = esc.topic || (escStream === "detections" ? "rule-proposals" : "parser-drops");
     const escPrompt = esc.action_prompt || `${esc.escalated_by} diagnose unparsed logs for ${esc.target || esc.id}`;
+    const sev = String(esc.severity || "").toUpperCase();
+    const ackCell = esc.acked
+      ? `<span class="badge badge-gray" title="Acknowledged by ${escapeHtml(esc.acked_by || "operator")}${esc.acked_at ? " at " + escapeHtml(new Date(esc.acked_at).toLocaleString()) : ""}">Acked</span>`
+      : `<button class="btn btn-secondary btn-sm" onclick="handleAckEscalation(${jsArg(esc.id)})">Ack</button>`;
     return `
-    <tr>
+    <tr class="${esc.acked ? "row-acked" : ""}">
       <td>
-        <span class="badge ${esc.severity === 'CRITICAL' ? 'badge-red' : 'badge-yellow'}">${esc.severity}</span>
+        <span class="badge ${sev === 'CRITICAL' ? 'badge-red' : 'badge-yellow'}">${escapeHtml(sev)}</span>
       </td>
       <td>
         <div style="font-weight:600; color:var(--text-main); font-size:12.5px;">${escapeHtml(esc.title)}</div>
@@ -5477,20 +5699,96 @@ function renderGastownEscalations() {
         <code style="font-size:11px; color:var(--text-dim);">${escapeHtml(esc.target || "")}</code>
       </td>
       <td>
-        <span style="font-size:12px; color:var(--text-muted);">${renderAvatar("agent", esc.escalated_by)} ${esc.escalated_by}</span>
+        <span style="font-size:12px; color:var(--text-muted);">${renderAvatar("agent", esc.escalated_by)} ${escapeHtml(esc.escalated_by)}</span>
       </td>
-      <td style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">
-        ${esc.age || "<5m"}
+      <td style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);" title="${escapeHtml(esc.created_at || "")}">
+        ${escapeHtml(esc.age || UNKNOWN_METRIC)}
       </td>
       <td>
-        <div style="display:flex; gap:6px;">
-          <button class="btn btn-secondary btn-sm" onclick="showToast('Escalation ${esc.id} acknowledged', 'info')">Ack</button>
-          <button class="btn btn-primary btn-sm" onclick="switchTopicAndChat('${escStream}', '${escTopic}', '${escPrompt}')">Resolve</button>
+        <div style="display:flex; gap:6px; align-items:center;">
+          ${ackCell}
+          <button class="btn btn-primary btn-sm" onclick="switchTopicAndChat(${jsArg(escStream)}, ${jsArg(escTopic)}, ${jsArg(escPrompt)})">Resolve</button>
         </div>
       </td>
     </tr>
   `;
   }).join("");
+}
+
+async function handleAckEscalation(escalationId) {
+  try {
+    const res = await fetch(`/api/gastown/escalations/${encodeURIComponent(escalationId)}/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acked_by: "secops-operator" }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast("error", `Acknowledge failed: ${err.detail || res.status}`);
+      return;
+    }
+    showToast("success", `Escalation ${escalationId} acknowledged`);
+    await loadGastownOverview(true);
+  } catch (err) {
+    showToast("error", `Acknowledge error: ${err.message}`);
+  }
+}
+window.handleAckEscalation = handleAckEscalation;
+
+// Real preflight gates for a proposal — only what the proposal record actually proves.
+function getPreflightGates(p) {
+  const pf = p.preflight_proof || p.preflight || {};
+  return [
+    { label: "Syntax compiler", ok: !!pf.syntax_verified, detail: (pf.compiler_diagnostics || []).join("; ") },
+    { label: "Empirical replay", ok: !!pf.replay_verified, detail: pf.replay_summary || "" },
+  ];
+}
+
+function getDiffStats(diff) {
+  const lines = (diff || "").split("\n");
+  return {
+    added: lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length,
+    removed: lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length,
+  };
+}
+
+// Modal a11y: Esc closes, backdrop click closes, Tab is trapped, focus is restored.
+function activateModal(modal, closeFn) {
+  deactivateModal(modal);
+  const state = { previouslyFocused: document.activeElement };
+  state.onKey = (e) => {
+    // An action dialog stacked above owns the keyboard.
+    if (document.querySelector(".action-dialog-overlay")) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeFn();
+    } else if (e.key === "Tab") {
+      const focusables = Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"))
+        .filter((el) => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  };
+  state.onMouseDown = (e) => { if (e.target === modal) closeFn(); };
+  document.addEventListener("keydown", state.onKey);
+  modal.addEventListener("mousedown", state.onMouseDown);
+  modal._a11y = state;
+  const closeBtn = modal.querySelector(".gt-modal-close-btn");
+  if (closeBtn) closeBtn.focus();
+}
+
+function deactivateModal(modal) {
+  const state = modal && modal._a11y;
+  if (!state) return;
+  document.removeEventListener("keydown", state.onKey);
+  modal.removeEventListener("mousedown", state.onMouseDown);
+  modal._a11y = null;
+  if (state.previouslyFocused && document.contains(state.previouslyFocused) && typeof state.previouslyFocused.focus === "function") {
+    state.previouslyFocused.focus();
+  }
 }
 
 function openGastownDiffModal(proposalId) {
@@ -5502,7 +5800,7 @@ function openGastownDiffModal(proposalId) {
 
   const author = p.author || p.author_agent || "@secops-dispatcher";
   const target = p.target_resource_id || p.target_resource || "SecOps Resource";
-  const diff = p.proposed_diff || p.diff || "--- a/resource\n+++ b/resource\n@@ -1,3 +1,3 @@\n- old_statement\n+ new_statement";
+  const diff = p.proposed_diff || p.diff || "";
 
   const badgeEl = document.getElementById("modalProposalBadge");
   const titleEl = document.getElementById("modalProposalTitle");
@@ -5518,47 +5816,75 @@ function openGastownDiffModal(proposalId) {
   if (authorEl) authorEl.textContent = author;
   if (riskEl) riskEl.textContent = p.risk_level || "MEDIUM";
   if (subEl) subEl.textContent = p.subsystem || "Detections";
-  if (ratEl) ratEl.textContent = p.rationale || "Operational refinement to minimize noise and improve precision.";
+  if (ratEl) {
+    ratEl.textContent = p.rationale || "No rationale provided by the authoring agent.";
+    ratEl.classList.toggle("is-empty", !p.rationale);
+  }
 
   const proofBox = document.getElementById("modalPreflightProof");
   if (proofBox) {
+    const gates = getPreflightGates(p);
+    const allOk = gates.every((g) => g.ok);
     proofBox.innerHTML = `
-      <div style="display:flex; gap:16px; margin-bottom:8px; flex-wrap:wrap;">
-        <span style="color:#c2d94c; font-weight:600;">✓ Invariant Gate: PASS</span>
-        <span style="color:#c2d94c; font-weight:600;">✓ Backtest Gate: PASS</span>
-        <span style="color:#c2d94c; font-weight:600;">✓ Zero-Synthetic Audit: PASS</span>
+      <div class="gt-gate-list">
+        ${gates.map((g) => `
+          <div class="gt-gate ${g.ok ? "is-pass" : "is-missing"}">
+            <span class="gt-gate-status">${g.ok ? "✓ PASS" : "✗ NOT VERIFIED"}</span>
+            <span class="gt-gate-label">${escapeHtml(g.label)}</span>
+            ${g.detail ? `<span class="gt-gate-detail">${escapeHtml(g.detail)}</span>` : ""}
+          </div>`).join("")}
       </div>
-      <div style="color:var(--text-dim); font-size:11px;">Validated against live Chronicle SecOps API. Preflight Bors verification confirmed zero syntax errors and passed all regression tests.</div>
+      ${allOk ? "" : `<div class="gt-gate-warning">⚠ Not all preflight gates are verified. Review the diff carefully before merging.</div>`}
     `;
   }
 
   const diffBlock = document.getElementById("modalDiffContent");
   if (diffBlock) {
-    diffBlock.textContent = diff;
+    if (diff) {
+      diffBlock.innerHTML = formatUnifiedDiff(diff);
+      diffBlock.classList.remove("is-empty");
+    } else {
+      diffBlock.textContent = "No diff attached to this proposal.";
+      diffBlock.classList.add("is-empty");
+    }
   }
 
+  const isOpen = p.status === "OPEN";
   const btnApprove = document.getElementById("modalBtnApprove");
   const btnReject = document.getElementById("modalBtnReject");
+  const setBusy = (busy) => {
+    if (btnApprove) btnApprove.disabled = busy;
+    if (btnReject) btnReject.disabled = busy;
+  };
   if (btnApprove) {
+    btnApprove.hidden = !isOpen;
     btnApprove.onclick = async () => {
-      await handleProposalAction(p.id, "approve");
-      closeGastownDiffModal();
+      setBusy(true);
+      const done = await handleApproveProposal(p.id);
+      setBusy(false);
+      if (done) closeGastownDiffModal();
     };
   }
   if (btnReject) {
+    btnReject.hidden = !isOpen;
     btnReject.onclick = async () => {
-      await handleProposalAction(p.id, "reject");
-      closeGastownDiffModal();
+      setBusy(true);
+      const done = await handleRejectProposal(p.id);
+      setBusy(false);
+      if (done) closeGastownDiffModal();
     };
   }
 
   modal.style.display = "flex";
+  activateModal(modal, closeGastownDiffModal);
 }
 window.openGastownDiffModal = openGastownDiffModal;
 
 function closeGastownDiffModal() {
   const modal = document.getElementById("gastownDiffModal");
-  if (modal) modal.style.display = "none";
+  if (!modal) return;
+  modal.style.display = "none";
+  deactivateModal(modal);
 }
 window.closeGastownDiffModal = closeGastownDiffModal;
 
@@ -5588,7 +5914,9 @@ async function renderGastownPatrols() {
       statusBadge.className = `gt-badge ${isHealthy ? "gt-badge-green" : "gt-badge-yellow"}`;
     }
     if (heartbeatDetail) {
-      heartbeatDetail.textContent = `Heartbeat: ${deacon.deacon_heartbeat || "Active (<1m)"}`;
+      heartbeatDetail.textContent = deacon.deacon_heartbeat
+        ? `Heartbeat: ${deacon.deacon_heartbeat}`
+        : "Heartbeat: unknown";
     }
     if (activePatrolsPill) {
       activePatrolsPill.textContent = `${deacon.active_patrols || schedules.length} Active Patrols (${deacon.total_patrols_run || 0} sweeps run)`;
@@ -5658,7 +5986,7 @@ async function renderGastownPatrols() {
                 <span class="badge ${statusClass}">${lastStatus}</span>
                 <span style="font-size:11px; color:var(--text-dim);">${isEnabled ? "✓ Enabled" : "Paused"}</span>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="triggerGastownAgentPatrol('${handle}')">
+              <button class="btn btn-primary btn-sm" onclick="triggerGastownAgentPatrol(${jsArg(handle)})">
                 <svg class="ui-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 <span>Run Patrol</span>
               </button>
@@ -5775,26 +6103,26 @@ async function renderGastownWorkQueue() {
 
           // Action buttons
           let actionButtons = `
-            <button class="btn btn-xs btn-secondary" onclick="viewSocIssueDetail('${id}')" title="Inspect durable Git ledger & events">Ledger</button>
+            <button class="btn btn-xs btn-secondary" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})" title="Inspect durable Git ledger & events">Ledger</button>
           `;
           if (status === "AVAILABLE" || (iss.lease && Math.max(0, Math.floor(iss.lease.expires_at - nowSec)) === 0)) {
             actionButtons += `
-              <button class="btn btn-xs btn-primary" onclick="handleClaimSocIssue('${id}')" title="Claim lease for autonomous worker">Claim</button>
+              <button class="btn btn-xs btn-primary" onclick="handleClaimSocIssue(${jsArg(iss.issue_id || iss.id)})" title="Claim lease for autonomous worker">Claim</button>
             `;
           } else if (status === "LEASED" || status === "CLAIMED") {
             actionButtons += `
-              <button class="btn btn-xs btn-outline" onclick="handleReleaseSocIssue('${id}')" title="Release lease back to pool">Release</button>
+              <button class="btn btn-xs btn-outline" onclick="handleReleaseSocIssue(${jsArg(iss.issue_id || iss.id)})" title="Release lease back to pool">Release</button>
             `;
           }
           if (status === "VALIDATING" || status === "LEASED") {
             actionButtons += `
-              <button class="btn btn-xs btn-success" onclick="handleDecideSocIssue('${id}', 'APPROVED')" title="Approve issue change">Approve</button>
+              <button class="btn btn-xs btn-success" onclick="handleDecideSocIssue(${jsArg(iss.issue_id || iss.id)}, 'APPROVED')" title="Approve issue change">Approve</button>
             `;
           }
 
           return `
             <tr>
-              <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" onclick="viewSocIssueDetail('${id}')">${id}</td>
+              <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})">${id}</td>
               <td><span class="badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:10px; font-weight:700;">${plane.toUpperCase()}</span></td>
               <td>
                 <div style="font-weight:600; color:var(--text-bright); font-size:12.5px;">${title}</div>
@@ -5862,6 +6190,7 @@ async function viewSocIssueDetail(issueId) {
   if (titleEl) titleEl.textContent = `SOC Issue: ${issueId}`;
   bodyEl.innerHTML = `<div style="text-align:center; padding:32px; color:var(--text-muted);">Loading Git evidence ledger & state transitions for ${escapeHtml(issueId)}...</div>`;
   modal.style.display = "flex";
+  if (!modal._a11y) activateModal(modal, closeSocIssueModal);
 
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}`);
@@ -5950,11 +6279,11 @@ async function viewSocIssueDetail(issueId) {
     if (footerEl) {
       let footerBtns = `<button class="btn btn-secondary" onclick="closeSocIssueModal()">Close</button>`;
       if (iss.status === "AVAILABLE") {
-        footerBtns += `<button class="btn btn-primary" onclick="handleClaimSocIssue('${issueId}')">Claim Issue</button>`;
+        footerBtns += `<button class="btn btn-primary" onclick="handleClaimSocIssue(${jsArg(issueId)})">Claim Issue</button>`;
       } else if (iss.status === "LEASED" || iss.status === "VALIDATING") {
         footerBtns += `
-          <button class="btn btn-danger" onclick="handleDecideSocIssue('${issueId}', 'REJECTED')">Reject</button>
-          <button class="btn btn-success" onclick="handleDecideSocIssue('${issueId}', 'APPROVED')">Approve Decision</button>
+          <button class="btn btn-danger" onclick="handleDecideSocIssue(${jsArg(issueId)}, 'REJECTED')">Reject</button>
+          <button class="btn btn-success" onclick="handleDecideSocIssue(${jsArg(issueId)}, 'APPROVED')">Approve Decision</button>
         `;
       }
       footerEl.innerHTML = footerBtns;
@@ -5967,13 +6296,21 @@ window.viewSocIssueDetail = viewSocIssueDetail;
 
 function closeSocIssueModal() {
   const modal = document.getElementById("modalSocIssue");
-  if (modal) modal.style.display = "none";
+  if (!modal) return;
+  modal.style.display = "none";
+  deactivateModal(modal);
 }
 window.closeSocIssueModal = closeSocIssueModal;
 
 async function handleClaimSocIssue(issueId) {
-  const handle = prompt("Enter worker agent handle to claim this issue:", "@parser-doctor");
-  if (!handle) return;
+  const result = await openActionDialog({
+    title: "Claim issue",
+    message: `Assign a 5-minute lease on ${issueId} to a worker agent.`,
+    confirmLabel: "Claim",
+    fields: [{ name: "handle", label: "Worker agent handle", type: "text", required: true, placeholder: "@parser-doctor" }],
+  });
+  if (!result) return;
+  const handle = result.handle.startsWith("@") ? result.handle : `@${result.handle}`;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/claim`, {
       method: "POST",
@@ -5982,20 +6319,26 @@ async function handleClaimSocIssue(issueId) {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Acquired lease on ${issueId} for ${handle}`, "success");
+      showToast("success", `Acquired lease on ${issueId} for ${handle}`);
       closeSocIssueModal();
       await renderGastownWorkQueue();
     } else {
-      showToast(`Claim failed: ${data.detail || data.error}`, "error");
+      showToast("error", `Claim failed: ${data.detail || data.error}`);
     }
   } catch (err) {
-    showToast(`Claim error: ${err.message}`, "error");
+    showToast("error", `Claim error: ${err.message}`);
   }
 }
 window.handleClaimSocIssue = handleClaimSocIssue;
 
 async function handleReleaseSocIssue(issueId) {
-  if (!confirm(`Release lease on ${issueId} back to available queue?`)) return;
+  const confirmed = await openActionDialog({
+    title: "Release lease",
+    message: `Force-release the lease on ${issueId} and return it to the available queue? The current holder will lose its claim.`,
+    confirmLabel: "Release",
+    variant: "danger",
+  });
+  if (!confirmed) return;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/release`, {
       method: "POST",
@@ -6004,20 +6347,28 @@ async function handleReleaseSocIssue(issueId) {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Lease on ${issueId} released`, "success");
+      showToast("success", `Lease on ${issueId} released`);
       await renderGastownWorkQueue();
     } else {
-      showToast(`Release failed: ${data.detail || data.error}`, "error");
+      showToast("error", `Release failed: ${data.detail || data.error}`);
     }
   } catch (err) {
-    showToast(`Release error: ${err.message}`, "error");
+    showToast("error", `Release error: ${err.message}`);
   }
 }
 window.handleReleaseSocIssue = handleReleaseSocIssue;
 
 async function handleDecideSocIssue(issueId, decision) {
-  const rationale = prompt(`Enter rationale for ${decision} decision on ${issueId}:`, "Approved by operator via SOC operating console");
-  if (rationale === null) return;
+  const isReject = String(decision).toUpperCase() === "REJECTED";
+  const result = await openActionDialog({
+    title: isReject ? "Reject issue" : "Approve issue",
+    message: `Record a ${String(decision).toUpperCase()} decision on ${issueId}. This is written to the audit trail.`,
+    confirmLabel: isReject ? "Reject" : "Approve",
+    variant: isReject ? "danger" : "primary",
+    fields: [{ name: "rationale", label: "Rationale", type: "textarea", required: true, minLength: 5 }],
+  });
+  if (!result) return;
+  const rationale = result.rationale;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/decide`, {
       method: "POST",
@@ -6026,14 +6377,14 @@ async function handleDecideSocIssue(issueId, decision) {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Recorded ${decision} on ${issueId}`, "success");
+      showToast("success", `Recorded ${decision} on ${issueId}`);
       closeSocIssueModal();
       await renderGastownWorkQueue();
     } else {
-      showToast(`Decision failed: ${data.detail || data.error}`, "error");
+      showToast("error", `Decision failed: ${data.detail || data.error}`);
     }
   } catch (err) {
-    showToast(`Decision error: ${err.message}`, "error");
+    showToast("error", `Decision error: ${err.message}`);
   }
 }
 window.handleDecideSocIssue = handleDecideSocIssue;
@@ -6043,19 +6394,19 @@ async function triggerGastownPatrolAll() {
   const headerBtn = document.getElementById("btnHeaderPatrolAll");
   if (btn) btn.disabled = true;
   if (headerBtn) headerBtn.disabled = true;
-  showToast("Deacon: Sweeping all 5 fleet patrol cycles across live endpoints...", "info");
+  showToast("info", "Deacon: Sweeping all 5 fleet patrol cycles across live endpoints...");
   try {
     const res = await fetch("/api/gastown/patrols/run-all", { method: "POST" });
     const data = await res.json();
     if (res.ok) {
-      showToast(`Deacon: Fleet sweep completed (${data.executed_count} agents audited)`, "success");
+      showToast("success", `Deacon: Fleet sweep completed (${data.executed_count} agents audited)`);
       await loadGastownOverview(true);
       await renderGastownPatrols();
     } else {
-      showToast(`Patrol sweep failed: ${data.detail || data.error}`, "error");
+      showToast("error", `Patrol sweep failed: ${data.detail || data.error}`);
     }
   } catch (err) {
-    showToast(`Sweep error: ${err.message}`, "error");
+    showToast("error", `Sweep error: ${err.message}`);
   } finally {
     if (btn) btn.disabled = false;
     if (headerBtn) headerBtn.disabled = false;
@@ -6064,21 +6415,21 @@ async function triggerGastownPatrolAll() {
 window.triggerGastownPatrolAll = triggerGastownPatrolAll;
 
 async function triggerGastownAgentPatrol(agentHandle) {
-  showToast(`Deacon: Running patrol for ${agentHandle}...`, "info");
+  showToast("info", `Deacon: Running patrol for ${agentHandle}...`);
   try {
     const res = await fetch(`/api/gastown/patrols/${encodeURIComponent(agentHandle)}/run`, { method: "POST" });
     const data = await res.json();
     if (res.ok && data.status === "SUCCESS") {
       const beads = data.created_beads || [];
       const beadMsg = beads.length > 0 ? ` (${beads.length} autonomous beads slung)` : "";
-      showToast(`Deacon: Patrol completed for ${agentHandle}${beadMsg}`, "success");
+      showToast("success", `Deacon: Patrol completed for ${agentHandle}${beadMsg}`);
       await loadGastownOverview(true);
       await renderGastownPatrols();
     } else {
-      showToast(`Patrol failed for ${agentHandle}: ${data.error || data.detail}`, "error");
+      showToast("error", `Patrol failed for ${agentHandle}: ${data.error || data.detail}`);
     }
   } catch (err) {
-    showToast(`Error running patrol: ${err.message}`, "error");
+    showToast("error", `Error running patrol: ${err.message}`);
   }
 }
 window.triggerGastownAgentPatrol = triggerGastownAgentPatrol;
@@ -6533,10 +6884,10 @@ function copyAgentPrompt(instruction) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(instruction).then(
       () => {
-        showToast("System instruction copied to clipboard!", "success");
+        showToast("success", "System instruction copied to clipboard!");
       },
       () => {
-        showToast("Failed to copy to clipboard", "error");
+        showToast("error", "Failed to copy to clipboard");
       }
     );
   } else {
@@ -6547,9 +6898,9 @@ function copyAgentPrompt(instruction) {
     textarea.select();
     try {
       document.execCommand("copy");
-      showToast("System instruction copied to clipboard!", "success");
+      showToast("success", "System instruction copied to clipboard!");
     } catch (e) {
-      showToast("Failed to copy prompt", "error");
+      showToast("error", "Failed to copy prompt");
     }
     document.body.removeChild(textarea);
   }
@@ -6606,7 +6957,7 @@ function loadBriefingsView() {
         if (type && id) {
           fetchEntityDossier(type, id);
         } else {
-          showToast("Please enter an Entity Identifier", "warning");
+          showToast("warning", "Please enter an Entity Identifier");
         }
       });
     }
@@ -6679,11 +7030,7 @@ async function loadShiftBriefing(hours = 8) {
 
     // Render markdown narrative
     if (narrativeBody) {
-      if (typeof marked !== "undefined" && marked.parse) {
-        narrativeBody.innerHTML = marked.parse(briefing.summary_narrative || "*No shift narrative generated.*");
-      } else {
-        narrativeBody.textContent = briefing.summary_narrative || "No narrative";
-      }
+      narrativeBody.innerHTML = formatMarkdown(briefing.summary_narrative || "*No shift narrative generated.*");
     }
   } catch (err) {
     console.error("Failed to load shift briefing:", err);
@@ -6841,28 +7188,28 @@ async function fetchEntityDossier(subjectType, subjectId) {
 async function triggerShiftBrief() {
   const hours = parseInt(document.getElementById("shiftWindowSelect")?.value || "8", 10);
   try {
-    showToast(`Triggering shift handover brief across last ${hours}h...`, "info");
+    showToast("info", `Triggering shift handover brief across last ${hours}h...`);
     const res = await fetch(`/api/briefings/trigger?hours=${hours}`, { method: "POST" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    showToast("Shift brief computed and broadcast to #briefings/shift-briefings!", "success");
+    showToast("success", "Shift brief computed and broadcast to #briefings/shift-briefings!");
     await loadShiftBriefing(hours);
   } catch (err) {
     console.error("Failed to trigger shift brief:", err);
-    showToast(`Failed to trigger briefing: ${err.message}`, "error");
+    showToast("error", `Failed to trigger briefing: ${err.message}`);
   }
 }
 
 function copySlackBlocks() {
   if (!currentShiftSlackBlocks) {
-    showToast("No Slack Blocks available to copy", "warning");
+    showToast("warning", "No Slack Blocks available to copy");
     return;
   }
   const payloadStr = JSON.stringify(currentShiftSlackBlocks, null, 2);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(payloadStr).then(
-      () => showToast("Slack Block Kit payload copied to clipboard!", "success"),
-      () => showToast("Failed to copy Slack Blocks to clipboard", "error")
+      () => showToast("success", "Slack Block Kit payload copied to clipboard!"),
+      () => showToast("error", "Failed to copy Slack Blocks to clipboard")
     );
   }
 }

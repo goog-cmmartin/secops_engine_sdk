@@ -49,6 +49,7 @@ class ChangeProposal:
     merged_by: Optional[str] = None
     merge_commit: Optional[str] = None
     rejection_reason: Optional[str] = None
+    approval_note: Optional[str] = None
     rationale: str = ""
     proposed_diff: str = ""
     issue_id: Optional[str] = None
@@ -103,6 +104,7 @@ class ProposalManager:
             "merged_by": proposal.merged_by,
             "merge_commit": proposal.merge_commit,
             "rejection_reason": proposal.rejection_reason,
+            "approval_note": proposal.approval_note,
             "preflight": asdict(proposal.preflight),
             "mutation_payload": proposal.mutation_payload,
         }
@@ -166,6 +168,7 @@ class ProposalManager:
             merged_by=frontmatter.get("merged_by"),
             merge_commit=frontmatter.get("merge_commit"),
             rejection_reason=frontmatter.get("rejection_reason"),
+            approval_note=frontmatter.get("approval_note"),
             rationale=rationale,
             proposed_diff=diff,
             preflight=preflight,
@@ -250,6 +253,7 @@ class ProposalManager:
         merged_by: str = "human-operator",
         inventory_client: Any = None,
         lifecycle_manager: Any = None,
+        approval_note: Optional[str] = None,
     ) -> MergeResult:
         """Applies mutation via SecOpsEngine, moves proposal to merged/, and records git commit."""
         open_file = self.open_dir / f"{proposal_id}.md"
@@ -296,6 +300,7 @@ class ProposalManager:
             proposal.status = "MERGED"
             proposal.merged_at = datetime.now(timezone.utc).isoformat()
             proposal.merged_by = merged_by
+            proposal.approval_note = approval_note
             proposal.updated_at = proposal.merged_at
 
             # 3. Move file from open/ to merged/
@@ -424,6 +429,8 @@ class ProposalManager:
                 f"Target: {proposal.target_resource_id}\n"
                 f"Action: {proposal.action_type}\n"
             )
+            if proposal.approval_note:
+                commit_msg += f"Approval-Note: {proposal.approval_note}\n"
 
             res = subprocess.run(
                 ["git", "commit", "-m", commit_msg, "--", ".proposals/"],

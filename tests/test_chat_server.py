@@ -373,7 +373,7 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         # 3. Approve via POST /api/proposals/{id}/approve
         res_approve = self.client.post(
             f"/api/proposals/{prop_id}/approve",
-            json={"merged_by": "secops-analyst-test"},
+            json={"merged_by": "secops-analyst-test", "approval_note": "Validated against 7d replay"},
         )
         self.assertEqual(res_approve.status_code, 200)
         merge_data = res_approve.json()
@@ -383,6 +383,7 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         saved_prop = proposal_manager.get_proposal(prop_id)
         self.assertEqual(saved_prop.status, "MERGED")
         self.assertEqual(saved_prop.merged_by, "secops-analyst-test")
+        self.assertEqual(saved_prop.approval_note, "Validated against 7d replay")
 
         # Cleanup merged test proposal file
         merged_file = proposal_manager.merged_dir / f"{prop_id}.md"

@@ -225,3 +225,72 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
             prop_str = f"{prop.get('id', '')} {prop.get('target_resource_id', '')} {prop.get('title', '')}".lower()
             for banned in banned_terms:
                 self.assertNotIn(banned, prop_str, f"Banned term '{banned}' found in proposal: {prop}")
+
+
+class EscalationAckAndApprovalTrustTest(unittest.TestCase):
+    """Group 1 (UI review): escalation acks persist; approval surfaces show no fabricated data."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = LocalFileEvidenceStore(base_dir=self._tmp.name)
+        _seed(self.store)
+        self._patches = [
+            mock.patch.object(web_server, "evidence_store", self.store),
+            mock.patch.object(web_server, "ESCALATION_ACKS_PATH", Path(self._tmp.name) / "escalation_acks.json"),
+        ]
+        for patcher in self._patches:
+            patcher.start()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        for patcher in reversed(self._patches):
+            patcher.stop()
+        self._tmp.cleanup()
+
+    def _escalations(self):
+        res = self.client.get("/api/gastown/overview")
+        self.assertEqual(res.status_code, 200)
+        return res.json()
+
+    def test_ack_escalation_persists_and_updates_count(self):
+        data = self._escalations()
+        escalations = data["escalations"]
+        self.assertGreater(len(escalations), 0)
+        target = escalations[0]
+        self.assertFalse(target["acked"])
+        unacked_before = data["summary"]["escalation_count"]
+
+        res = self.client.post(f"/api/gastown/escalations/{target['id']}/ack", json={"acked_by": "test-operator"})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["acked"])
+
+        data_after = self._escalations()
+        acked = next(e for e in data_after["escalations"] if e["id"] == target["id"])
+        self.assertTrue(acked["acked"])
+        self.assertEqual(acked["acked_by"], "test-operator")
+        self.assertIsNotNone(acked["acked_at"])
+        self.assertEqual(data_after["summary"]["escalation_count"], unacked_before - 1)
+        self.assertEqual(data_after["summary"]["escalation_total"], len(data_after["escalations"]))
+
+    def test_ack_rejects_invalid_id(self):
+        res = self.client.post("/api/gastown/escalations/not-an-escalation/ack", json={})
+        self.assertEqual(res.status_code, 400)
+
+    def test_escalation_age_is_real_not_placeholder(self):
+        for esc in self._escalations()["escalations"]:
+            self.assertNotIn(esc["age"], ("Active", "Pending Review", "<5m"))
+            if esc.get("created_at"):
+                self.assertRegex(esc["age"], r"^\d+[mhd]$")
+
+    def test_frontend_has_no_fabricated_preflight_or_diff(self):
+        content = (Path(__file__).resolve().parent.parent / "clients" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        for term in [
+            "Invariant Gate: PASS",
+            "Backtest Gate: PASS",
+            "Zero-Synthetic Audit: PASS",
+            "old_statement",
+            "Operational refinement to minimize noise and improve precision.",
+            "GATES PASSED",
+            "acknowledged')\">Ack",
+        ]:
+            self.assertNotIn(term, content, f"Fabricated UI content '{term}' found in app.js")

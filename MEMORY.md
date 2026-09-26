@@ -15,6 +15,7 @@ Table of contents for project documentation and governance.
 
 ## Reports & Artifacts
 
+- [docs/WEB_UI_REVIEW_PLAN.md](docs/WEB_UI_REVIEW_PLAN.md) — Web UI review findings and cross-session progress tracker (bugs, UX polish, a11y, cleanup).
 - [reports/M1_CAPABILITY_REPORT.md](reports/M1_CAPABILITY_REPORT.md) — Milestone 1.1 capability & robustness report (UDM Search slice). Point-in-time record.
 - [discovery/observations/01_udm_search_discovery.md](discovery/observations/01_udm_search_discovery.md) — Live UDM search behavior/API observations.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.

@@ -190,11 +190,55 @@ class PostMessageRequest(BaseModel):
 
 class ApproveProposalRequest(BaseModel):
     merged_by: str = Field(default="secops-operator", description="Identifier of human approving mutation")
+    approval_note: Optional[str] = Field(default=None, description="Operator justification recorded with the merge")
 
 
 class RejectProposalRequest(BaseModel):
     reason: str = Field(..., description="Explanation of why change was rejected")
     rejected_by: str = Field(default="secops-operator", description="Reviewer identifier")
+
+
+class AckEscalationRequest(BaseModel):
+    acked_by: str = Field(default="secops-operator", description="Operator acknowledging the escalation")
+    note: Optional[str] = Field(default=None, description="Optional acknowledgement note")
+
+
+# --- Escalation acknowledgements ---
+# Escalations are derived on each /api/gastown/overview call, so operator
+# acknowledgements are persisted separately, keyed by escalation id.
+ESCALATION_ACKS_PATH = REPO_ROOT / ".state" / "escalation_acks.json"
+
+
+def _load_escalation_acks() -> Dict[str, Dict[str, Any]]:
+    try:
+        return json.loads(ESCALATION_ACKS_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_escalation_acks(acks: Dict[str, Dict[str, Any]]) -> None:
+    ESCALATION_ACKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ESCALATION_ACKS_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(acks, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(ESCALATION_ACKS_PATH)
+
+
+def _humanize_age(ts: Any) -> Optional[str]:
+    """Returns a compact age string (e.g. '42m', '3h', '2d') for an ISO timestamp, or None."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    secs = max(0, int((datetime.now(timezone.utc) - dt).total_seconds()))
+    if secs < 3600:
+        return f"{max(1, secs // 60)}m"
+    if secs < 86400:
+        return f"{secs // 3600}h"
+    return f"{secs // 86400}d"
 
 
 # --- API Routes ---
@@ -429,6 +473,7 @@ async def list_proposals(
             "merged_by": p.merged_by,
             "merge_commit": p.merge_commit,
             "rejection_reason": p.rejection_reason,
+            "approval_note": p.approval_note,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -457,6 +502,7 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
             "merged_by": p.merged_by,
             "merge_commit": p.merge_commit,
             "rejection_reason": p.rejection_reason,
+            "approval_note": p.approval_note,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -482,6 +528,7 @@ async def approve_proposal(
         engine=engine,
         merged_by=body.merged_by,
         lifecycle_manager=lifecycle_manager,
+        approval_note=body.approval_note,
     )
 
     if not res.success:
@@ -497,7 +544,8 @@ async def approve_proposal(
         content=(
             f"✅ **Change Proposal Merged**: `{proposal_id}`\n\n"
             f"- **Approved By**: {body.merged_by}\n"
-            f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n"
+            + (f"- **Approval Note**: {body.approval_note}\n" if body.approval_note else "")
+            + f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n"
             f"- **Git Commit**: `{res.commit_hash or 'HEAD'}`\n\n"
             f"Production mutation executed successfully via SecOpsEngine."
         ),
@@ -896,8 +944,8 @@ async def get_gastown_overview() -> Dict[str, Any]:
                 "stream": "detections",
                 "topic": "rule-proposals",
                 "action_prompt": f"@secops-dispatcher review proposal {p.id}",
-                "age": "Pending Review",
-                "acked": False,
+                "created_at": p.created_at,
+                "age": _humanize_age(p.created_at),
             })
     if not escalations:
         for t in todos_pending:
@@ -912,10 +960,17 @@ async def get_gastown_overview() -> Dict[str, Any]:
                     "stream": t.get("stream", "detections"),
                     "topic": t.get("topic", "general"),
                     "action_prompt": t.get("action_prompt", ""),
-                    "age": "Active",
-                    "acked": False,
+                    "created_at": t.get("created_at"),
+                    "age": _humanize_age(t.get("created_at")),
                 })
-    summary["escalation_count"] = len(escalations)
+    acks = _load_escalation_acks()
+    for esc in escalations:
+        ack = acks.get(esc["id"])
+        esc["acked"] = ack is not None
+        esc["acked_by"] = ack.get("acked_by") if ack else None
+        esc["acked_at"] = ack.get("acked_at") if ack else None
+    summary["escalation_count"] = sum(1 for e in escalations if not e["acked"])
+    summary["escalation_total"] = len(escalations)
 
     soc_issues = [i.to_dict() for i in work_queue.list_issues(limit=50)]
     soc_workers = [w.to_dict() for w in work_queue.list_workers(active_only=False)]
@@ -938,6 +993,22 @@ async def get_gastown_overview() -> Dict[str, Any]:
         "soc_workers": soc_workers,
         "soc_leases_active": active_leases_count,
     }
+
+
+@app.post("/api/gastown/escalations/{escalation_id}/ack")
+async def ack_escalation(escalation_id: str, body: AckEscalationRequest) -> Dict[str, Any]:
+    """Records an operator acknowledgement for an escalation (persisted across restarts)."""
+    if not escalation_id.startswith("esc_"):
+        raise HTTPException(status_code=400, detail="Invalid escalation id.")
+    acks = _load_escalation_acks()
+    record = {
+        "acked_by": body.acked_by,
+        "acked_at": datetime.now(timezone.utc).isoformat(),
+        "note": body.note,
+    }
+    acks[escalation_id] = record
+    _save_escalation_acks(acks)
+    return {"id": escalation_id, "acked": True, **record}
 
 
 # --- SOC Operating System Work Queue & Durability Endpoints ---

@@ -307,6 +307,30 @@ body.view-gastown-active .main-content-area {
   display: inline-block;
 }
 
+.live-indicator.is-connecting {
+  background-color: var(--accent-amber);
+  box-shadow: 0 0 8px var(--accent-amber);
+}
+
+.live-indicator.is-disconnected {
+  background-color: #dc2626;
+  box-shadow: 0 0 8px #dc2626;
+}
+
+.connection-banner {
+  background: #7f1d1d;
+  color: #fef2f2;
+  border-bottom: 1px solid #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 16px;
+  text-align: center;
+}
+
+.connection-banner[hidden] {
+  display: none;
+}
+
 .section-label {
   font-size: 11px;
   font-weight: 700;
@@ -1946,6 +1970,12 @@ body.view-gastown-active .main-content-area {
   border: 1px solid var(--accent-blue);
 }
 
+.toast-warning {
+  background: #78350f;
+  color: #fffbeb;
+  border: 1px solid #d97706;
+}
+
 /* ==========================================================================
    Gas Town Control Center & Board Styles (Honoring Gastown Architecture)
    ========================================================================== */
@@ -2054,6 +2084,10 @@ body.view-gastown-active .main-content-area {
   color: var(--accent-green);
 }
 
+.gt-stat-val.unknown {
+  color: var(--text-dim);
+}
+
 /* Summary & Alerts Metric Banner */
 .gt-summary-banner {
   background: var(--bg-tertiary);
@@ -2111,6 +2145,18 @@ body.view-gastown-active .main-content-area {
   border: 1px solid rgba(250, 123, 23, 0.35);
   padding: 6px 12px;
   border-radius: 20px;
+}
+
+.gt-alert-pill.gt-alert-green {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-green);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.gt-alert-pill.gt-alert-unknown {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-dim);
+  border-color: rgba(148, 163, 184, 0.35);
 }
 
 /* Gastown Tabs Bar */
@@ -3792,3 +3838,129 @@ body.view-gastown-active .main-content-area {
   border-radius: 3px;
   font-size: 9.5px;
 }
+
+/* --- Action Dialog (HITL confirm/reason modal) --- */
+.action-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 12, 0.7);
+  backdrop-filter: blur(3px);
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.action-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  width: 460px;
+  max-width: 95vw;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.action-dialog-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.action-dialog-message {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.action-dialog-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-top: 4px;
+}
+
+.action-dialog-req { color: var(--accent-rose); }
+.action-dialog-opt { color: var(--text-dim); font-weight: 400; }
+
+.action-dialog input,
+.action-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-primary);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.action-dialog input:focus-visible,
+.action-dialog textarea:focus-visible,
+.action-dialog button:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+.action-dialog-error {
+  font-size: 12px;
+  color: var(--accent-rose);
+}
+
+.action-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.btn-danger {
+  background-color: var(--accent-rose);
+  color: #ffffff;
+  border-color: var(--accent-rose);
+}
+
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* --- Group 1 (approval trust): status badges, preflight gates, empty states --- */
+.badge-green { background: rgba(84, 171, 152, 0.15); color: var(--accent-green); }
+.badge-yellow { background: rgba(250, 123, 23, 0.15); color: var(--accent-amber); }
+.badge-red { background: rgba(255, 90, 80, 0.15); color: var(--accent-rose); }
+.badge-blue { background: rgba(138, 180, 248, 0.15); color: var(--accent-blue); }
+.badge-gray { background: var(--bg-tertiary); color: var(--text-dim); }
+
+.gt-gate-list { display: flex; flex-direction: column; gap: 6px; }
+.gt-gate { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.gt-gate-status { font-weight: 700; font-size: 11.5px; min-width: 110px; }
+.gt-gate.is-pass .gt-gate-status { color: var(--accent-green); }
+.gt-gate.is-missing .gt-gate-status { color: var(--accent-amber); }
+.gt-gate-label { color: var(--text-main); font-weight: 600; }
+.gt-gate-detail { color: var(--text-dim); font-size: 11.5px; }
+.gt-gate-warning {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(250, 123, 23, 0.1);
+  border: 1px solid rgba(250, 123, 23, 0.35);
+  color: var(--accent-amber);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diff-block .diff-line { padding: 0 4px; }
+.diff-block.is-empty,
+.gt-modal-rationale.is-empty { color: var(--text-dim); font-style: italic; }
+
+.data-table tr.row-acked td { opacity: 0.6; }
+
+.gt-modal-footer .btn:disabled { opacity: 0.55; cursor: progress; }

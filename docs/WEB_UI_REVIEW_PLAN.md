@@ -11,8 +11,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 4 | SSE disconnect invisible → live dot states + banner + resync | 1 Bugs | Done |
 | 5 | Operator-facing terminology (keep internal names in code) | 2 Polish | Todo |
 | 6 | Replace confirm()/prompt() for approve/reject/claim with modal + required reason | 2 Polish | Done |
-| 9 | Tidy top bar: move build tags to About; add open proposals/escalations/connection | 2 Polish | Todo |
-| 10 | Actions summary cards clickable → sub-tab; alert strip links to review column | 2 Polish | Todo |
+| 9 | Tidy top bar: move build tags to About; add open proposals/escalations/connection | 2 Polish | Done |
+| 10 | Actions summary cards clickable → sub-tab; alert strip links to review column | 2 Polish | Done |
 | 7 | Accessibility: focus-visible, tablist roles, aria-live, icon button labels | 3 A11y | Todo |
 | 8 | Minimum 11px text | 3 A11y | Todo |
 | — | Module split, inline styles → theme tokens, inline onclick → listeners | 4 Cleanup | Todo |
@@ -53,6 +53,13 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Composer: auto-grows 48→200px, including programmatic `input.value = …` prefills (value setter intercepted on the element).
 - Verified with a QuickJS DOM-stub harness (failure/edit/retry/dup/race/scroll); autosize needs a browser check.
 
+## #9 / #10 notes (done 2026-09-26)
+- Top bar: "ADK 2"/"HITL Review" tags → About dialog (ⓘ; reads `/api/health`, now incl. `version`). Right side = escalations chip (unacked; amber when >0, "—" when overview unavailable; → Actions/Escalations), agents chip (→ Agent Library), connection chip (Live/Connecting…/Offline, replaces unlabeled brand dot). Actions nav badge = open proposals, hidden at 0 (was permanently `display:none`).
+- Overview loaded at startup + every 60s while tab visible + on SSE proposal messages, so top-bar counts are live outside Actions.
+- Summary cards are `<button data-gt-target>`; sub-tab targets get `.is-active`/`aria-current`. Polecats → Agent Library, Hooks → Dashboards. Alert pill is a button (disabled when all clear) → Kanban, scrolls + flashes review column (reduced-motion safe).
+- `openActionDialog` gained `bodyHtml` (trusted, caller-escaped) and `showCancel`.
+- Verified: `.venv/_jscheck/g9check.py` (26 checks) + uxcheck/g7check still green.
+
 ## #5 terminology map (screen text only)
 | Current | Suggested |
 |---|---|
@@ -70,7 +77,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Hardcoded counts in copy ("5 Active Patrols", "Sweeping all 5 fleet patrol cycles")
 - Empty chat state uses trash icon; offer per-topic suggested prompts instead
 - Quick switcher (Ctrl/Cmd+K) for streams/topics/DMs
-- 4 pre-existing failures in tests/test_chat_server.py (agent library/dispatcher) — unrelated to UI work
+- 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
+- Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live
 - Knowledge Graph nav opens new tab — add external-link icon or bring in-app
 - Per-view URLs (hash routing for Actions sub-tabs / briefing tabs)
 - On-screen errors with Retry instead of console-only catch blocks

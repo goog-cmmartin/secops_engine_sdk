@@ -248,6 +248,7 @@ async def health_check() -> Dict[str, Any]:
     open_props = proposal_manager.list_proposals(status="OPEN")
     return {
         "status": "healthy",
+        "version": app.version,
         "agents_online": len(fleet),
         "open_proposals": len(open_props),
         "engine_capabilities": len(engine.registry.list_capabilities()),
@@ -1850,7 +1851,7 @@ async def list_observations_endpoint(limit: int = Query(50, ge=1, le=200)) -> Di
 async def list_mitre_profiles_endpoint() -> Dict[str, Any]:
     """Lists available MITRE ATT&CK threat profiles."""
     try:
-        profiles = engine.list_mitre_threat_profiles()
+        profiles = await asyncio.to_thread(engine.list_mitre_threat_profiles)
         return {
             "status": "SUCCESS",
             "profiles": profiles,
@@ -1868,7 +1869,8 @@ async def get_mitre_coverage_endpoint(
 ) -> Dict[str, Any]:
     """Evaluates tenant detection rules and live telemetry against MITRE ATT&CK."""
     try:
-        assessment = engine.analyze_mitre_coverage(
+        assessment = await asyncio.to_thread(
+            engine.analyze_mitre_coverage,
             profile_id=profile,
             sync_cache_if_empty=True,
             time_unit="DAY",
@@ -1891,7 +1893,10 @@ async def run_mitre_audit_endpoint(
 ) -> Dict[str, Any]:
     """Executes a strategic MITRE ATT&CK coverage assessment and posts the dashboard card to Fleet Chat."""
     try:
-        assessment = engine.analyze_mitre_coverage(
+        # Engine work runs off-loop; chat_store.add_message below must stay on
+        # the event loop (it fans out via asyncio.Queue.put_nowait).
+        assessment = await asyncio.to_thread(
+            engine.analyze_mitre_coverage,
             profile_id=profile,
             sync_cache_if_empty=True,
             time_unit=time_unit,
@@ -1956,7 +1961,8 @@ async def sync_mitre_rules_endpoint(
 ) -> Dict[str, Any]:
     """Synchronizes customer and curated detection rules into Firestore with parsed MITRE technique IDs."""
     try:
-        res = engine.sync_mitre_rules(
+        res = await asyncio.to_thread(
+            engine.sync_mitre_rules,
             force_refresh=force,
             include_curated=include_curated,
             max_rules=max_rules,
@@ -1976,7 +1982,7 @@ async def get_mitre_report_endpoint(
 ) -> Dict[str, Any]:
     """Generates executive Markdown report for MITRE ATT&CK posture."""
     try:
-        rep = engine.generate_mitre_report(profile_id=profile)
+        rep = await asyncio.to_thread(engine.generate_mitre_report, profile_id=profile)
         return {
             "status": "SUCCESS",
             "report": rep,
@@ -1990,7 +1996,7 @@ async def get_mitre_report_endpoint(
 async def get_technique_rules_endpoint(technique_id: str) -> Dict[str, Any]:
     """Retrieves all detection rules mapped to a specific MITRE ATT&CK technique."""
     try:
-        rules = engine.get_technique_rules(technique_id)
+        rules = await asyncio.to_thread(engine.get_technique_rules, technique_id)
         return {
             "status": "SUCCESS",
             "technique_id": technique_id,

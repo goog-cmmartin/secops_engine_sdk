@@ -303,6 +303,7 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["status"], "healthy")
+        self.assertTrue(data["version"])  # shown in the UI About dialog
         self.assertGreaterEqual(data["agents_online"], 4)
         self.assertGreaterEqual(data["engine_capabilities"], 160)
 

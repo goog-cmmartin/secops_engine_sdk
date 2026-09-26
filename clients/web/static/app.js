@@ -186,7 +186,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   renderUnreadIndicators();
   initSSE();
+  // Top-bar escalation count needs the overview even when Actions isn't open.
+  if (state.currentView !== "gastown") loadGastownOverview();
+  setInterval(() => {
+    if (!document.hidden) loadGastownOverview();
+  }, TOPBAR_REFRESH_MS);
 });
+
+const TOPBAR_REFRESH_MS = 60000;
 
 function setupEventListeners() {
   const composerInput = document.getElementById("composerInput");
@@ -357,6 +364,25 @@ function setupEventListeners() {
   if (tabGtEscalations) tabGtEscalations.addEventListener("click", () => switchGastownSubtab("escalations"));
   if (tabGtPatrols) tabGtPatrols.addEventListener("click", () => switchGastownSubtab("patrols"));
   if (btnRefreshGastown) btnRefreshGastown.addEventListener("click", () => loadGastownOverview(true));
+
+  // #10: summary cards jump to their sub-tab (or top-level view); alert strip -> review column.
+  document.querySelectorAll(".gt-summary-card[data-gt-target]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const target = card.dataset.gtTarget;
+      if (target === "library" || target === "dashboards") switchView(target);
+      else switchGastownSubtab(target);
+    });
+  });
+  const gtAlertItem = document.getElementById("gtAlertItem");
+  if (gtAlertItem) gtAlertItem.addEventListener("click", focusReviewColumn);
+
+  // #9: top-bar status chips + About.
+  const topbarEscalations = document.getElementById("topbarEscalations");
+  if (topbarEscalations) topbarEscalations.addEventListener("click", () => openActionsSubtab("escalations"));
+  const fleetStatusTag = document.getElementById("fleetStatusTag");
+  if (fleetStatusTag) fleetStatusTag.addEventListener("click", () => switchView("library"));
+  const aboutBtn = document.getElementById("aboutBtn");
+  if (aboutBtn) aboutBtn.addEventListener("click", openAboutDialog);
 
   // Diff Modal Close
   const btnCloseDiffModal = document.getElementById("btnCloseDiffModal");
@@ -632,6 +658,15 @@ function setLiveStatus(status) {
   });
   const banner = document.getElementById("connectionBanner");
   if (banner) banner.hidden = status !== "disconnected";
+  const chip = document.getElementById("connChip");
+  if (chip) {
+    chip.classList.remove("is-connected", "is-connecting", "is-disconnected");
+    chip.classList.add(`is-${status}`);
+    chip.title = titles[status];
+    const label = document.getElementById("connChipLabel");
+    if (label) label.textContent = { connected: "Live", connecting: "Connecting…", disconnected: "Offline" }[status];
+  }
+  state.liveStatus = status;
 }
 
 function initSSE() {
@@ -710,6 +745,7 @@ function initSSE() {
         // Refresh proposals list if message carries a proposal
         if (msg.proposal_id) {
           loadProposals();
+          loadGastownOverview();
         }
       }
     } catch (err) {
@@ -753,6 +789,42 @@ async function loadAgents() {
   }
 }
 
+// Top-bar "Actions" badge + drawer toggle: open proposals awaiting operator review.
+function setOpenProposalBadges(openCount) {
+  const navBoardBadge = document.getElementById("navBoardBadge");
+  if (navBoardBadge) {
+    navBoardBadge.textContent = openCount > 99 ? "99+" : String(openCount);
+    navBoardBadge.hidden = !openCount;
+    navBoardBadge.title = `${openCount} proposal${openCount === 1 ? "" : "s"} awaiting review`;
+    navBoardBadge.setAttribute("aria-label", navBoardBadge.title);
+  }
+  const drawerToggleBadge = document.getElementById("drawerToggleBadge");
+  if (drawerToggleBadge) drawerToggleBadge.textContent = openCount;
+}
+
+// Top-bar escalation chip. `count` is null when the overview is unavailable.
+function setTopbarEscalations(count) {
+  const chip = document.getElementById("topbarEscalations");
+  if (!chip) return;
+  const countEl = document.getElementById("topbarEscCount");
+  const labelEl = document.getElementById("topbarEscLabel");
+  const known = typeof count === "number";
+  if (countEl) countEl.textContent = known ? String(count) : UNKNOWN_METRIC;
+  if (labelEl) labelEl.textContent = known && count === 1 ? "escalation" : "escalations";
+  chip.classList.toggle("is-alert", known && count > 0);
+  chip.classList.toggle("is-unknown", !known);
+  chip.title = known
+    ? `${count} unacknowledged escalation${count === 1 ? "" : "s"} — open Escalations`
+    : "Escalation count unavailable — open Escalations";
+}
+
+// Jump into a specific Actions sub-tab from anywhere (top bar, summary cards).
+function openActionsSubtab(subtab) {
+  switchGastownSubtab(subtab);
+  if (state.currentView !== "gastown") switchView("gastown");
+}
+window.openActionsSubtab = openActionsSubtab;
+
 async function loadProposals() {
   try {
     const res = await fetch("/api/proposals");
@@ -761,10 +833,7 @@ async function loadProposals() {
     const openCount = state.proposals.filter(p => p.status === "OPEN").length;
     const openPropCount = document.getElementById("openPropCount");
     if (openPropCount) openPropCount.textContent = openCount;
-    const navBoardBadge = document.getElementById("navBoardBadge");
-    if (navBoardBadge) navBoardBadge.textContent = openCount;
-    const drawerToggleBadge = document.getElementById("drawerToggleBadge");
-    if (drawerToggleBadge) drawerToggleBadge.textContent = openCount;
+    setOpenProposalBadges(openCount);
   } catch (err) {
     console.error("Failed loading proposals:", err);
   }
@@ -975,7 +1044,9 @@ function renderAgents() {
   renderDirectMessages();
   const fleetTag = document.getElementById("fleetStatusTag");
   if (fleetTag && Array.isArray(state.agents) && state.agents.length > 0) {
-    fleetTag.textContent = `${state.agents.length} Agents Active`;
+    const n = state.agents.length;
+    fleetTag.textContent = `${n} agent${n === 1 ? "" : "s"}`;
+    fleetTag.title = `${n} registered agent${n === 1 ? "" : "s"} — open Agent Library`;
   }
   const gtFleet = document.getElementById("gtFleetOnline");
   if (gtFleet && Array.isArray(state.agents) && state.agents.length > 0) {
@@ -3628,7 +3699,7 @@ async function handleClearTopic() {
  * or null on cancel / Escape / backdrop click.
  * fields: [{ name, label, type: "text"|"textarea", required, value, placeholder, minLength }]
  */
-function openActionDialog({ title, message = "", confirmLabel = "Confirm", variant = "primary", fields = [] }) {
+function openActionDialog({ title, message = "", confirmLabel = "Confirm", variant = "primary", fields = [], bodyHtml = "", showCancel = true }) {
   return new Promise((resolve) => {
     const previouslyFocused = document.activeElement;
     const overlay = document.createElement("div");
@@ -3667,10 +3738,11 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
       <form class="action-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}" novalidate>
         <h2 id="${titleId}" class="action-dialog-title">${escapeHtml(title)}</h2>
         ${message ? `<p class="action-dialog-message">${escapeHtml(message)}</p>` : ""}
+        ${bodyHtml}
         ${fieldsHtml}
         <div class="action-dialog-error" role="alert" hidden></div>
         <div class="action-dialog-actions">
-          <button type="button" class="btn btn-secondary" data-action="cancel">Cancel</button>
+          ${showCancel ? '<button type="button" class="btn btn-secondary" data-action="cancel">Cancel</button>' : ""}
           <button type="submit" class="btn ${variant === "danger" ? "btn-danger" : "btn-primary"}">${escapeHtml(confirmLabel)}</button>
         </div>
       </form>`;
@@ -3732,7 +3804,8 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
         fire();
       }
     });
-    overlay.querySelector('[data-action="cancel"]').addEventListener("click", () => close(null));
+    const cancelBtn = overlay.querySelector('[data-action="cancel"]');
+    if (cancelBtn) cancelBtn.addEventListener("click", () => close(null));
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
     document.addEventListener("keydown", onKey, true);
 
@@ -3742,6 +3815,33 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
     if (firstInput && firstInput.select) firstInput.select();
   });
 }
+
+// --- About (#9): build/runtime details moved out of the top bar ---
+async function openAboutDialog() {
+  let health = null;
+  try {
+    const res = await fetch("/api/health");
+    if (res.ok) health = await res.json();
+  } catch (_) { /* rendered as unavailable */ }
+  const val = (v) => (v === undefined || v === null || v === "" ? UNKNOWN_METRIC : String(v));
+  const connLabel = { connected: "Live", connecting: "Connecting…", disconnected: "Offline — reconnecting" }[state.liveStatus] || UNKNOWN_METRIC;
+  const rows = [
+    ["Agent runtime", "Google ADK 2"],
+    ["Change control", "Human-in-the-loop review — every production mutation requires operator approval"],
+    ["Server version", health ? val(health.version) : UNKNOWN_METRIC],
+    ["Server status", health ? val(health.status) : "Unreachable"],
+    ["Agents registered", health ? val(health.agents_online) : UNKNOWN_METRIC],
+    ["Open proposals", health ? val(health.open_proposals) : UNKNOWN_METRIC],
+    ["Engine capabilities", health ? val(health.engine_capabilities) : UNKNOWN_METRIC],
+    ["Evidence store", health ? val(health.evidence_fabric_store) : UNKNOWN_METRIC],
+    ["Event stream", connLabel],
+  ];
+  const bodyHtml = `<dl class="about-grid">${rows
+    .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`)
+    .join("")}</dl>`;
+  await openActionDialog({ title: "About Google SecOps Multi-Agent Fleet", bodyHtml, confirmLabel: "Close", showCancel: false });
+}
+window.openAboutDialog = openAboutDialog;
 
 // --- Proposal Approvals & Rejections ---
 async function handleApproveProposal(proposalId) {
@@ -5732,7 +5832,10 @@ function markGastownHeaderStale() {
   if (alert) {
     alert.textContent = "⚠ Overview unavailable — pending review count unknown";
     alert.className = "gt-alert-pill gt-alert-unknown";
+    alert.disabled = true;
+    alert.removeAttribute("title");
   }
+  setTopbarEscalations(null);
 }
 
 function renderGastownHeader() {
@@ -5784,25 +5887,43 @@ function renderGastownHeader() {
   if (statLeases) statLeases.textContent = summary.soc_leases_active ?? UNKNOWN_METRIC;
   if (statConvoys) statConvoys.textContent = convoyCount;
   if (statEscalations) statEscalations.textContent = escalationCount;
+  setTopbarEscalations(typeof summary.escalation_count === "number" ? summary.escalation_count : null);
 
   // Alerts Strip
   const gtAlertItem = document.getElementById("gtAlertItem");
   const openProps = (gastownState.proposals || []).filter((p) => p.status === "OPEN").length;
   if (gtAlertItem) {
     if (openProps > 0) {
-      gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting HITL operator review`;
+      gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting HITL operator review →`;
       gtAlertItem.className = "gt-alert-pill";
+      gtAlertItem.disabled = false;
+      gtAlertItem.title = "Show the HITL Review column";
     } else {
       gtAlertItem.textContent = "✓ All clear — 0 pending reviews";
       gtAlertItem.className = "gt-alert-pill gt-alert-green";
+      gtAlertItem.disabled = true;
+      gtAlertItem.removeAttribute("title");
     }
   }
 
   // Update Top Nav and Drawer Badges
-  const navBoardBadge = document.getElementById("navBoardBadge");
-  if (navBoardBadge) navBoardBadge.textContent = openProps;
-  const drawerToggleBadge = document.getElementById("drawerToggleBadge");
-  if (drawerToggleBadge) drawerToggleBadge.textContent = openProps;
+  setOpenProposalBadges(openProps);
+}
+
+// Alert strip -> Kanban board, scrolled to and briefly highlighting the review column.
+function focusReviewColumn() {
+  switchGastownSubtab("kanban");
+  const col = document.getElementById("kanbanColReview");
+  if (!col) return;
+  if (col.scrollIntoView) col.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  col.classList.remove("kanban-col-flash");
+  void col.offsetWidth; // restart the animation if clicked repeatedly
+  col.classList.add("kanban-col-flash");
+  const first = col.querySelector(".kanban-card, .kanban-card-action-btn");
+  if (first && first.focus) {
+    if (!first.hasAttribute("tabindex") && first.tagName !== "BUTTON") first.setAttribute("tabindex", "-1");
+    first.focus({ preventScroll: true });
+  }
 }
 
 function switchGastownSubtab(subtabName) {
@@ -5830,6 +5951,12 @@ function switchGastownSubtab(subtabName) {
     if (secEl) {
       secEl.style.display = t.name === subtabName ? "block" : "none";
     }
+  });
+  document.querySelectorAll(".gt-summary-card[data-gt-target]").forEach((card) => {
+    const on = card.dataset.gtTarget === subtabName;
+    card.classList.toggle("is-active", on);
+    if (on) card.setAttribute("aria-current", "true");
+    else card.removeAttribute("aria-current");
   });
 
   renderGastownCurrentSubtab();

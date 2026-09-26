@@ -16,7 +16,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 7 | Accessibility: focus-visible, tablist roles, aria-live, icon button labels | 3 A11y | Done |
 | 8 | Minimum 11px text | 3 A11y | Done |
 | 4a | Inline onclick → delegated `data-act` listener | 4 Cleanup | Done |
-| 4b | Inline styles → theme tokens / CSS classes (944 `style=` in app.js, 131 in HTML) | 4 Cleanup | Todo |
+| 4b-1 | Hard-coded colours → theme tokens (app.js, index.html, status classes in style.css) + AA contrast | 4 Cleanup | Done |
+| 4b-2 | Remaining inline layout `style=` → CSS classes | 4 Cleanup | Todo |
 | 4c | Module split of app.js (~8.1k lines) | 4 Cleanup | Todo |
 | 11 | Approval surfaces still show fabricated data (see below) | 5 Trust | Done |
 | 12 | Diff modal: cancel in approve/reject dialog still closes modal; no Esc/backdrop/focus trap | 5 Trust | Done |
@@ -99,3 +100,10 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
   polite live region announces agent replies; global `:focus-visible` ring; `prefers-reduced-motion`; Knowledge Graph shows ↗ + "(opens in new tab)".
 - Remaining a11y follow-ups: inline `onclick` buttons in chat widgets still carry low-contrast inline colours (see #4 Cleanup);
   no automated axe run yet.
+
+## #4b-1 notes (done 2026-09-26)
+- Semantic palette in style.css: `--c-<tone>` (text), `-solid` (fill behind `--on-solid`), `-bg`/`-faint`/`-bd` (color-mix tints). Tones: ok, danger, warn, high, info, sky, indigo, violet, neutral. Separate dark/light values.
+- app.js + index.html: 0 literal hex/rgba colours left. Also defined 7 tokens that were referenced but never defined (`--bg-surface`, `--bg-card`, `--text-bright`, …).
+- style.css: badge-open/merged/rejected, badge-green/yellow/red/blue, badge-tag, dps-badge, decay-flag-tag, lease-expiry, btn-approve, preflight-box now use tokens (previously dark-only literals, unreadable in light theme). `.diff-container` stays dark in both themes but now sets its own base text colour.
+- Verified: headless-Chrome WCAG contrast scan of all 21 chat-widget renderers (empty + populated fixtures), 0 AA failures in both themes; full index.html load has 0 JS errors; uxcheck/g7check/g9check green.
+- About 200 literal colours remain in non-status style.css rules (layout chrome); migrate with 4b-2.

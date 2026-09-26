@@ -1545,7 +1545,7 @@ function renderDecayAuditWidget(widget) {
   const isLive = !!widget.is_live;
   const liveBadge = isLive
     ? `<span class="badge" style="background:var(--c-ok-bg); color:var(--c-ok); border:1px solid var(--c-ok-bd);">🟢 LIVE (ENABLED)</span>`
-    : `<span class="badge" style="background:var(--c-neutral-bg); color:var(--text-muted); border:1px solid var(--c-neutral-bd);">⚪ DISABLED</span>`;
+    : `<span class="badge" style="background:var(--c-neutral-bg); color:var(--text-dim); border:1px solid var(--c-neutral-bd);">⚪ DISABLED</span>`;
 
   let diagnosticsHtml = "";
   if (widget.compiler_errors && widget.compiler_errors.length > 0) {
@@ -1615,7 +1615,7 @@ function renderDecayAuditWidget(widget) {
       <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; background:var(--surface-inset); padding:8px 10px; border-radius:6px;">
         <div style="font-size:12px;">
           <strong style="color:var(--text-main);">Action:</strong>
-          <span style="color:var(--c-info); font-weight:600; margin-left:4px;">${escapeHtml(widget.recommendation || "INVESTIGATE")}</span>
+          <span style="color:var(--text-accent); font-weight:600; margin-left:4px;">${escapeHtml(widget.recommendation || "INVESTIGATE")}</span>
         </div>
         <div style="display:flex; gap:6px;">
           <button class="btn-approve" style="background:var(--c-indigo-solid); padding:4px 10px; font-size:11px;" ${act("promptRemediateRule", widget.rule_id)}>
@@ -2785,7 +2785,7 @@ function renderRuleConflictWidget(widget) {
   const isSilent = !!widget.is_silent;
   const liveBadge = isLive
     ? `<span class="badge" style="background:var(--c-ok-bg); color:var(--c-ok); border:1px solid var(--c-ok-bd);">🟢 LIVE (ENABLED)</span>`
-    : `<span class="badge" style="background:var(--c-neutral-bg); color:var(--text-muted); border:1px solid var(--c-neutral-bd);">⚪ DISABLED</span>`;
+    : `<span class="badge" style="background:var(--c-neutral-bg); color:var(--text-dim); border:1px solid var(--c-neutral-bd);">⚪ DISABLED</span>`;
 
   const silentBadge = isSilent
     ? `<span class="badge" style="background:var(--c-danger-bg); color:var(--c-danger); border:1px solid var(--c-danger-bd);">⚠️ 0 DETECTIONS (90d)</span>`

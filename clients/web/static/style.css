@@ -58,6 +58,93 @@
   --font-mono: var(--secops-font-family-mono, "Google Sans Mono", monospace);
 }
 
+/* --------------------------------------------------------------------
+   Semantic status palette (theme-aware)
+   --c-<tone>        text / icon / accent border on a surface or its tint
+   --c-<tone>-solid  filled control or bar behind white text (--on-solid)
+   --c-<tone>-bg     tinted chip / badge background
+   --c-<tone>-faint  very light tint (row highlight, info panels)
+   --c-<tone>-bd     border of a tinted chip
+   Tones: ok, danger, warn, high, info, sky, indigo, violet, neutral
+   -------------------------------------------------------------------- */
+:root,
+[data-theme="dark"],
+.smp-theme-dark {
+  --c-ok: #34d399;       --c-ok-solid: #047857;
+  --c-danger: #f87171;   --c-danger-solid: #dc2626;
+  --c-warn: #fbbf24;     --c-warn-solid: #b45309;
+  --c-high: #fb923c;     --c-high-solid: #c2410c;
+  --c-info: #7cb4fb;     --c-info-solid: #2563eb;
+  --c-sky: #38bdf8;      --c-sky-solid: #0369a1;
+  --c-indigo: #a5b4fc;   --c-indigo-solid: #4f46e5;
+  --c-violet: #cc9afd;   --c-violet-solid: #7c3aed;
+  --c-neutral: #9aa0a6;  --c-neutral-solid: #5f6368;
+  --on-solid: #ffffff;
+
+  /* Neutral surfaces layered on cards (code blocks, stat strips, table heads) */
+  --surface-inset: rgba(0, 0, 0, 0.22);
+  --surface-inset-strong: rgba(0, 0, 0, 0.38);
+  --surface-stripe: rgba(255, 255, 255, 0.03);
+
+  /* Previously referenced but never defined */
+  --bg-surface: var(--bg-secondary);
+  --bg-card: var(--bg-secondary);
+  --bg-table-header: var(--bg-tertiary);
+  --text-bright: var(--text-main);
+  --text-primary: var(--text-main);
+  --color-primary-light: var(--text-accent);
+  --accent-red: var(--accent-rose);
+}
+
+[data-theme="light"],
+.smp-theme-light {
+  --c-ok: #0d652d;       --c-ok-solid: #047857;
+  --c-danger: #a50e0e;   --c-danger-solid: #dc2626;
+  --c-warn: #945200;     --c-warn-solid: #b45309;
+  --c-high: #b3410b;     --c-high-solid: #c2410c;
+  --c-info: #174ea6;     --c-info-solid: #2563eb;
+  --c-sky: #0369a1;      --c-sky-solid: #0369a1;
+  --c-indigo: #4338ca;   --c-indigo-solid: #4f46e5;
+  --c-violet: #7e22ce;   --c-violet-solid: #7c3aed;
+  --c-neutral: #5f6368;  --c-neutral-solid: #5f6368;
+  --on-solid: #ffffff;
+
+  --surface-inset: rgba(60, 64, 67, 0.06);
+  --surface-inset-strong: rgba(60, 64, 67, 0.10);
+  --surface-stripe: rgba(60, 64, 67, 0.035);
+}
+
+/* Derived tints: computed from the active tone colour, so they follow the theme */
+:root {
+  --c-ok-bg: color-mix(in srgb, var(--c-ok) 15%, transparent);
+  --c-ok-faint: color-mix(in srgb, var(--c-ok) 8%, transparent);
+  --c-ok-bd: color-mix(in srgb, var(--c-ok) 35%, transparent);
+  --c-danger-bg: color-mix(in srgb, var(--c-danger) 15%, transparent);
+  --c-danger-faint: color-mix(in srgb, var(--c-danger) 8%, transparent);
+  --c-danger-bd: color-mix(in srgb, var(--c-danger) 35%, transparent);
+  --c-warn-bg: color-mix(in srgb, var(--c-warn) 15%, transparent);
+  --c-warn-faint: color-mix(in srgb, var(--c-warn) 8%, transparent);
+  --c-warn-bd: color-mix(in srgb, var(--c-warn) 35%, transparent);
+  --c-high-bg: color-mix(in srgb, var(--c-high) 15%, transparent);
+  --c-high-faint: color-mix(in srgb, var(--c-high) 8%, transparent);
+  --c-high-bd: color-mix(in srgb, var(--c-high) 35%, transparent);
+  --c-info-bg: color-mix(in srgb, var(--c-info) 15%, transparent);
+  --c-info-faint: color-mix(in srgb, var(--c-info) 8%, transparent);
+  --c-info-bd: color-mix(in srgb, var(--c-info) 35%, transparent);
+  --c-sky-bg: color-mix(in srgb, var(--c-sky) 15%, transparent);
+  --c-sky-faint: color-mix(in srgb, var(--c-sky) 8%, transparent);
+  --c-sky-bd: color-mix(in srgb, var(--c-sky) 35%, transparent);
+  --c-indigo-bg: color-mix(in srgb, var(--c-indigo) 15%, transparent);
+  --c-indigo-faint: color-mix(in srgb, var(--c-indigo) 8%, transparent);
+  --c-indigo-bd: color-mix(in srgb, var(--c-indigo) 35%, transparent);
+  --c-violet-bg: color-mix(in srgb, var(--c-violet) 15%, transparent);
+  --c-violet-faint: color-mix(in srgb, var(--c-violet) 8%, transparent);
+  --c-violet-bd: color-mix(in srgb, var(--c-violet) 35%, transparent);
+  --c-neutral-bg: color-mix(in srgb, var(--c-neutral) 15%, transparent);
+  --c-neutral-faint: color-mix(in srgb, var(--c-neutral) 8%, transparent);
+  --c-neutral-bd: color-mix(in srgb, var(--c-neutral) 35%, transparent);
+}
+
 /* Theme Toggle Button */
 .theme-toggle-btn {
   display: inline-flex;
@@ -1003,15 +1090,15 @@ body.view-gastown-active .main-content-area {
   text-transform: uppercase;
 }
 
-.badge-open { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); }
-.badge-merged { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); }
-.badge-rejected { background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); }
+.badge-open { background: var(--c-warn-bg); color: var(--c-warn); }
+.badge-merged { background: var(--c-ok-bg); color: var(--c-ok); }
+.badge-rejected { background: var(--c-danger-bg); color: var(--c-danger); }
 .badge-risk { background: var(--bg-tertiary); color: var(--text-muted); }
 
 .badge-tag {
-  background: rgba(59, 130, 246, 0.12);
-  color: #93c5fd;
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: var(--c-info-bg);
+  color: var(--c-info);
+  border: 1px solid var(--c-info-bd);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -1061,7 +1148,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .preflight-box {
-  background-color: rgba(15, 23, 42, 0.7);
+  background-color: var(--surface-inset-strong);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 8px 10px;
@@ -1084,6 +1171,7 @@ body.view-gastown-active .main-content-area {
 /* Diff View */
 .diff-container {
   background-color: #0d1117;
+  color: #c9d1d9;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   font-family: var(--font-mono);
@@ -1122,8 +1210,8 @@ body.view-gastown-active .main-content-area {
 }
 
 .btn-approve {
-  background-color: var(--accent-green);
-  color: #ffffff;
+  background-color: var(--c-ok-solid);
+  color: var(--on-solid);
   border: none;
   font-size: 11.5px;
   font-weight: 600;
@@ -1136,7 +1224,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .btn-approve:hover {
-  background-color: #059669;
+  background-color: color-mix(in srgb, var(--c-ok-solid) 85%, black);
 }
 
 .btn-reject {
@@ -1468,21 +1556,21 @@ body.view-gastown-active .main-content-area {
 }
 
 .dps-badge.dps-high {
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border: 1px solid var(--c-danger-bd);
 }
 
 .dps-badge.dps-med {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
+  border: 1px solid var(--c-warn-bd);
 }
 
 .dps-badge.dps-low {
-  background: rgba(16, 185, 129, 0.2);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: var(--c-ok-bg);
+  color: var(--c-ok);
+  border: 1px solid var(--c-ok-bd);
 }
 
 .dps-number {
@@ -1504,39 +1592,39 @@ body.view-gastown-active .main-content-area {
   padding: 2px 6px;
   border-radius: 3px;
   text-transform: uppercase;
-  background: rgba(156, 163, 175, 0.15);
-  color: #d1d5db;
-  border: 1px solid rgba(156, 163, 175, 0.25);
+  background: var(--c-neutral-bg);
+  color: var(--c-neutral);
+  border: 1px solid var(--c-neutral-bd);
 }
 
 .decay-flag-tag.tag-broken_compilation {
-  background: rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.5);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border-color: var(--c-danger-bd);
 }
 
 .decay-flag-tag.tag-silent {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fcd34d;
-  border-color: rgba(245, 158, 11, 0.5);
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
+  border-color: var(--c-warn-bd);
 }
 
 .decay-flag-tag.tag-stale {
-  background: rgba(167, 139, 250, 0.2);
-  color: #c4b5fd;
-  border-color: rgba(167, 139, 250, 0.5);
+  background: var(--c-violet-bg);
+  color: var(--c-violet);
+  border-color: var(--c-violet-bd);
 }
 
 .decay-flag-tag.tag-unpopulated_udm_fields {
-  background: rgba(244, 63, 94, 0.2);
-  color: #fda4af;
-  border-color: rgba(244, 63, 94, 0.5);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border-color: var(--c-danger-bd);
 }
 
 .decay-flag-tag.tag-healthy {
-  background: rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
-  border-color: rgba(16, 185, 129, 0.5);
+  background: var(--c-ok-bg);
+  color: var(--c-ok);
+  border-color: var(--c-ok-bd);
 }
 
 /* ====================================================================
@@ -2101,7 +2189,7 @@ body.view-gastown-active .main-content-area {
 
 /* Lease countdowns (SOC work queue) */
 .lease-expiry {
-  color: #34d399;
+  color: var(--c-ok);
   font-family: var(--font-mono);
   font-size: 11.5px;
   font-weight: 600;
@@ -2109,11 +2197,11 @@ body.view-gastown-active .main-content-area {
 }
 
 .lease-expiry.is-expiring {
-  color: #fbbf24;
+  color: var(--c-warn);
 }
 
 .lease-expiry.is-expired {
-  color: #f87171;
+  color: var(--c-danger);
 }
 
 .lease-expiry-abs {
@@ -4127,10 +4215,10 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 /* --- Group 1 (approval trust): status badges, preflight gates, empty states --- */
-.badge-green { background: rgba(84, 171, 152, 0.15); color: var(--accent-green); }
-.badge-yellow { background: rgba(250, 123, 23, 0.15); color: var(--accent-amber); }
-.badge-red { background: rgba(255, 90, 80, 0.15); color: var(--accent-rose); }
-.badge-blue { background: rgba(138, 180, 248, 0.15); color: var(--accent-blue); }
+.badge-green { background: var(--c-ok-bg); color: var(--c-ok); }
+.badge-yellow { background: var(--c-warn-bg); color: var(--c-warn); }
+.badge-red { background: var(--c-danger-bg); color: var(--c-danger); }
+.badge-blue { background: var(--c-info-bg); color: var(--c-info); }
 .badge-gray { background: var(--bg-tertiary); color: var(--text-dim); }
 
 .gt-gate-list { display: flex; flex-direction: column; gap: 6px; }

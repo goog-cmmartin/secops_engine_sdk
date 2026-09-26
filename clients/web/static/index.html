@@ -9,10 +9,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.1">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">Skip to main content</a>
+  <div id="srAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <!-- Global Top Navigation Bar -->
   <header class="app-topbar">
     <div class="topbar-brand">
@@ -21,7 +23,7 @@
       </span>
       <span class="topbar-title">Google SecOps Multi-Agent Fleet</span>
     </div>
-    <nav class="topbar-nav">
+    <nav class="topbar-nav" aria-label="Primary">
       <button id="navBtnChat" class="nav-tab active">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>Fleet Chat</span>
@@ -47,6 +49,8 @@
       <a id="navBtnKnowledge" class="nav-tab" href="/knowledge/viz.html" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         <span>Knowledge Graph</span>
+        <span class="ext-link-icon" aria-hidden="true">↗</span>
+        <span class="sr-only">(opens in new tab)</span>
       </a>
     </nav>
     <div class="topbar-meta">
@@ -75,7 +79,7 @@
 
   <div class="app-container">
     <!-- Left Navigation Sidebar: Slack-Style Streams & Collapsible DMs -->
-    <aside id="sidebarLeft" class="sidebar-left">
+    <aside id="sidebarLeft" class="sidebar-left" aria-label="Streams and direct messages">
       <div class="workspace-header">
         <div class="workspace-title">
           <span class="live-indicator is-connecting" role="status" aria-label="Connecting to event stream…" title="Connecting to event stream…"></span>
@@ -90,12 +94,12 @@
         <div id="streamsList" class="streams-list"></div>
 
         <!-- Slack-Style Direct Messages Section -->
-        <div id="dmSectionHeader" class="section-header-row clickable" title="Toggle Direct Messages">
+        <div id="dmSectionHeader" class="section-header-row clickable" title="Toggle Direct Messages" role="button" tabindex="0" aria-expanded="true" aria-controls="dmList">
           <div style="display:flex; align-items:center; gap:6px;">
             <span class="section-label">Direct Messages</span>
             <span id="dmCountBadge" class="dm-count-badge">—</span>
           </div>
-          <span id="dmToggleIcon" class="section-toggle-icon">▼</span>
+          <span id="dmToggleIcon" class="section-toggle-icon" aria-hidden="true">▼</span>
         </div>
         <div id="dmSearchContainer" class="dm-search-container">
           <div class="dm-search-box">
@@ -105,13 +109,13 @@
             </svg>
             <input
               type="text"
-              id="dmSearchInput"
+              id="dmSearchInput" aria-label="Filter agents"
               class="dm-search-input"
               placeholder="Filter agents..."
               autocomplete="off"
               spellcheck="false"
             />
-            <button id="dmClearFilterBtn" class="dm-clear-btn" title="Clear filter" style="display:none;" type="button">&times;</button>
+            <button id="dmClearFilterBtn" class="dm-clear-btn" title="Clear filter" aria-label="Clear agent filter" style="display:none;" type="button">&times;</button>
           </div>
         </div>
         <div id="dmList" class="dm-list"></div>
@@ -119,7 +123,7 @@
     </aside>
 
     <!-- Center Content Area -->
-    <main class="main-content-area">
+    <main id="mainContent" class="main-content-area" tabindex="-1">
       <!-- View 1: Fleet Chat View -->
       <div id="chatView" class="view-panel active">
         <!-- Chat Header -->
@@ -144,7 +148,7 @@
               </svg>
               <span>Clear Topic</span>
             </button>
-            <button id="toggleRightDrawerBtn" class="btn-drawer-toggle" title="Toggle Proposals Drawer">
+            <button id="toggleRightDrawerBtn" type="button" class="btn-drawer-toggle" title="Toggle Proposals Drawer" aria-controls="sidebarRight" aria-expanded="false">
               <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
               <span>Proposals</span>
               <span id="drawerToggleBadge" class="drawer-badge">0</span>
@@ -153,7 +157,7 @@
         </header>
 
         <!-- Message Timeline -->
-        <section id="messageTimeline" class="message-timeline"></section>
+        <section id="messageTimeline" class="message-timeline" aria-label="Message history"></section>
 
         <!-- Message Composer -->
         <footer class="chat-composer-box">
@@ -162,12 +166,12 @@
           <button id="newMessagesPill" class="new-messages-pill" type="button" hidden aria-live="polite">New messages ↓</button>
           <div class="composer-input-row">
             <textarea
-              id="composerInput"
+              id="composerInput" aria-label="Message"
               class="composer-textarea"
               placeholder="Message #detections > rule-proposals... (type @ for agent autocomplete)"
               rows="1"
             ></textarea>
-            <button id="sendBtn" class="btn-send">
+            <button id="sendBtn" type="button" class="btn-send">
               <span>Send</span>
             </button>
           </div>
@@ -238,28 +242,28 @@
 
           <!-- Gastown Tab Navigation Bar -->
           <div class="gastown-tabs-bar">
-            <div class="gastown-tabs">
-              <button id="tabGtKanban" class="subtab active">
+            <div class="gastown-tabs" role="tablist" aria-label="Actions sections">
+              <button id="tabGtKanban" type="button" class="subtab active" role="tab" aria-controls="secGtKanban">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
                 <span>Kanban Board</span>
               </button>
-              <button id="tabGtWorkQueue" class="subtab">
+              <button id="tabGtWorkQueue" type="button" class="subtab" role="tab" aria-controls="secGtWorkQueue">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
                 <span>Work Queue &amp; Leases</span>
               </button>
-              <button id="tabGtConvoys" class="subtab">
+              <button id="tabGtConvoys" type="button" class="subtab" role="tab" aria-controls="secGtConvoys">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
                 <span>Work Packages</span>
               </button>
-              <button id="tabGtRefinery" class="subtab">
+              <button id="tabGtRefinery" type="button" class="subtab" role="tab" aria-controls="secGtRefinery">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
                 <span>Change Queue</span>
               </button>
-              <button id="tabGtEscalations" class="subtab">
+              <button id="tabGtEscalations" type="button" class="subtab" role="tab" aria-controls="secGtEscalations">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 <span>Escalations</span>
               </button>
-              <button id="tabGtPatrols" class="subtab">
+              <button id="tabGtPatrols" type="button" class="subtab" role="tab" aria-controls="secGtPatrols">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                 <span>Scheduled Audits</span>
               </button>
@@ -277,7 +281,7 @@
           </div>
 
           <!-- Section 1: Kanban Board -->
-          <div id="secGtKanban" class="gastown-section">
+          <div id="secGtKanban" role="tabpanel" aria-labelledby="tabGtKanban" tabindex="-1" class="gastown-section">
             <div class="kanban-grid">
               <!-- Col 1: Triage / Backlog -->
               <div class="kanban-column" id="kanbanColTriage">
@@ -330,7 +334,7 @@
           </div>
 
           <!-- Section 2: Convoys -->
-          <div id="secGtConvoys" class="gastown-section" style="display:none;">
+          <div id="secGtConvoys" role="tabpanel" aria-labelledby="tabGtConvoys" tabindex="-1" class="gastown-section" style="display:none;">
             <div class="table-card">
               <div class="table-card-header">
                 <div>
@@ -364,7 +368,7 @@
           </div>
 
           <!-- Section 3: Refinery Merge Queue -->
-          <div id="secGtRefinery" class="gastown-section" style="display:none;">
+          <div id="secGtRefinery" role="tabpanel" aria-labelledby="tabGtRefinery" tabindex="-1" class="gastown-section" style="display:none;">
             <div class="table-card">
               <div class="table-card-header">
                 <div>
@@ -399,7 +403,7 @@
           </div>
 
           <!-- Section 4: Escalations -->
-          <div id="secGtEscalations" class="gastown-section" style="display:none;">
+          <div id="secGtEscalations" role="tabpanel" aria-labelledby="tabGtEscalations" tabindex="-1" class="gastown-section" style="display:none;">
             <div class="table-card">
               <div class="table-card-header">
                 <div>
@@ -433,7 +437,7 @@
           </div>
 
           <!-- Section 5: Deacon Patrols -->
-          <div id="secGtPatrols" class="gastown-section" style="display:none;">
+          <div id="secGtPatrols" role="tabpanel" aria-labelledby="tabGtPatrols" tabindex="-1" class="gastown-section" style="display:none;">
             <div class="deacon-patrol-header-card">
               <div class="deacon-patrol-title-area">
                 <div class="deacon-badge-row">
@@ -493,7 +497,7 @@
           </div>
 
           <!-- Section 6: Work Queue & Leases -->
-          <div id="secGtWorkQueue" class="gastown-section" style="display:none;">
+          <div id="secGtWorkQueue" role="tabpanel" aria-labelledby="tabGtWorkQueue" tabindex="-1" class="gastown-section" style="display:none;">
             <!-- Active Issues Table -->
             <div class="table-card" style="margin-bottom: 20px;">
               <div class="table-card-header">
@@ -507,7 +511,7 @@
                   </p>
                 </div>
                 <div style="display:flex; gap:8px;">
-                  <select id="socFilterPlane" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                  <select id="socFilterPlane" aria-label="Filter by plane" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
                     <option value="">All Planes</option>
                     <option value="data">Data</option>
                     <option value="detection">Detection</option>
@@ -517,7 +521,7 @@
                     <option value="improvement">Improvement</option>
                     <option value="external">External</option>
                   </select>
-                  <select id="socFilterStatus" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                  <select id="socFilterStatus" aria-label="Filter by status" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
                     <option value="">All Statuses</option>
                     <option value="AVAILABLE">Available</option>
                     <option value="LEASED">Leased</option>
@@ -660,33 +664,33 @@
           </div>
 
           <!-- Ingestion Page Sub-Tabs -->
-          <div class="subpage-tabs">
-            <button id="tabIngestionFeeds" class="subtab active">
+          <div class="subpage-tabs" role="tablist" aria-label="Dashboard sections">
+            <button id="tabIngestionFeeds" type="button" class="subtab active" role="tab" aria-controls="secIngestionFeeds">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><circle cx="12" cy="12" r="2"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
               <span>Feed Pipelines (@feed-agent)</span>
             </button>
-            <button id="tabIngestionParsers" class="subtab">
+            <button id="tabIngestionParsers" type="button" class="subtab" role="tab" aria-controls="secIngestionParsers">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
               <span>Normalizers &amp; CBN (@parser-doctor)</span>
             </button>
-            <button id="tabIngestionDiagnostics" class="subtab">
+            <button id="tabIngestionDiagnostics" type="button" class="subtab" role="tab" aria-controls="secIngestionDiagnostics">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.31L4.15 19.3A2 2 0 0 0 5.86 22h12.28a2 2 0 0 0 1.71-2.7L14 9.31V2"/><line x1="8.5" y1="2" x2="15.5" y2="2"/></svg>
               <span>Unparsed Log Diagnostic Lab (@raw-log-agent)</span>
             </button>
-            <button id="tabIngestionFinOps" class="subtab">
+            <button id="tabIngestionFinOps" type="button" class="subtab" role="tab" aria-controls="secIngestionFinOps">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
               <span>FinOps &amp; Log Costs (@log-cost-agent)</span>
             </button>
-            <button id="tabIngestionNamespaceLabels" class="subtab">
+            <button id="tabIngestionNamespaceLabels" type="button" class="subtab" role="tab" aria-controls="secIngestionNamespaceLabels">
               <svg class="tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
               <span>Labels &amp; Namespaces (@namespace-label-agent)</span>
             </button>
           </div>
 
           <!-- Tab 1: Feed Pipelines Table -->
-          <div id="secIngestionFeeds" class="subpage-section active">
+          <div id="secIngestionFeeds" role="tabpanel" aria-labelledby="tabIngestionFeeds" tabindex="-1" class="subpage-section active">
             <div class="table-toolbar">
-              <input id="feedSearchInput" type="text" class="search-input" placeholder="Filter feeds by name, log type, or source..." />
+              <input id="feedSearchInput" aria-label="Filter feeds" type="text" class="search-input" placeholder="Filter feeds by name, log type, or source..." />
               <div class="filter-group">
                 <button class="filter-chip active" data-ffilter="all">All</button>
                 <button class="filter-chip" data-ffilter="HEALTHY">Healthy</button>
@@ -719,9 +723,9 @@
           </div>
 
           <!-- Tab 2: Parser Health Table -->
-          <div id="secIngestionParsers" class="subpage-section" style="display:none;">
+          <div id="secIngestionParsers" role="tabpanel" aria-labelledby="tabIngestionParsers" tabindex="-1" class="subpage-section" style="display:none;">
             <div class="table-toolbar">
-              <input id="parserSearchInput" type="text" class="search-input" placeholder="Filter parsers by log type or author..." />
+              <input id="parserSearchInput" aria-label="Filter parsers" type="text" class="search-input" placeholder="Filter parsers by log type or author..." />
               <div class="filter-group">
                 <button class="filter-chip active" data-pfilter="all">All</button>
                 <button class="filter-chip" data-pfilter="HEALTHY">Healthy</button>
@@ -754,7 +758,7 @@
           </div>
 
           <!-- Tab 3: Unparsed Log Diagnostic Lab -->
-          <div id="secIngestionDiagnostics" class="subpage-section" style="display:none;">
+          <div id="secIngestionDiagnostics" role="tabpanel" aria-labelledby="tabIngestionDiagnostics" tabindex="-1" class="subpage-section" style="display:none;">
             <div class="diagnostic-lab-card">
               <div class="lab-header">
                 <div>
@@ -769,15 +773,15 @@
               </div>
               <div class="lab-controls">
                 <div class="lab-input-group">
-                  <label>Log Type</label>
+                  <label for="labLogTypeInput">Log Type</label>
                   <input id="labLogTypeInput" type="text" placeholder="e.g. CS_EDR, WINEVTLOG, PAN_FIREWALL" class="search-input" />
                 </div>
                 <div class="lab-input-group" style="width:140px;">
-                  <label>Lookback Hours</label>
+                  <label for="labLookbackInput">Lookback Hours</label>
                   <input id="labLookbackInput" type="number" value="168" min="1" max="720" class="search-input" />
                 </div>
                 <div class="lab-input-group" style="width:100px;">
-                  <label>Sample Limit</label>
+                  <label for="labLimitInput">Sample Limit</label>
                   <input id="labLimitInput" type="number" value="5" min="1" max="25" class="search-input" />
                 </div>
                 <button id="btnRunLabDiagnose" class="btn btn-primary" style="align-self:flex-end;">
@@ -791,16 +795,16 @@
           </div>
 
           <!-- Tab 4: FinOps & Log Cost Optimization -->
-          <div id="secIngestionFinOps" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
+          <div id="secIngestionFinOps" role="tabpanel" aria-labelledby="tabIngestionFinOps" tabindex="-1" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
             <div class="table-toolbar">
               <div style="display:flex; align-items:center; gap:8px;">
-                <label style="font-size:12px; color:var(--text-muted);">Pricing Tier:</label>
+                <label for="finopsTierSelect" style="font-size:12px; color:var(--text-muted);">Pricing Tier:</label>
                 <select id="finopsTierSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
                   <option value="STANDARD">Standard ($1.95/GB)</option>
                   <option value="ENTERPRISE" selected>Enterprise ($2.40/GB)</option>
                   <option value="ENTERPRISE_PLUS">Enterprise Plus ($4.60/GB)</option>
                 </select>
-                <label style="font-size:12px; color:var(--text-muted); margin-left:8px;">Lookback:</label>
+                <label for="finopsDaysSelect" style="font-size:12px; color:var(--text-muted); margin-left:8px;">Lookback:</label>
                 <select id="finopsDaysSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
                   <option value="1">1 Day</option>
                   <option value="7" selected>7 Days</option>
@@ -875,10 +879,10 @@
           </div>
 
           <!-- Tab 5: Ingestion Labels & Namespaces Hygiene -->
-          <div id="secIngestionNamespaceLabels" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
+          <div id="secIngestionNamespaceLabels" role="tabpanel" aria-labelledby="tabIngestionNamespaceLabels" tabindex="-1" class="subpage-section" style="display:none; flex-direction:column; gap:16px;">
             <div class="table-toolbar">
               <div style="display:flex; align-items:center; gap:8px;">
-                <label style="font-size:12px; color:var(--text-muted);">Lookback:</label>
+                <label for="nsLabelsDaysSelect" style="font-size:12px; color:var(--text-muted);">Lookback:</label>
                 <select id="nsLabelsDaysSelect" class="form-select" style="background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:4px 8px; font-size:12px;">
                   <option value="1">1 Day</option>
                   <option value="7" selected>7 Days</option>
@@ -1002,7 +1006,7 @@
               <div class="library-search-box">
                 <input
                   type="text"
-                  id="agentSearchInput"
+                  id="agentSearchInput" aria-label="Filter agent library"
                   class="search-input"
                   placeholder="Filter agents by name, handle, role, or tool..."
                 />
@@ -1075,14 +1079,14 @@
           </div>
 
           <!-- Sub-Navigation Tabs: Shift Briefing | Posture & Gaps | Entity Dossiers -->
-          <div class="subnav-tabs-bar">
-            <button id="tabBtnShiftBrief" class="subnav-tab active">Shift Handover Briefing</button>
-            <button id="tabBtnPostureGaps" class="subnav-tab">Institutional Posture &amp; Gaps</button>
-            <button id="tabBtnEntityDossier" class="subnav-tab">Cross-Agent Entity Dossier</button>
+          <div class="subnav-tabs-bar" role="tablist" aria-label="Briefing sections">
+            <button id="tabBtnShiftBrief" type="button" class="subnav-tab active" role="tab" aria-controls="tabContentShiftBrief">Shift Handover Briefing</button>
+            <button id="tabBtnPostureGaps" type="button" class="subnav-tab" role="tab" aria-controls="tabContentPostureGaps">Institutional Posture &amp; Gaps</button>
+            <button id="tabBtnEntityDossier" type="button" class="subnav-tab" role="tab" aria-controls="tabContentEntityDossier">Cross-Agent Entity Dossier</button>
           </div>
 
           <!-- Tab Content 1: Shift Handover Briefing -->
-          <div id="tabContentShiftBrief" class="briefing-tab-pane active">
+          <div id="tabContentShiftBrief" role="tabpanel" aria-labelledby="tabBtnShiftBrief" tabindex="-1" class="briefing-tab-pane active">
             <!-- Shift Header Metadata Banner -->
             <div id="shiftMetaBanner" class="brief-meta-banner">
               <div class="shift-badge-row">
@@ -1171,7 +1175,7 @@
           </div>
 
           <!-- Tab Content 2: Institutional Posture & Knowledge Gaps -->
-          <div id="tabContentPostureGaps" class="briefing-tab-pane" style="display:none;">
+          <div id="tabContentPostureGaps" role="tabpanel" aria-labelledby="tabBtnPostureGaps" tabindex="-1" class="briefing-tab-pane" style="display:none;">
             <!-- Posture Gauges Grid -->
             <div class="posture-metrics-grid">
               <div class="metric-card">
@@ -1213,7 +1217,7 @@
             <div class="card gaps-card">
               <h3 class="card-section-title">
                 <span>Surfaced Institutional Knowledge Gaps &amp; Unknowns</span>
-                <span class="badge-blue" style="font-size:10px; padding:2px 6px;">Zero Hallucination</span>
+                <span class="badge-blue" style="font-size:11px; padding:2px 6px;">Zero Hallucination</span>
               </h3>
               <div class="table-responsive">
                 <table class="data-table" id="tableKnowledgeGaps">
@@ -1236,18 +1240,18 @@
           </div>
 
           <!-- Tab Content 3: Cross-Agent Entity Dossier -->
-          <div id="tabContentEntityDossier" class="briefing-tab-pane" style="display:none;">
+          <div id="tabContentEntityDossier" role="tabpanel" aria-labelledby="tabBtnEntityDossier" tabindex="-1" class="briefing-tab-pane" style="display:none;">
             <div class="card dossier-search-card">
               <h3 class="card-section-title">Cross-Agent Entity Dossier Explorer</h3>
               <p class="card-section-desc">Synthesize multi-agent factual assertions, health statuses, and knowledge gaps for any operational entity (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
               <div class="dossier-search-bar">
-                <select id="dossierSubjectType" class="form-select">
+                <select id="dossierSubjectType" aria-label="Entity type" class="form-select">
                   <option value="log_type">Log Source (log_type)</option>
                   <option value="rule_id">Detection Rule (rule_id)</option>
                   <option value="playbook_id">SOAR Playbook (playbook_id)</option>
                   <option value="feed_id">Ingestion Feed (feed_id)</option>
                 </select>
-                <input type="text" id="dossierSubjectId" class="form-input" placeholder="e.g. PAN_FIREWALL" />
+                <input type="text" id="dossierSubjectId" aria-label="Entity identifier" class="form-input" placeholder="e.g. PAN_FIREWALL" />
                 <button id="btnFetchDossier" class="btn btn-primary">Fetch Dossier</button>
               </div>
             </div>
@@ -1262,27 +1266,27 @@
 
 
     <!-- Right Drawer: Proposals & Fleet Inspector (Toggleable) -->
-    <aside id="sidebarRight" class="sidebar-right sidebar-right-closed">
+    <aside id="sidebarRight" class="sidebar-right sidebar-right-closed" aria-label="Proposals and fleet drawer">
       <div class="drawer-header-bar">
         <span class="drawer-header-title">Inspector</span>
         <div class="drawer-header-actions">
           <button id="btnOpenFullBoard" class="btn-drawer-action" title="Open Full Actions Board">
             <span>Actions ↗</span>
           </button>
-          <button id="btnCloseDrawer" class="btn-drawer-close" title="Close Drawer">
+          <button id="btnCloseDrawer" type="button" class="btn-drawer-close" title="Close Drawer" aria-label="Close drawer">
             <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
       </div>
-      <div class="drawer-tabs">
-        <div id="tabProposals" class="drawer-tab active">
+      <div class="drawer-tabs" role="tablist" aria-label="Drawer sections">
+        <button id="tabProposals" type="button" class="drawer-tab active" role="tab" aria-controls="drawerContent">
           Proposals (<span id="openPropCount">0</span>)
-        </div>
-        <div id="tabTuning" class="drawer-tab">Tuning (Noise)</div>
-        <div id="tabDecay" class="drawer-tab">Decay Queue</div>
-        <div id="tabFleet" class="drawer-tab">Fleet Roster</div>
+        </button>
+        <button id="tabTuning" type="button" class="drawer-tab" role="tab" aria-controls="drawerContent">Tuning (Noise)</button>
+        <button id="tabDecay" type="button" class="drawer-tab" role="tab" aria-controls="drawerContent">Decay Queue</button>
+        <button id="tabFleet" type="button" class="drawer-tab" role="tab" aria-controls="drawerContent">Fleet Roster</button>
       </div>
-      <div id="drawerContent" class="drawer-content"></div>
+      <div id="drawerContent" class="drawer-content" role="tabpanel" aria-labelledby="tabProposals"></div>
     </aside>
   </div>
 
@@ -1348,6 +1352,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.6.1"></script>
+  <script src="/static/app.js?v=2.6.2"></script>
 </body>
 </html>

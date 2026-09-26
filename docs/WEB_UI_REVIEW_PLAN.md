@@ -13,8 +13,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 6 | Replace confirm()/prompt() for approve/reject/claim with modal + required reason | 2 Polish | Done |
 | 9 | Tidy top bar: move build tags to About; add open proposals/escalations/connection | 2 Polish | Done |
 | 10 | Actions summary cards clickable → sub-tab; alert strip links to review column | 2 Polish | Done |
-| 7 | Accessibility: focus-visible, tablist roles, aria-live, icon button labels | 3 A11y | Todo |
-| 8 | Minimum 11px text | 3 A11y | Todo |
+| 7 | Accessibility: focus-visible, tablist roles, aria-live, icon button labels | 3 A11y | Done |
+| 8 | Minimum 11px text | 3 A11y | Done |
 | — | Module split, inline styles → theme tokens, inline onclick → listeners | 4 Cleanup | Todo |
 | 11 | Approval surfaces still show fabricated data (see below) | 5 Trust | Done |
 | 12 | Diff modal: cancel in approve/reject dialog still closes modal; no Esc/backdrop/focus trap | 5 Trust | Done |
@@ -82,9 +82,18 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Quick switcher (Ctrl/Cmd+K) for streams/topics/DMs
 - 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
 - Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live
-- Knowledge Graph nav opens new tab — add external-link icon or bring in-app
 - Per-view URLs (hash routing for Actions sub-tabs / briefing tabs)
 - On-screen errors with Retry instead of console-only catch blocks
 - Kanban review column: highlight + "oldest: Nh"
 - Narrow-screen breakpoints (<1200px)
-- prefers-reduced-motion
+
+## #7 / #8 notes (2026-09-26)
+- #8: every `font-size` < 11px (CSS, inline HTML, JS templates; 169 sites) raised to 11px.
+- #7: skip link + `#mainContent` landmark; labelled `nav`/`aside`s; all 4 tab groups are `tablist`/`tab`/`tabpanel`
+  with arrow/Home/End keys; `aria-selected`, roving tabindex and nav `aria-current` mirror `.active` through a
+  MutationObserver in `setupA11y()` (so the switch* functions stay unchanged); drawer tabs are now `<button>`s;
+  sidebar stream/topic/DM rows and kanban cards are focusable `role=button` with Enter/Space, and focus survives re-renders;
+  drawer toggle / DM section expose `aria-expanded`; 15 unlabelled inputs/selects now labelled; `#srAnnouncer`
+  polite live region announces agent replies; global `:focus-visible` ring; `prefers-reduced-motion`; Knowledge Graph shows ↗ + "(opens in new tab)".
+- Remaining a11y follow-ups: inline `onclick` buttons in chat widgets still carry low-contrast inline colours (see #4 Cleanup);
+  no automated axe run yet.

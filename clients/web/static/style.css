@@ -486,7 +486,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .section-toggle-icon {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   transition: transform 0.15s ease;
   margin-right: 4px;
@@ -501,7 +501,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .dm-count-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   background: var(--bg-tertiary);
   color: var(--text-muted);
@@ -641,7 +641,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .dm-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   background: var(--btn-primary-bg, var(--secops-cta-primary, #1a73e8));
   color: #ffffff;
@@ -788,7 +788,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .msg-role-tag {
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: 3px;
   background-color: rgba(138, 180, 248, 0.14);
@@ -798,7 +798,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .msg-timestamp {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-left: auto;
 }
@@ -996,7 +996,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .badge {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 3px;
@@ -1013,7 +1013,7 @@ body.view-gastown-active .main-content-area {
   color: #93c5fd;
   border: 1px solid rgba(59, 130, 246, 0.25);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1041,7 +1041,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .kpi-lbl {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   color: var(--text-dim);
   letter-spacing: 0.4px;
@@ -1313,7 +1313,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .drawer-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   background: var(--btn-primary-bg, var(--secops-cta-primary, #1a73e8));
   color: #ffffff;
@@ -1349,7 +1349,7 @@ body.view-gastown-active .main-content-area {
 
 .nav-pill-badge[hidden] { display: none; }
 .nav-pill-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   background: #f59e0b;
   color: #111827;
@@ -1491,14 +1491,14 @@ body.view-gastown-active .main-content-area {
 }
 
 .dps-text {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .decay-flag-tag {
   display: inline-block;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 600;
   padding: 2px 6px;
@@ -1852,7 +1852,7 @@ body.view-gastown-active .main-content-area {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   padding: 3px 8px;
   border-radius: 10px;
@@ -2186,7 +2186,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .gt-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 10px;
@@ -2229,7 +2229,7 @@ body.view-gastown-active .main-content-area {
 }
 
 .gt-stat-label {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2489,7 +2489,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .kanban-card-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 4px;
@@ -2538,7 +2538,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .kanban-card-action-btn {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 4px;
@@ -2796,7 +2796,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -2998,7 +2998,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .patrol-cadence-badge {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   font-family: var(--font-mono);
   padding: 2px 7px;
@@ -3031,7 +3031,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 .patrol-meta-label {
   color: var(--text-dim);
   text-transform: uppercase;
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.4px;
   font-weight: 600;
 }
@@ -3304,7 +3304,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 #freshnessBarStale { background: var(--accent-rose); }
 
 .freshness-legend {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
@@ -3320,7 +3320,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 .metric-val.status-red { color: var(--accent-rose); }
 
 .metric-sub {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
@@ -3511,7 +3511,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .lib-agent-subsystem-badge {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   font-weight: 600;
   letter-spacing: 0.3px;
@@ -3539,7 +3539,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   justify-content: space-between;
   gap: 6px;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .lib-agent-tool-count {
@@ -3823,7 +3823,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 
 .lib-tool-mcp {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-top: 1px;
 }
@@ -3836,7 +3836,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .tool-kind-badge {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -3864,7 +3864,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .tool-cardinality-badge {
-  font-size: 9.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   padding: 2px 5px;
   border-radius: 3px;
@@ -3887,7 +3887,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 
 .lib-tool-evidence-link {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   display: flex;
   align-items: center;
@@ -3956,7 +3956,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .lib-skill-type-badge {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
   padding: 2px 6px;
@@ -3978,7 +3978,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 
 .lib-skill-id {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4001,13 +4001,13 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .trigger-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   font-family: var(--font-mono);
 }
 
 .trigger-pill {
-  font-size: 9.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   padding: 1px 5px;
   background: var(--bg-secondary);
@@ -4017,7 +4017,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 }
 
 .lib-skill-path {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-top: auto;
   padding-top: 4px;
@@ -4030,7 +4030,7 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   border: 1px solid var(--code-border);
   padding: 1px 4px;
   border-radius: 3px;
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 /* --- Action Dialog (HITL confirm/reason modal) --- */
@@ -4275,3 +4275,72 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   cursor: pointer;
 }
 .agent-status-action-btn:hover { background: var(--bg-hover); }
+
+
+/* --- Accessibility (#7) --- */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+.skip-link {
+  position: absolute;
+  left: 8px; top: -48px;
+  z-index: 10000;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--accent-blue);
+  color: var(--bg-primary, #fff);
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 8px; }
+#mainContent:focus { outline: none; }
+
+/* Visible keyboard focus everywhere; mouse clicks stay clean. */
+:where(button, a, [role="button"], [role="tab"], [tabindex]:not([tabindex="-1"]), select, summary):focus-visible,
+.nav-tab:focus-visible,
+.subtab:focus-visible,
+.subnav-tab:focus-visible,
+.drawer-tab:focus-visible,
+.stream-header:focus-visible,
+.topic-item:focus-visible,
+.dm-item:focus-visible,
+.kanban-card:focus-visible,
+.drawer-proposal-item:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+/* Text inputs that suppress outline get a visible focus ring instead of only a subtle border change. */
+.dm-search-box:focus-within,
+.composer-textarea:focus-visible,
+.search-input:focus-visible,
+.form-input:focus-visible,
+.form-select:focus-visible,
+.select-sm:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+/* Drawer tabs are now <button>s: neutralise UA button styling. */
+button.drawer-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+}
+button.drawer-tab.active { border-bottom-color: var(--text-accent); }
+
+.ext-link-icon { margin-left: 4px; font-size: 11px; opacity: 0.7; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

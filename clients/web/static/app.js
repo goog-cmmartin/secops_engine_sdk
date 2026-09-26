@@ -175,6 +175,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     state.activeTopic = decodeURIComponent(parts.slice(1).join("/"));
   }
   setupEventListeners();
+  setupA11y();
   await Promise.all([loadStreams(), loadAgents(), loadProposals()]);
   routeRestoring = true;
   try {
@@ -740,6 +741,9 @@ function initSSE() {
           } else {
             state.messages.push(msg);
             appendMessageToTimeline(msg, { live: true });
+            if (msg.sender_type !== "user" && state.currentView === "chat") {
+              announce(`New message from ${msg.sender_handle || "agent"}`);
+            }
           }
         }
         // Refresh proposals list if message carries a proposal
@@ -906,6 +910,7 @@ async function switchTopic(stream, topic) {
 function renderStreams() {
   const container = document.getElementById("streamsList");
   if (!container) return;
+  const focusKey = focusedKeyWithin(container);
   container.innerHTML = "";
 
   state.streams.forEach((s) => {
@@ -915,6 +920,10 @@ function renderStreams() {
 
     const headerEl = document.createElement("div");
     headerEl.className = "stream-header";
+    headerEl.setAttribute("role", "button");
+    headerEl.tabIndex = 0;
+    headerEl.dataset.focusKey = `stream:${s.id}`;
+    if (isActive) headerEl.setAttribute("aria-current", "true");
     const streamUnread = isActive ? 0 : unreadForStream(s.id);
     headerEl.innerHTML = `
       <span># ${escapeHtml(s.name)}</span>
@@ -939,6 +948,10 @@ function renderStreams() {
         const topicEl = document.createElement("div");
         const topicUnread = unreadFor(s.id, t.name);
         topicEl.className = `topic-item ${isTopicActive ? "active" : ""} ${topicUnread ? "has-unread" : ""}`;
+        topicEl.setAttribute("role", "button");
+        topicEl.tabIndex = 0;
+        topicEl.dataset.focusKey = `topic:${s.id}/${t.name}`;
+        if (isTopicActive) topicEl.setAttribute("aria-current", "true");
         topicEl.innerHTML = `
           <span>${escapeHtml(t.name)}</span>
           ${topicUnread
@@ -957,6 +970,18 @@ function renderStreams() {
     streamEl.appendChild(topicsEl);
     container.appendChild(streamEl);
   });
+  restoreFocusKey(container, focusKey);
+}
+
+// Re-renders replace sidebar rows; keep keyboard focus on the same logical row.
+function focusedKeyWithin(container) {
+  const el = document.activeElement;
+  return el && container.contains(el) && el.dataset ? el.dataset.focusKey || null : null;
+}
+function restoreFocusKey(container, key) {
+  if (!key) return;
+  const target = Array.from(container.querySelectorAll("[data-focus-key]")).find((el) => el.dataset.focusKey === key);
+  if (target) target.focus();
 }
 
 let dmSearchQuery = "";
@@ -964,6 +989,7 @@ let dmSearchQuery = "";
 function renderDirectMessages() {
   const container = document.getElementById("dmList");
   if (!container) return;
+  const focusKey = focusedKeyWithin(container);
   container.innerHTML = "";
 
   const query = (dmSearchQuery || "").trim().toLowerCase();
@@ -1022,6 +1048,11 @@ function renderDirectMessages() {
     const row = document.createElement("div");
     const dmUnread = unreadFor("dm", a.handle);
     row.className = `dm-item ${isDmActive ? "active" : ""} ${dmUnread ? "has-unread" : ""}`;
+    row.setAttribute("role", "button");
+    row.tabIndex = 0;
+    row.dataset.focusKey = `dm:${a.handle}`;
+    row.setAttribute("aria-label", `Direct message ${a.handle}${dmUnread ? `, ${dmUnread} unread` : ""}`);
+    if (isDmActive) row.setAttribute("aria-current", "true");
     row.innerHTML = `
       <div class="dm-avatar-wrap">
         <div class="dm-avatar">${renderAvatar("agent", a.handle)}</div>
@@ -1029,7 +1060,7 @@ function renderDirectMessages() {
       </div>
       <div class="dm-info-wrap" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
         <div class="dm-handle" title="${escapeHtml(a.role || a.name || a.handle)}">${escapeHtml(a.handle)}</div>
-        ${query ? `<div style="font-size:10px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.role || a.name || "")}</div>` : ""}
+        ${query ? `<div style="font-size:11px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.role || a.name || "")}</div>` : ""}
       </div>
       ${unreadBadgeHtml(dmUnread)}
     `;
@@ -1038,6 +1069,7 @@ function renderDirectMessages() {
     });
     container.appendChild(row);
   });
+  restoreFocusKey(container, focusKey);
 }
 
 function renderAgents() {
@@ -1293,7 +1325,7 @@ function renderProposalWidget(widget) {
       <div class="preflight-box">
         <div style="font-weight:700; font-size:11.5px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
           <span>Empirical Pre-Flight Proof</span>
-          <span style="font-size:10.5px; color:${synOk && repOk ? '#34d399' : '#fbbf24'};">${synOk && repOk ? 'VERIFIED' : 'PENDING EMPIRICAL'}</span>
+          <span style="font-size:11px; color:${synOk && repOk ? '#34d399' : '#fbbf24'};">${synOk && repOk ? 'VERIFIED' : 'PENDING EMPIRICAL'}</span>
         </div>
         <div class="kpi-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:0;">
           <div class="kpi-card" style="padding:4px 6px; text-align:left;">
@@ -1339,7 +1371,7 @@ function renderProposalWidget(widget) {
         <span class="badge ${badgeClass}">${status}</span>
         <span class="badge badge-risk">${actionType}</span>
         <span class="badge badge-risk">RISK: ${riskLevel}</span>
-        <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-left:auto;">${proposalId}</span>
+        <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-left:auto;">${proposalId}</span>
       </div>
       <div class="prop-title">${escapeHtml(widget.title || "Change Proposal")}</div>
       ${widget.rationale ? `<div class="prop-rationale">${escapeHtml(widget.rationale)}</div>` : ""}
@@ -1368,7 +1400,7 @@ function renderReplayWidget(widget) {
       <div class="prop-meta-bar">
         <span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa;">EMPIRICAL REPLAY</span>
         <span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399;">${status}</span>
-        <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-left:auto;">rule: ${escapeHtml(targetRule)}</span>
+        <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-left:auto;">rule: ${escapeHtml(targetRule)}</span>
       </div>
       <div class="prop-title" style="font-size:13px; margin-bottom:4px;">${escapeHtml(widget.scenario_title || "Attack Vector Simulation")}</div>
 
@@ -1394,7 +1426,7 @@ function renderReplayWidget(widget) {
 
       <!-- Log Types & Playbooks -->
       <div style="margin: 6px 0 4px; display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
-        <span style="font-size:10.5px; color:var(--text-dim); text-transform:uppercase; font-weight:600;">Playbooks:</span>
+        <span style="font-size:11px; color:var(--text-dim); text-transform:uppercase; font-weight:600;">Playbooks:</span>
         ${playbookTags}
       </div>
 
@@ -1461,7 +1493,7 @@ function renderIdentityWidget(widget) {
       <div class="prop-meta-bar">
         <span class="badge" style="background:rgba(139,92,246,0.15); color:#a78bfa;">IAM GOVERNANCE</span>
         <span class="badge" style="background:${driftBadgeBg}; color:${driftBadgeText};">${driftStatus}</span>
-        <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-left:auto;">project: ${escapeHtml(projectId)}</span>
+        <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-left:auto;">project: ${escapeHtml(projectId)}</span>
       </div>
       <div class="prop-title" style="font-size:13px; margin-bottom:4px;">Chronicle IAM Permissions &amp; Custom Roles Audit</div>
 
@@ -1606,7 +1638,7 @@ function renderDecaySyncWidget(widget) {
       <tr style="border-bottom:1px solid rgba(55,65,81,0.4); font-size:11.5px;">
         <td style="padding:6px 8px;">
           <div style="font-weight:600; color:var(--text-bright, #f8fafc);">${escapeHtml(c.rule_name || c.rule_id)}</div>
-          ${c.rule_id && c.rule_id !== c.rule_name ? `<div style="font-size:10px; font-weight:400; color:#94a3b8; font-family:monospace; margin-top:2px;">${escapeHtml(c.rule_id)}</div>` : ''}
+          ${c.rule_id && c.rule_id !== c.rule_name ? `<div style="font-size:11px; font-weight:400; color:#94a3b8; font-family:monospace; margin-top:2px;">${escapeHtml(c.rule_id)}</div>` : ''}
         </td>
         <td style="padding:6px 8px; text-align:center;">
           <span style="font-weight:700; color:${dpsColor}; background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">${dps}</span>
@@ -1616,7 +1648,7 @@ function renderDecaySyncWidget(widget) {
           <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background-color:${c.is_live ? '#10b981' : '#64748b'}; box-shadow:${c.is_live ? '0 0 6px rgba(16,185,129,0.6)' : 'none'}; vertical-align:middle;"></span>
         </td>
         <td style="padding:6px 8px; text-align:right;">
-          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:10.5px; cursor:pointer;" onclick="auditRuleInChat('${c.rule_id}')">
+          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" onclick="auditRuleInChat('${c.rule_id}')">
             Audit
           </button>
         </td>
@@ -1761,7 +1793,7 @@ function renderNoiseTuningWidget(widget) {
         }).join("");
         dimBlocks.push(`
           <div style="background:rgba(15,23,42,0.6); padding:6px 8px; border-radius:4px; border:1px solid rgba(55,65,81,0.3);">
-            <div style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:3px;">${escapeHtml(dim)}</div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:3px;">${escapeHtml(dim)}</div>
             ${topItems}
           </div>
         `);
@@ -1969,7 +2001,7 @@ function renderFeedHealthWidget(widget) {
       ${findings.length > 0 ? `
         <table style="width:100%; border-collapse:collapse; margin-top:6px;">
           <thead>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-transform:uppercase;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:11px; color:var(--text-muted); text-transform:uppercase;">
               <th style="padding:4px 8px; text-align:left;">Feed Name</th>
               <th style="padding:4px 8px; text-align:left;">Log Type</th>
               <th style="padding:4px 8px; text-align:left;">Source</th>
@@ -2016,8 +2048,8 @@ function renderParserHealthWidget(widget) {
     else if (f.status === "IRREGULAR") sBadge = `<span style="color:#fbbf24; font-weight:600;">IRREGULAR</span>`;
 
     let driftBadge = f.version && f.latest_version && f.version !== f.latest_version
-      ? `<span style="color:#fbbf24; font-size:10.5px;">v${escapeHtml(f.version)} &rarr; v${escapeHtml(f.latest_version)}</span>`
-      : `<span style="color:#94a3b8; font-size:10.5px;">v${escapeHtml(f.version || "1.0")}</span>`;
+      ? `<span style="color:#fbbf24; font-size:11px;">v${escapeHtml(f.version)} &rarr; v${escapeHtml(f.latest_version)}</span>`
+      : `<span style="color:#94a3b8; font-size:11px;">v${escapeHtml(f.version || "1.0")}</span>`;
 
     return `
       <tr style="border-bottom:1px solid rgba(255,255,255,0.05); font-size:11.5px;">
@@ -2027,7 +2059,7 @@ function renderParserHealthWidget(widget) {
         <td style="padding:6px 8px;">${driftBadge}</td>
         <td style="padding:6px 8px; font-size:11px; color:#f87171;">${escapeHtml(f.drop_reason_code || "-")}</td>
         <td style="padding:6px 8px; text-align:right;">
-          <button class="btn btn-sm" style="font-size:10.5px; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3);" onclick="triggerCrossAgentHandoff('ingestion', 'parser-drops', '@parser-doctor diagnose unparsed logs for ${escapeHtml(f.log_type)}')">Diagnose</button>
+          <button class="btn btn-sm" style="font-size:11px; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3);" onclick="triggerCrossAgentHandoff('ingestion', 'parser-drops', '@parser-doctor diagnose unparsed logs for ${escapeHtml(f.log_type)}')">Diagnose</button>
         </td>
       </tr>
     `;
@@ -2070,7 +2102,7 @@ function renderParserHealthWidget(widget) {
       ${findings.length > 0 ? `
         <table style="width:100%; border-collapse:collapse; margin-top:6px;">
           <thead>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-transform:uppercase;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:11px; color:var(--text-muted); text-transform:uppercase;">
               <th style="padding:4px 8px; text-align:left;">Log Type</th>
               <th style="padding:4px 8px; text-align:left;">Author</th>
               <th style="padding:4px 8px; text-align:left;">Status</th>
@@ -2160,7 +2192,7 @@ function renderDataTableWidget(widget) {
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 14px;">📊</span>
           <span style="font-weight: 600; font-size: 12.5px; color: var(--text-primary);">${escapeHtml(title)}</span>
-          <span style="font-size: 10.5px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 7px; border-radius: 10px; font-weight: 600;">GoogleSQL</span>
+          <span style="font-size: 11px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 7px; border-radius: 10px; font-weight: 600;">GoogleSQL</span>
         </div>
         <span style="font-size: 11px; color: var(--text-muted);">${totalRows} row${totalRows === 1 ? '' : 's'} returned</span>
       </div>
@@ -2223,19 +2255,19 @@ function renderGcpTelemetryWidget(widget) {
 
       <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Ingestion Streams</div>
+          <div style="font-size:11px; color:var(--text-muted);">Ingestion Streams</div>
           <div style="font-size:16px; font-weight:700; color:#38bdf8;">${ingestionCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Normalizer Streams</div>
+          <div style="font-size:11px; color:var(--text-muted);">Normalizer Streams</div>
           <div style="font-size:16px; font-weight:700; color:#818cf8;">${normalizerCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">API Metric Streams</div>
+          <div style="font-size:11px; color:var(--text-muted);">API Metric Streams</div>
           <div style="font-size:16px; font-weight:700; color:#34d399;">${apiCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Logging Errors</div>
+          <div style="font-size:11px; color:var(--text-muted);">Logging Errors</div>
           <div style="font-size:16px; font-weight:700; color:${errorCount > 0 ? '#f87171' : '#34d399'};">${errorCount}</div>
         </div>
       </div>
@@ -2244,7 +2276,7 @@ function renderGcpTelemetryWidget(widget) {
         <div style="font-size:11.5px; font-weight:600; color:#f87171; margin-bottom:6px;">Recent Diagnostic & Audit Error Events:</div>
         <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
           <thead>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-align:left;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:11px; color:var(--text-muted); text-align:left;">
               <th style="padding:4px 8px;">Severity</th>
               <th style="padding:4px 8px;">Time</th>
               <th style="padding:4px 8px;">Resource</th>
@@ -2329,19 +2361,19 @@ function renderTenantDriftWidget(widget) {
 
       <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Critical Drift</div>
+          <div style="font-size:11px; color:var(--text-muted);">Critical Drift</div>
           <div style="font-size:16px; font-weight:700; color:${criticalCount > 0 ? '#f87171' : '#34d399'};">${criticalCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">High Drift</div>
+          <div style="font-size:11px; color:var(--text-muted);">High Drift</div>
           <div style="font-size:16px; font-weight:700; color:${highCount > 0 ? '#fb923c' : '#34d399'};">${highCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Total Deltas</div>
+          <div style="font-size:11px; color:var(--text-muted);">Total Deltas</div>
           <div style="font-size:16px; font-weight:700; color:${driftCount > 0 ? '#fbbf24' : '#34d399'};">${driftCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Subsystems Drifted</div>
+          <div style="font-size:11px; color:var(--text-muted);">Subsystems Drifted</div>
           <div style="font-size:16px; font-weight:700; color:${subsystemsDrifted.length > 0 ? '#a78bfa' : '#34d399'};">${subsystemsDrifted.length}</div>
         </div>
       </div>
@@ -2349,7 +2381,7 @@ function renderTenantDriftWidget(widget) {
       ${subsystemsDrifted.length > 0 ? `
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
           <span style="font-size:11px; color:var(--text-muted);">Affected Subsystems:</span>
-          ${subsystemsDrifted.map(s => `<span class="badge" style="background:rgba(167,139,250,0.15); color:#c4b5fd; font-size:10.5px;">${escapeHtml(s)}</span>`).join(" ")}
+          ${subsystemsDrifted.map(s => `<span class="badge" style="background:rgba(167,139,250,0.15); color:#c4b5fd; font-size:11px;">${escapeHtml(s)}</span>`).join(" ")}
         </div>
       ` : ''}
 
@@ -2357,7 +2389,7 @@ function renderTenantDriftWidget(widget) {
         <div style="font-size:11.5px; font-weight:600; color:#fbbf24; margin-bottom:6px;">Detected Configuration Parameter Deltas:</div>
         <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
           <thead>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-align:left;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:11px; color:var(--text-muted); text-align:left;">
               <th style="padding:4px 8px;">Severity</th>
               <th style="padding:4px 8px;">Subsystem</th>
               <th style="padding:4px 8px;">Parameter</th>
@@ -2375,7 +2407,7 @@ function renderTenantDriftWidget(widget) {
         <div style="font-size:11.5px; color:#34d399; font-style:italic;">All tenant configuration parameters match the active Evidence Fabric baseline. No configuration drift detected.</div>
       `)}
 
-      <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-muted);">
+      <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted);">
         <div>Snapshot: <code style="color:#cbd5e1;">${escapeHtml(snapshotId)}</code></div>
         ${fingerprint ? `<div>Fingerprint: <code style="color:#cbd5e1;">${escapeHtml(fingerprint.substring(0, 16))}...</code></div>` : ''}
       </div>
@@ -2429,7 +2461,7 @@ function renderPlaybookHealthWidget(widget) {
           else if (f.severity === "MEDIUM") sevColor = "#fbbf24";
 
           const affectedStr = f.affected_steps && f.affected_steps.length > 0
-            ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">Steps: <code>${escapeHtml(f.affected_steps.join(", "))}</code></div>`
+            ? `<div style="font-size:11px; color:#94a3b8; margin-top:2px;">Steps: <code>${escapeHtml(f.affected_steps.join(", "))}</code></div>`
             : "";
 
           return `
@@ -2438,7 +2470,7 @@ function renderPlaybookHealthWidget(widget) {
               <td style="padding:5px 6px; font-weight:700; color:${sevColor};">${escapeHtml(f.severity)}</td>
               <td style="padding:5px 6px; color:#f1f5f9;">
                 <div style="font-weight:600;">${escapeHtml(f.title)}</div>
-                <div style="color:#94a3b8; font-size:10.5px;">${escapeHtml(f.description)}</div>
+                <div style="color:#94a3b8; font-size:11px;">${escapeHtml(f.description)}</div>
                 ${affectedStr}
               </td>
               <td style="padding:5px 6px; font-weight:700; color:#f87171; text-align:right;">-${f.deduction} pts</td>
@@ -2456,9 +2488,9 @@ function renderPlaybookHealthWidget(widget) {
               </span>
               <div>
                 <div style="font-weight:700; font-size:12.5px; color:#f8fafc;">${escapeHtml(pb.name || "Playbook")}</div>
-                <div style="font-size:10.5px; color:var(--text-muted); display:flex; gap:6px; align-items:center; margin-top:2px;">
-                  <span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size:9.5px; padding:1px 5px;">${escapeHtml(pb.category || "General")}</span>
-                  <span class="badge" style="background:rgba(100,116,139,0.2); color:#cbd5e1; font-size:9.5px; padding:1px 5px;">P${pb.priority ?? 2}</span>
+                <div style="font-size:11px; color:var(--text-muted); display:flex; gap:6px; align-items:center; margin-top:2px;">
+                  <span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size:11px; padding:1px 5px;">${escapeHtml(pb.category || "General")}</span>
+                  <span class="badge" style="background:rgba(100,116,139,0.2); color:#cbd5e1; font-size:11px; padding:1px 5px;">P${pb.priority ?? 2}</span>
                   ${pb.is_enabled ? '<span style="color:#34d399;">● Active</span>' : '<span style="color:#64748b;">○ Inactive</span>'}
                   ${pb.is_debug_mode ? '<span style="color:#f87171; font-weight:700;">[DEBUG MODE]</span>' : ''}
                 </div>
@@ -2466,12 +2498,12 @@ function renderPlaybookHealthWidget(widget) {
             </div>
             <div style="text-align:right;">
               <div style="font-size:15px; font-weight:800; color:${gradeColor};">${score}<span style="font-size:11px; color:var(--text-muted);">/100</span></div>
-              <div style="font-size:10px; color:var(--text-muted);">${pb.step_count || 0} steps | ${pb.relation_count || 0} edges</div>
+              <div style="font-size:11px; color:var(--text-muted);">${pb.step_count || 0} steps | ${pb.relation_count || 0} edges</div>
             </div>
           </div>
 
           <!-- 30-Day Telemetry Strip -->
-          <div style="display:flex; gap:8px; margin-bottom:8px; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:4px; font-size:10.5px;">
+          <div style="display:flex; gap:8px; margin-bottom:8px; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:4px; font-size:11px;">
             <div style="flex:1;"><span style="color:var(--text-muted);">30d Runs:</span> <b style="color:#f8fafc;">${tel.total_runs || 0}</b></div>
             <div style="flex:1;"><span style="color:var(--text-muted);">Completed:</span> <b style="color:#34d399;">${tel.completed_runs || 0}</b></div>
             <div style="flex:1;"><span style="color:var(--text-muted);">Failed:</span> <b style="color:${tel.failed_runs ? '#f87171' : '#34d399'};">${tel.failed_runs || 0}</b></div>
@@ -2483,7 +2515,7 @@ function renderPlaybookHealthWidget(widget) {
           ${findings.length > 0 ? `
             <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
               <thead>
-                <tr style="border-bottom:1px solid rgba(255,255,255,0.08); font-size:10px; color:var(--text-muted); text-align:left;">
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.08); font-size:11px; color:var(--text-muted); text-align:left;">
                   <th style="padding:3px 6px;">Rule</th>
                   <th style="padding:3px 6px;">Severity</th>
                   <th style="padding:3px 6px;">Finding Details</th>
@@ -2495,20 +2527,20 @@ function renderPlaybookHealthWidget(widget) {
               </tbody>
             </table>
           ` : `
-            <div style="font-size:10.5px; color:#34d399; margin-bottom:6px;">✓ Clean static resilience topology. Zero anti-pattern deductions.</div>
+            <div style="font-size:11px; color:#34d399; margin-bottom:6px;">✓ Clean static resilience topology. Zero anti-pattern deductions.</div>
           `}
 
           <!-- Interactive Expanders: Mermaid Flowchart & Executive Brief -->
           <div style="display:flex; gap:6px; margin-top:6px;">
             ${mermaidDag ? `
               <button onclick="const el=document.getElementById('${cardId}_dag'); el.style.display=el.style.display==='none'?'block':'none';" 
-                      class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+                      class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
                 ⚡ Toggle Flowchart DAG
               </button>
             ` : ''}
             ${brief ? `
               <button onclick="const el=document.getElementById('${cardId}_brief'); el.style.display=el.style.display==='none'?'block':'none';" 
-                      class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+                      class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
                 📋 View GenAI Brief
               </button>
             ` : ''}
@@ -2517,17 +2549,17 @@ function renderPlaybookHealthWidget(widget) {
           ${mermaidDag ? `
             <div id="${cardId}_dag" style="display:none; margin-top:8px; padding:8px; background:rgba(0,0,0,0.5); border-radius:4px; border:1px solid rgba(255,255,255,0.1);">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:10px; color:var(--text-muted); font-weight:600;">Mermaid.js Flowchart DAG</span>
+                <span style="font-size:11px; color:var(--text-muted); font-weight:600;">Mermaid.js Flowchart DAG</span>
                 <button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(mermaidDag)}')); showToast('success', 'Mermaid DAG copied to clipboard');" 
-                        class="btn btn-secondary" style="font-size:9.5px; padding:2px 6px;">Copy Syntax</button>
+                        class="btn btn-secondary" style="font-size:11px; padding:2px 6px;">Copy Syntax</button>
               </div>
-              <pre class="mermaid" style="font-family:var(--font-mono); font-size:10px; color:#93c5fd; white-space:pre-wrap; margin:0; overflow-x:auto;">${escapeHtml(mermaidDag)}</pre>
+              <pre class="mermaid" style="font-family:var(--font-mono); font-size:11px; color:#93c5fd; white-space:pre-wrap; margin:0; overflow-x:auto;">${escapeHtml(mermaidDag)}</pre>
             </div>
           ` : ''}
 
           ${brief ? `
             <div id="${cardId}_brief" style="display:none; margin-top:8px; padding:10px 12px; background:rgba(30,41,59,0.7); border-radius:4px; border:1px solid rgba(99,102,241,0.25); font-size:11px; line-height:1.5;">
-              <div style="font-size:10.5px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">Architectural Executive Brief (Gemini)</div>
+              <div style="font-size:11px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">Architectural Executive Brief (Gemini)</div>
               ${formatMarkdown(brief)}
             </div>
           ` : ''}
@@ -2549,19 +2581,19 @@ function renderPlaybookHealthWidget(widget) {
 
       <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Playbooks Audited</div>
+          <div style="font-size:11px; color:var(--text-muted);">Playbooks Audited</div>
           <div style="font-size:16px; font-weight:700; color:#f8fafc;">${totalAudited}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Catalog Avg Score</div>
+          <div style="font-size:11px; color:var(--text-muted);">Catalog Avg Score</div>
           <div style="font-size:16px; font-weight:700; color:${avgScore >= 80 ? '#34d399' : (avgScore >= 70 ? '#fbbf24' : '#f87171')};">${avgScore}/100</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Degraded Playbooks</div>
+          <div style="font-size:11px; color:var(--text-muted);">Degraded Playbooks</div>
           <div style="font-size:16px; font-weight:700; color:${degradedCount > 0 ? '#f87171' : '#34d399'};">${degradedCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10.5px; color:var(--text-muted);">Active Storage</div>
+          <div style="font-size:11px; color:var(--text-muted);">Active Storage</div>
           <div style="font-size:14px; font-weight:700; color:#a78bfa;">soar_playbooks</div>
         </div>
       </div>
@@ -2667,31 +2699,31 @@ function renderTimestampIntegrityWidget(widget) {
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap:8px; margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Audited Feeds</div>
+          <div style="font-size:11px; color:var(--text-muted);">Audited Feeds</div>
           <div style="font-size:15px; font-weight:700; color:#f3f4f6;">${total}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Healthy</div>
+          <div style="font-size:11px; color:var(--text-muted);">Healthy</div>
           <div style="font-size:15px; font-weight:700; color:#34d399;">${healthy}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">New Anomalies</div>
+          <div style="font-size:11px; color:var(--text-muted);">New Anomalies</div>
           <div style="font-size:15px; font-weight:700; color:${newAnomalies > 0 ? '#f87171' : '#cbd5e1'};">${newAnomalies}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Prev Known</div>
+          <div style="font-size:11px; color:var(--text-muted);">Prev Known</div>
           <div style="font-size:15px; font-weight:700; color:${previouslyKnown > 0 ? '#fbbf24' : '#cbd5e1'};">${previouslyKnown}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Resolved</div>
+          <div style="font-size:11px; color:var(--text-muted);">Resolved</div>
           <div style="font-size:15px; font-weight:700; color:#38bdf8;">${resolved}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Clock Skews (Δt&lt;0)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Clock Skews (Δt&lt;0)</div>
           <div style="font-size:15px; font-weight:700; color:${skewedEvents > 0 ? '#f87171' : '#34d399'};">${skewedEvents.toLocaleString()}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Delayed (&gt;2h)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Delayed (&gt;2h)</div>
           <div style="font-size:15px; font-weight:700; color:${delayedEvents > 0 ? '#fb923c' : '#34d399'};">${delayedEvents.toLocaleString()}</div>
         </div>
       </div>
@@ -2699,7 +2731,7 @@ function renderTimestampIntegrityWidget(widget) {
       <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:6px; overflow-x:auto; margin-bottom:10px;">
         <table style="width:100%; border-collapse:collapse;">
           <thead>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10.5px; color:var(--text-muted); text-transform:uppercase;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:11px; color:var(--text-muted); text-transform:uppercase;">
               <th style="padding:6px 8px; text-align:left;">Log Type</th>
               <th style="padding:6px 8px; text-align:right;">Total Logs</th>
               <th style="padding:6px 8px; text-align:right;">Avg Delay</th>
@@ -2719,12 +2751,12 @@ function renderTimestampIntegrityWidget(widget) {
       ${narrative ? `
         <div style="display:flex; gap:6px; margin-top:6px;">
           <button onclick="const el=document.getElementById('${briefId}'); el.style.display=el.style.display==='none'?'block':'none';" 
-                  class="btn btn-secondary" style="font-size:10.5px; padding:3px 8px; border-radius:4px;">
+                  class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
             📋 Toggle Operational Runbook & Brief
           </button>
         </div>
         <div id="${briefId}" style="display:none; margin-top:8px; padding:10px 12px; background:rgba(30,41,59,0.7); border-radius:4px; border:1px solid rgba(99,102,241,0.25); font-size:11px; line-height:1.5;">
-          <div style="font-size:10.5px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">GenAI Infrastructure Advisory</div>
+          <div style="font-size:11px; color:#a5b4fc; font-weight:700; margin-bottom:6px;">GenAI Infrastructure Advisory</div>
           ${formatMarkdown(narrative)}
         </div>
       ` : ''}
@@ -2786,7 +2818,7 @@ function renderRuleConflictWidget(widget) {
               <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
                 <div>
                   <div style="font-weight:700; font-size:12.5px; color:#f3f4f6;">${escapeHtml(c.similar_rule_name || c.similar_rule_id)}</div>
-                  <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${escapeHtml(c.similar_rule_id)}</div>
+                  <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">${escapeHtml(c.similar_rule_id)}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
                   <span class="badge" style="background:${typeBadgeColor}22; color:${typeBadgeColor}; border:1px solid ${typeBadgeColor}44; font-weight:700;">${escapeHtml(c.conflict_type)}</span>
@@ -2877,19 +2909,19 @@ function renderRuleConflictBatchWidget(widget) {
 
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Critical Overlaps</div>
+          <div style="font-size:11px; color:var(--text-muted);">Critical Overlaps</div>
           <div style="font-size:16px; font-weight:700; color:#f87171;">${severityCounts['CRITICAL'] || 0}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Moderate Overlaps</div>
+          <div style="font-size:11px; color:var(--text-muted);">Moderate Overlaps</div>
           <div style="font-size:16px; font-weight:700; color:#fbbf24;">${severityCounts['MODERATE'] || 0}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Redundancies</div>
+          <div style="font-size:11px; color:var(--text-muted);">Redundancies</div>
           <div style="font-size:16px; font-weight:700; color:#c084fc;">${conflictCounts['REDUNDANCY'] || 0}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Contradictions</div>
+          <div style="font-size:11px; color:var(--text-muted);">Contradictions</div>
           <div style="font-size:16px; font-weight:700; color:#f87171;">${conflictCounts['CONTRADICTION'] || 0}</div>
         </div>
       </div>
@@ -2903,13 +2935,13 @@ function renderRuleConflictBatchWidget(widget) {
             <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(17,24,39,0.7); border:1px solid rgba(75,85,99,0.3); border-radius:4px; padding:8px 10px;">
               <div>
                 <div style="font-weight:600; font-size:12px; color:#f3f4f6;">${escapeHtml(r.rule_name || r.rule_id)}</div>
-                <div style="font-family:var(--font-mono); font-size:10px; color:var(--text-dim);">${escapeHtml(r.rule_id)}</div>
+                <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">${escapeHtml(r.rule_id)}</div>
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <span class="badge" style="background:${r.highest_cos >= 75 ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}; color:${r.highest_cos >= 75 ? '#f87171' : '#fbbf24'}; font-weight:700;">
                   ${Math.round(r.highest_cos)} COS
                 </span>
-                <button onclick="promptRuleConflictAudit('${escapeHtml(r.rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                <button onclick="promptRuleConflictAudit('${escapeHtml(r.rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                   Audit
                 </button>
               </div>
@@ -2993,27 +3025,27 @@ function renderRuleAuditCard(widget) {
 
       <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Total Scanned</div>
+          <div style="font-size:11px; color:var(--text-muted);">Total Scanned</div>
           <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalScanned}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Healthy Active</div>
+          <div style="font-size:11px; color:var(--text-muted);">Healthy Active</div>
           <div style="font-size:16px; font-weight:700; color:#34d399;">${healthyCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Silent (0 Det/90d)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Silent (0 Det/90d)</div>
           <div style="font-size:16px; font-weight:700; color:${silentCount > 0 ? '#fbbf24' : '#cbd5e1'};">${silentCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Execution Errors</div>
+          <div style="font-size:11px; color:var(--text-muted);">Execution Errors</div>
           <div style="font-size:16px; font-weight:700; color:${failingCount > 0 ? '#f87171' : '#34d399'};">${failingCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Conflicts (COS≥75)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Conflicts (COS≥75)</div>
           <div style="font-size:16px; font-weight:700; color:${conflictCount > 0 ? '#c084fc' : '#cbd5e1'};">${conflictCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Shadows Curated</div>
+          <div style="font-size:11px; color:var(--text-muted);">Shadows Curated</div>
           <div style="font-size:16px; font-weight:700; color:${shadowedCuratedCount > 0 ? '#fb923c' : '#34d399'};">${shadowedCuratedCount}</div>
         </div>
       </div>
@@ -3021,21 +3053,21 @@ function renderRuleAuditCard(widget) {
       ${attentionItems.length > 0 ? `
         <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
           <span>Action Required Rules (${attentionItems.length})</span>
-          <span style="font-size:10px; font-weight:normal; color:var(--text-dim);">Showing prioritized findings</span>
+          <span style="font-size:11px; font-weight:normal; color:var(--text-dim);">Showing prioritized findings</span>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; max-height:360px; overflow-y:auto;">
           ${attentionItems.slice(0, 25).map(f => {
             const st = typeof f.status === "object" ? f.status.value : f.status;
-            let stBadge = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); font-size:10px;">${st}</span>`;
+            let stBadge = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); font-size:11px;">${st}</span>`;
             if (st === "SILENT_DECAY") {
-              stBadge = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); font-size:10px;">SILENT DECAY</span>`;
+              stBadge = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); font-size:11px;">SILENT DECAY</span>`;
             } else if (st === "MISCONFIGURED_ALERTING") {
-              stBadge = `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:10px;">MISCONFIGURED</span>`;
+              stBadge = `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:11px;">MISCONFIGURED</span>`;
             }
             const isCurated = f.rule_source === "GOOGLE_CURATED" || (f.rule_id && f.rule_id.startsWith("ur_"));
             const srcBadge = isCurated
-              ? `<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); font-size:9.5px;">CURATED</span>`
-              : `<span class="badge" style="background:rgba(156,163,175,0.15); color:#cbd5e1; border:1px solid rgba(156,163,175,0.3); font-size:9.5px;">CUSTOM</span>`;
+              ? `<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); font-size:11px;">CURATED</span>`
+              : `<span class="badge" style="background:rgba(156,163,175,0.15); color:#cbd5e1; border:1px solid rgba(156,163,175,0.3); font-size:11px;">CUSTOM</span>`;
 
             return `
               <div style="background:rgba(17,24,39,0.7); border:1px solid rgba(75,85,99,0.3); border-radius:4px; padding:8px 10px;">
@@ -3045,46 +3077,46 @@ function renderRuleAuditCard(widget) {
                       ${srcBadge}
                       <span style="font-weight:600; font-size:12px; color:#f3f4f6;">${escapeHtml(f.rule_name || f.rule_id)}</span>
                     </div>
-                    <div style="font-family:var(--font-mono); font-size:10px; color:var(--text-dim); margin-top:1px;">
+                    <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-top:1px;">
                       ${escapeHtml(f.rule_id)} &bull; DPS: <strong>${Math.round(f.dps_score || 0)}</strong> &bull; 90d Det: <strong>${f.detection_count_90d || 0}</strong>
                     </div>
                   </div>
                   <div style="display:flex; align-items:center; gap:6px;">
                     ${stBadge}
-                    ${f.highest_conflict_cos >= 75 ? `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:10px;">${Math.round(f.highest_conflict_cos)}% COS</span>` : ''}
+                    ${f.highest_conflict_cos >= 75 ? `<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); font-size:11px;">${Math.round(f.highest_conflict_cos)}% COS</span>` : ''}
                   </div>
                 </div>
 
                 ${f.shadowed_by_curated_id ? `
-                  <div style="margin-top:4px; padding:4px 6px; background:rgba(251,146,60,0.1); border:1px solid rgba(251,146,60,0.3); border-radius:3px; font-size:10.5px; color:#fdba74;">
+                  <div style="margin-top:4px; padding:4px 6px; background:rgba(251,146,60,0.1); border:1px solid rgba(251,146,60,0.3); border-radius:3px; font-size:11px; color:#fdba74;">
                     ⚠️ <strong>Shadows Google Curated Rule:</strong> ${escapeHtml(f.shadowed_by_curated_name || f.shadowed_by_curated_id)} (<code>${escapeHtml(f.shadowed_by_curated_id)}</code>)
                   </div>
                 ` : ''}
 
                 ${f.remediation_steps && f.remediation_steps.length > 0 ? `
-                  <div style="font-size:10.5px; color:#94a3b8; margin-top:4px;">
+                  <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
                     💡 ${escapeHtml(f.remediation_steps[0])}
                   </div>
                 ` : ''}
 
                 <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
                   ${f.shadowed_by_curated_id ? `
-                    <button onclick="promptRuleConflictConsolidate('${escapeHtml(f.rule_id)}', '${escapeHtml(f.shadowed_by_curated_id)}')" style="background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.4); color:#fed7aa; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer; font-weight:600;">
+                    <button onclick="promptRuleConflictConsolidate('${escapeHtml(f.rule_id)}', '${escapeHtml(f.shadowed_by_curated_id)}')" style="background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.4); color:#fed7aa; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer; font-weight:600;">
                       ⚡ Retire in Favor of Curated
                     </button>
                   ` : ''}
                   ${f.highest_conflict_cos >= 75 ? `
-                    <button onclick="promptRuleConflictAudit('${escapeHtml(f.rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button onclick="promptRuleConflictAudit('${escapeHtml(f.rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       🔍 Inspect Conflict
                     </button>
                   ` : ''}
                   ${st === "SILENT_DECAY" ? `
-                    <button onclick="promptRuleDecayInvestigate('${escapeHtml(f.rule_id)}')" style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#fde68a; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button onclick="promptRuleDecayInvestigate('${escapeHtml(f.rule_id)}')" style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#fde68a; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       📉 Investigate Decay
                     </button>
                   ` : ''}
                   ${st === "EXECUTION_ERROR" ? `
-                    <button onclick="promptRuleSyntaxFix('${escapeHtml(f.rule_id)}')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:10.5px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button onclick="promptRuleSyntaxFix('${escapeHtml(f.rule_id)}')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       🛠️ Inspect Runtime Error
                     </button>
                   ` : ''}
@@ -3136,19 +3168,19 @@ function renderFinopsCostCard(widget) {
 
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Ingested Volume (7d)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Ingested Volume (7d)</div>
           <div style="font-size:16px; font-weight:700; color:#60a5fa;">${totalVolumeGb} GB</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Total Ingested Events</div>
+          <div style="font-size:11px; color:var(--text-muted);">Total Ingested Events</div>
           <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalEvents}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Projected Spend (Enterprise)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Projected Spend (Enterprise)</div>
           <div style="font-size:16px; font-weight:700; color:#f87171;">${spendEnterprise}/mo</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Potential Savings</div>
+          <div style="font-size:11px; color:var(--text-muted);">Potential Savings</div>
           <div style="font-size:16px; font-weight:700; color:#34d399;">${savings}/mo</div>
         </div>
       </div>
@@ -3189,10 +3221,10 @@ function renderRawLogSearchCard(w) {
           <span style="font-size:12px; font-weight:700; color:#93c5fd; text-transform:uppercase; letter-spacing:0.5px;">Chronicle Raw Log Search</span>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
-          <span style="background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#93c5fd; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">
+          <span style="background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#93c5fd; font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px;">
             ${totalMatches} ${totalMatches === 1 ? 'MATCH' : 'MATCHES'}
           </span>
-          <span style="background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.3); color:#34d399; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">
+          <span style="background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.3); color:#34d399; font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px;">
             ${progress}% SCANNED
           </span>
         </div>
@@ -3200,15 +3232,15 @@ function renderRawLogSearchCard(w) {
 
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; font-size:11px;">
         <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:3px 8px; font-family:var(--font-mono); color:#cbd5e1; flex:1; min-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-          <span style="color:var(--text-muted); font-size:10px;">QUERY:</span> <span style="color:#67e8f9;">${escapeHtml(query || "*")}</span>
+          <span style="color:var(--text-muted); font-size:11px;">QUERY:</span> <span style="color:#67e8f9;">${escapeHtml(query || "*")}</span>
         </div>
         <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:3px 8px; font-family:var(--font-mono); color:#94a3b8;">
-          <span style="color:var(--text-muted); font-size:10px;">WINDOW:</span> ${lookbackHours}h lookback
+          <span style="color:var(--text-muted); font-size:11px;">WINDOW:</span> ${lookbackHours}h lookback
         </div>
       </div>
 
       ${matches.length > 0 ? `
-        <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px;">Sample Matches (${matches.length})</div>
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px;">Sample Matches (${matches.length})</div>
         <div style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding-right:4px;">
           ${matches.map((m, idx) => {
             const snippet = m.snippet || m.raw_text || JSON.stringify(m, null, 2);
@@ -3217,18 +3249,18 @@ function renderRawLogSearchCard(w) {
             const time = m.ingestion_time || m.timestamp || "";
             return `
               <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06); border-radius:4px; padding:6px 8px; font-size:11px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:11px;">
                   <div style="display:flex; align-items:center; gap:6px;">
                     <span style="background:rgba(99, 102, 241, 0.18); border:1px solid rgba(99, 102, 241, 0.35); color:#a5b4fc; font-weight:700; padding:1px 5px; border-radius:3px;">
                       ${escapeHtml(logType)}
                     </span>
                     ${time ? `<span style="color:var(--text-muted);">${escapeHtml(time)}</span>` : ''}
                   </div>
-                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('success', 'Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:9px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
+                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('success', 'Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:11px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
                     📋 Copy Raw Log
                   </button>
                 </div>
-                <pre style="margin:0; padding:4px 6px; background:rgba(0,0,0,0.5); border-radius:3px; font-family:var(--font-mono); font-size:10px; color:#e2e8f0; max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(snippet)}</code></pre>
+                <pre style="margin:0; padding:4px 6px; background:rgba(0,0,0,0.5); border-radius:3px; font-family:var(--font-mono); font-size:11px; color:#e2e8f0; max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-all;"><code>${escapeHtml(snippet)}</code></pre>
               </div>
             `;
           }).join("")}
@@ -3330,27 +3362,27 @@ function renderMitreCoverageCard(widget) {
       <!-- KPI Grid -->
       <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Covered Techs</div>
+          <div style="font-size:11px; color:var(--text-muted);">Covered Techs</div>
           <div style="font-size:16px; font-weight:700; color:#34d399;">${validatedTechniques}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Evaluated Rules</div>
+          <div style="font-size:11px; color:var(--text-muted);">Evaluated Rules</div>
           <div style="font-size:16px; font-weight:700; color:#f3f4f6;">${totalRules}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Resilient (≥2)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Resilient (≥2)</div>
           <div style="font-size:16px; font-weight:700; color:#38bdf8;">${resilientCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Fragile (SPoF)</div>
+          <div style="font-size:11px; color:var(--text-muted);">Fragile (SPoF)</div>
           <div style="font-size:16px; font-weight:700; color:${fragileCount > 0 ? '#fbbf24' : '#34d399'};">${fragileCount}</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Tactical Vis</div>
+          <div style="font-size:11px; color:var(--text-muted);">Tactical Vis</div>
           <div style="font-size:16px; font-weight:700; color:#a78bfa;">${visTactics}/14</div>
         </div>
         <div class="kpi-card" style="padding:6px 8px; text-align:center;">
-          <div style="font-size:10px; color:var(--text-muted);">Blind Tactics</div>
+          <div style="font-size:11px; color:var(--text-muted);">Blind Tactics</div>
           <div style="font-size:16px; font-weight:700; color:${blindTactics.length > 0 ? '#f87171' : '#34d399'};">${blindTactics.length}</div>
         </div>
       </div>
@@ -3373,18 +3405,18 @@ function renderMitreCoverageCard(widget) {
         <div style="margin-bottom:10px;">
           <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
             <span>High-Risk Uncovered Techniques (${criticalTechniques.length})</span>
-            <span style="font-size:10px; color:#f87171; font-weight:600;">Priority Defenses Required</span>
+            <span style="font-size:11px; color:#f87171; font-weight:600;">Priority Defenses Required</span>
           </div>
           <div style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;">
             ${criticalTechniques.slice(0, 5).map(t => `
               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:4px; padding:5px 8px;">
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <button onclick="promptMitreTechniqueInspect('${escapeHtml(t.technique_id || '')}')" class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-size:10px; font-family:var(--font-mono); border:none; cursor:pointer;" title="Click to inspect mapped rules">
+                  <button onclick="promptMitreTechniqueInspect('${escapeHtml(t.technique_id || '')}')" class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-size:11px; font-family:var(--font-mono); border:none; cursor:pointer;" title="Click to inspect mapped rules">
                     ${escapeHtml(t.technique_id || '')}
                   </button>
                   <span style="font-size:11.5px; font-weight:600; color:#f3f4f6;">${escapeHtml(t.name || '')}</span>
                 </div>
-                <div style="font-size:10.5px; color:var(--text-muted);">
+                <div style="font-size:11px; color:var(--text-muted);">
                   Risk Weight: <strong style="color:#fbbf24;">${t.risk_weight || 5}</strong>
                 </div>
               </div>
@@ -3448,8 +3480,8 @@ async function renderTuningDrawer() {
     itemsContainer.innerHTML = rules.map(r => {
       const isCurated = r.rule_id.startsWith("ur_");
       const typeBadge = isCurated
-        ? `<span class="badge" style="background:rgba(99,102,241,0.15); color:#818cf8; font-size:10px;">CURATED</span>`
-        : `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; font-size:10px;">CUSTOMER</span>`;
+        ? `<span class="badge" style="background:rgba(99,102,241,0.15); color:#818cf8; font-size:11px;">CURATED</span>`
+        : `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; font-size:11px;">CUSTOMER</span>`;
 
       return `
         <div class="proposal-card status-open" style="padding:10px; margin-bottom:8px; border-left:3px solid #6366f1;">
@@ -3459,7 +3491,7 @@ async function renderTuningDrawer() {
             </div>
             ${typeBadge}
           </div>
-          <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-bottom:6px;">
+          <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-bottom:6px;">
             ${escapeHtml(r.rule_id)}
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:11px;">
@@ -4161,7 +4193,7 @@ async function renderDecayDrawer() {
           <span>Live: <strong>${item.is_live ? '🟢 Yes' : '⚪ No'}</strong></span>
         </div>
         <div style="margin-top:6px; display:flex; justify-content:flex-end;">
-          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:10.5px; cursor:pointer;" onclick="auditRuleInChat('${item.rule_id}')">
+          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" onclick="auditRuleInChat('${item.rule_id}')">
             Deep Audit &rarr;
           </button>
         </div>
@@ -4248,7 +4280,7 @@ function renderFleetDrawer() {
   header.innerHTML = `
     <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
       <span>Fleet Roster</span>
-      <span style="font-size:10px; background:var(--bg-tertiary); padding:1px 6px; border-radius:8px;">${total} Online</span>
+      <span style="font-size:11px; background:var(--bg-tertiary); padding:1px 6px; border-radius:8px;">${total} Online</span>
     </div>
     <input
       type="text"
@@ -4315,7 +4347,7 @@ function renderFleetDrawerItems() {
       <div style="font-weight:700; font-size:13px; color:var(--text-accent);">${escapeHtml(a.handle)}</div>
       <div style="font-size:12px; font-weight:600; color:var(--text-main); margin: 2px 0;">${escapeHtml(a.role)}</div>
       <div style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">${escapeHtml(a.description)}</div>
-      <div style="font-size:10.5px; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:11px; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center;">
         <span>Capabilities: <strong>${a.capabilities.length}</strong></span>
         <span>Subsystem: <code>${escapeHtml(a.subsystem || "general")}</code></span>
       </div>
@@ -5224,7 +5256,7 @@ function renderFinopsSection() {
         <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
             <div style="display:flex; align-items:center; gap:8px;">
-              <span class="status-badge" style="background:rgba(52,211,153,0.15); color:#34d399; border:1px solid rgba(52,211,153,0.3); font-size:10px;">${escapeHtml(rec.category)}</span>
+              <span class="status-badge" style="background:rgba(52,211,153,0.15); color:#34d399; border:1px solid rgba(52,211,153,0.3); font-size:11px;">${escapeHtml(rec.category)}</span>
               <span style="font-weight:600; font-size:13px; color:#f9fafb;">${escapeHtml(rec.title)}</span>
             </div>
             <span style="font-size:12px; font-weight:700; color:#34d399;">+$${(rec.potential_monthly_savings_usd || 0).toFixed(2)}/mo</span>
@@ -5253,8 +5285,8 @@ function renderFinopsSection() {
       tableBody.innerHTML = drivers.map(d => {
         const isBloated = d.is_bloated;
         const bloatBadge = isBloated 
-          ? `<span class="status-badge status-WARN" style="font-size:10px;">BLOATED (>2KB)</span>`
-          : `<span class="status-badge status-HEALTHY" style="font-size:10px;">OPTIMAL</span>`;
+          ? `<span class="status-badge status-WARN" style="font-size:11px;">BLOATED (>2KB)</span>`
+          : `<span class="status-badge status-HEALTHY" style="font-size:11px;">OPTIMAL</span>`;
         return `
           <tr>
             <td style="font-weight:600; color:#f8fafc;"><code style="color:#38bdf8; font-size:11.5px;">${escapeHtml(d.log_type)}</code></td>
@@ -5354,7 +5386,7 @@ function renderNamespaceLabelsSection() {
           <div style="background:var(--bg-table-header); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight:700; font-size:12.5px; color:#f3f4f6;">${escapeHtml(f.title)}</span>
-              <span class="status-badge ${sevClass}" style="font-size:10px;">${escapeHtml(f.severity)}</span>
+              <span class="status-badge ${sevClass}" style="font-size:11px;">${escapeHtml(f.severity)}</span>
             </div>
             <div style="font-size:11.5px; color:#cbd5e1; margin-top:4px;">${escapeHtml(f.description)}</div>
             ${typesBadge}
@@ -5372,8 +5404,8 @@ function renderNamespaceLabelsSection() {
     } else {
       labelsTableBody.innerHTML = activeLabels.map(l => {
         const typeBadge = l.is_auto_generated
-          ? `<span class="status-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; font-size:10px;">AUTO</span>`
-          : `<span class="status-badge" style="background:rgba(156,163,175,0.15); color:#9ca3af; font-size:10px;">CUSTOM</span>`;
+          ? `<span class="status-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; font-size:11px;">AUTO</span>`
+          : `<span class="status-badge" style="background:rgba(156,163,175,0.15); color:#9ca3af; font-size:11px;">CUSTOM</span>`;
         const logTypesStr = (l.log_types || []).slice(0, 3).join(", ") + ((l.log_types || []).length > 3 ? ` (+${l.log_types.length - 3})` : "");
         return `
           <tr>
@@ -5394,8 +5426,8 @@ function renderNamespaceLabelsSection() {
     } else {
       nsTableBody.innerHTML = activeNs.map(n => {
         const rfcBadge = n.is_network_rfc1918_relevant
-          ? `<span class="status-badge status-WARN" style="font-size:10px;">RFC 1918</span>`
-          : `<span class="status-badge status-HEALTHY" style="font-size:10px;">STANDARD</span>`;
+          ? `<span class="status-badge status-WARN" style="font-size:11px;">RFC 1918</span>`
+          : `<span class="status-badge status-HEALTHY" style="font-size:11px;">STANDARD</span>`;
         const logTypesStr = (n.log_types || []).slice(0, 3).join(", ") + ((n.log_types || []).length > 3 ? ` (+${n.log_types.length - 3})` : "");
         return `
           <tr>
@@ -5737,7 +5769,7 @@ function renderDiagnosticResults(data, logType) {
   if (rawEvents.length > 0) {
     samplesHtml = rawEvents.map((ev, idx) => `
       <div style="background:rgba(15,23,42,0.9); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:8px 10px; margin-top:6px;">
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-dim); margin-bottom:4px;">
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-bottom:4px;">
           <span>Sample #${idx + 1}</span>
           <span>${escapeHtml(ev.timestamp || "Recent")}</span>
         </div>
@@ -5996,11 +6028,11 @@ function renderSocKanbanCard(iss) {
   const holder = iss.lease?.holder_agent || "unassigned";
 
   return `
-    <div class="kanban-card" onclick="viewSocIssueDetail(${jsArg(iss.issue_id)})" style="border-left: 3px solid #6366f1;">
+    <div class="kanban-card" role="button" tabindex="0" onclick="viewSocIssueDetail(${jsArg(iss.issue_id)})" style="border-left: 3px solid #6366f1;">
       <div class="kanban-card-head">
         <span class="kanban-card-id" style="color:#a5b4fc;">${id}</span>
         <div style="display:flex; align-items:center; gap:4px;">
-          <span class="kanban-card-badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:9.5px;">${plane}</span>
+          <span class="kanban-card-badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:11px;">${plane}</span>
           <span class="kanban-card-badge ${sevClass}">${sev}</span>
         </div>
       </div>
@@ -6134,7 +6166,7 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" onclick="openGastownDiffModal(${jsArg(p.id)})">
+          <div class="kanban-card" role="button" tabindex="0" onclick="openGastownDiffModal(${jsArg(p.id)})">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${riskClass}">${p.risk_level || "PROPOSAL"}</span>
@@ -6170,7 +6202,7 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" onclick="openGastownDiffModal(${jsArg(p.id)})" style="opacity:0.85;">
+          <div class="kanban-card" role="button" tabindex="0" onclick="openGastownDiffModal(${jsArg(p.id)})" style="opacity:0.85;">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}">${p.status}</span>
@@ -6267,7 +6299,7 @@ function renderGastownRefinery() {
         </td>
         <td>
           <div style="font-size:12.5px; font-weight:600; color:var(--text-main);">${escapeHtml(p.title || target)}</div>
-          <code style="font-size:10.5px; color:var(--text-dim);">${escapeHtml(target)}</code>
+          <code style="font-size:11px; color:var(--text-dim);">${escapeHtml(target)}</code>
         </td>
         <td>
           <span style="display:flex; align-items:center; gap:5px; font-size:12px;">
@@ -6642,7 +6674,7 @@ async function renderGastownPatrols() {
           const handle = log.agent_handle || "@agent";
           const beads = log.created_beads || [];
           const beadMarkup = beads.length > 0
-            ? beads.map((b) => `<code style="font-size:10px; color:#c2d94c;">${b}</code>`).join(", ")
+            ? beads.map((b) => `<code style="font-size:11px; color:#c2d94c;">${b}</code>`).join(", ")
             : `<span style="color:var(--text-dim); font-size:11px;">None (clean)</span>`;
           return `
             <tr>
@@ -6757,13 +6789,13 @@ async function renderGastownWorkQueue() {
           return `
             <tr>
               <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})">${id}</td>
-              <td><span class="badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:10px; font-weight:700;">${plane.toUpperCase()}</span></td>
+              <td><span class="badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:11px; font-weight:700;">${plane.toUpperCase()}</span></td>
               <td>
                 <div style="font-weight:600; color:var(--text-bright); font-size:12.5px;">${title}</div>
                 <div style="font-size:11px; color:var(--text-dim); font-family:var(--font-mono); margin-top:2px;">${target}</div>
               </td>
-              <td><span class="kanban-card-badge ${sevClass}" style="font-size:10px;">${sev}</span></td>
-              <td><span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${status}</span></td>
+              <td><span class="kanban-card-badge ${sevClass}" style="font-size:11px;">${sev}</span></td>
+              <td><span class="badge ${statusBadgeClass}" style="font-size:11px; font-weight:700;">${status}</span></td>
               <td>${ownerHtml}</td>
               <td>${expiresHtml}</td>
               <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${authority}</td>
@@ -6783,9 +6815,9 @@ async function renderGastownWorkQueue() {
           const handle = escapeHtml(w.agent_handle || "@agent");
           const authority = escapeHtml(w.max_authority_tier || "TIER_1_AUTONOMOUS");
           const planeList = w.operational_planes || w.supported_planes || [];
-          const planes = planeList.map(p => `<span class="badge" style="background:rgba(59,130,246,0.12); color:#93c5fd; font-size:10px; margin-right:3px;">${escapeHtml(p)}</span>`).join("");
+          const planes = planeList.map(p => `<span class="badge" style="background:rgba(59,130,246,0.12); color:#93c5fd; font-size:11px; margin-right:3px;">${escapeHtml(p)}</span>`).join("");
           const rawCaps = Array.isArray(w.capabilities) ? w.capabilities : Object.keys(w.capabilities || {});
-          const caps = rawCaps.slice(0, 8).map(c => `<span class="tag-chip" style="font-size:10px; padding:2px 6px; margin:2px; display:inline-block; background:rgba(255,255,255,0.06); border-radius:3px; font-family:var(--font-mono);">${escapeHtml(c)}</span>`).join("") + (rawCaps.length > 8 ? `<span style="font-size:10px; color:var(--text-dim); margin-left:4px;">+${rawCaps.length - 8} more</span>` : "");
+          const caps = rawCaps.slice(0, 8).map(c => `<span class="tag-chip" style="font-size:11px; padding:2px 6px; margin:2px; display:inline-block; background:rgba(255,255,255,0.06); border-radius:3px; font-family:var(--font-mono);">${escapeHtml(c)}</span>`).join("") + (rawCaps.length > 8 ? `<span style="font-size:11px; color:var(--text-dim); margin-left:4px;">+${rawCaps.length - 8} more</span>` : "");
           const maxLeases = w.max_concurrent_leases ?? 3;
 
           return `
@@ -6800,7 +6832,7 @@ async function renderGastownWorkQueue() {
               <td>${planes || '<span style="color:var(--text-dim);">-</span>'}</td>
               <td><div style="max-width:340px; display:flex; flex-wrap:wrap;">${caps || '<span style="color:var(--text-dim);">-</span>'}</div></td>
               <td style="font-family:var(--font-mono); font-weight:600; color:#cbd5e1;">${maxLeases}</td>
-              <td><span class="badge badge-green" style="font-size:10px; font-weight:700;">READY</span></td>
+              <td><span class="badge badge-green" style="font-size:11px; font-weight:700;">READY</span></td>
             </tr>
           `;
         }).join("");
@@ -6901,7 +6933,7 @@ async function viewSocIssueDetail(issueId) {
         const evName = escapeHtml(ev.transition || `Event ${idx + 1}`);
         const actor = escapeHtml(ev.actor || "system");
         const ts = escapeHtml(ev.timestamp || "-");
-        const meta = ev.metadata ? `<pre style="margin:4px 0 0; background:rgba(0,0,0,0.3); padding:6px; border-radius:4px; font-size:10.5px; max-height:100px; overflow-y:auto;">${escapeHtml(JSON.stringify(ev.metadata, null, 2))}</pre>` : "";
+        const meta = ev.metadata ? `<pre style="margin:4px 0 0; background:rgba(0,0,0,0.3); padding:6px; border-radius:4px; font-size:11px; max-height:100px; overflow-y:auto;">${escapeHtml(JSON.stringify(ev.metadata, null, 2))}</pre>` : "";
         const evidenceRefs = (ev.evidence_references && ev.evidence_references.length > 0)
           ? `<div style="margin-top:4px; font-size:11px; color:#93c5fd;">📎 Evidence: ${ev.evidence_references.map(r => `<code>${escapeHtml(r)}</code>`).join(", ")}</div>`
           : "";
@@ -6911,7 +6943,7 @@ async function viewSocIssueDetail(issueId) {
             <div style="position: absolute; left: -6px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: #6366f1;"></div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span style="font-weight:700; color:var(--text-bright); font-size:12px;">${evName}</span>
-              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${ts}</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">${ts}</span>
             </div>
             <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
               Actor: <span style="font-weight:600; color:#e2e8f0;">${actor}</span>
@@ -7778,13 +7810,13 @@ function renderDeltaSection(countElemId, listElemId, items, emptyText) {
     const id = item.id || item.issue_id || "";
     const agent = item.agent || item.author || "";
     const severity = item.severity || item.priority || "";
-    const sevBadge = severity ? `<span style="font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; background:#1e293b; color:#cbd5e1; text-transform:uppercase;">${escapeHtml(severity)}</span>` : "";
+    const sevBadge = severity ? `<span style="font-size:11px; font-weight:700; padding:1px 5px; border-radius:3px; background:#1e293b; color:#cbd5e1; text-transform:uppercase;">${escapeHtml(severity)}</span>` : "";
     return `
       <div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:space-between; gap:6px;">
         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
         <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
           ${sevBadge}
-          ${agent ? `<span style="font-size:10px; color:#38bdf8;">@${escapeHtml(agent.replace('@', ''))}</span>` : ""}
+          ${agent ? `<span style="font-size:11px; color:#38bdf8;">@${escapeHtml(agent.replace('@', ''))}</span>` : ""}
         </div>
       </div>
     `;
@@ -7837,7 +7869,7 @@ async function loadPostureSnapshot() {
             <td style="padding:8px 10px; font-weight:600; color:#f1f5f9;">${escapeHtml(g.subject || "-")}</td>
             <td style="padding:8px 10px; color:#cbd5e1;">${escapeHtml(g.description || "-")}</td>
             <td style="padding:8px 10px;">
-              <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; background:${g.severity === 'high' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}; color:${g.severity === 'high' ? '#f87171' : '#facc15'}; text-transform:uppercase;">
+              <span style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:3px; background:${g.severity === 'high' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}; color:${g.severity === 'high' ? '#f87171' : '#facc15'}; text-transform:uppercase;">
                 ${escapeHtml(g.severity || "medium")}
               </span>
             </td>
@@ -7936,3 +7968,101 @@ function copySlackBlocks() {
 
 
 
+
+
+// --- Accessibility helpers (#7) ---
+// Screen-reader announcements via a single polite live region.
+function announce(text) {
+  const el = document.getElementById("srAnnouncer");
+  if (!el || !text) return;
+  el.textContent = "";
+  // Re-set on next frame so repeated identical messages are still announced.
+  requestAnimationFrame(() => { el.textContent = text; });
+}
+window.announce = announce;
+
+// Elements rendered as divs that behave like buttons: Enter/Space activates.
+const A11Y_CLICKABLE = ".stream-header, .topic-item, .dm-item, .kanban-card, #dmSectionHeader, div.drawer-proposal-item[tabindex]";
+
+function syncTabState(tab) {
+  const on = tab.classList.contains("active");
+  tab.setAttribute("aria-selected", on ? "true" : "false");
+  tab.tabIndex = on ? 0 : -1;
+  if (on && tab.getAttribute("aria-controls") === "drawerContent") {
+    document.getElementById("drawerContent")?.setAttribute("aria-labelledby", tab.id);
+  }
+}
+
+function syncNavState(nav) {
+  if (nav.classList.contains("active")) nav.setAttribute("aria-current", "page");
+  else nav.removeAttribute("aria-current");
+}
+
+function setupA11y() {
+  // Tabs: aria-selected / roving tabindex mirror the existing `.active` class,
+  // so the individual switch* functions don't need to know about ARIA.
+  const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+  const navs = Array.from(document.querySelectorAll(".topbar-nav .nav-tab"));
+  tabs.forEach(syncTabState);
+  navs.forEach(syncNavState);
+  const classObserver = new MutationObserver((records) => {
+    records.forEach((r) => {
+      const el = r.target;
+      if (el.getAttribute("role") === "tab") syncTabState(el);
+      else if (el.classList.contains("nav-tab")) syncNavState(el);
+    });
+  });
+  [...tabs, ...navs].forEach((el) => classObserver.observe(el, { attributes: true, attributeFilter: ["class"] }));
+
+  // Arrow-key navigation within tablists (automatic activation).
+  document.querySelectorAll('[role="tablist"]').forEach((list) => {
+    list.addEventListener("keydown", (e) => {
+      const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      const items = Array.from(list.querySelectorAll('[role="tab"]')).filter((t) => t.offsetParent !== null);
+      const idx = items.indexOf(document.activeElement);
+      if (idx === -1) return;
+      e.preventDefault();
+      let next = idx;
+      if (e.key === "ArrowLeft") next = (idx - 1 + items.length) % items.length;
+      else if (e.key === "ArrowRight") next = (idx + 1) % items.length;
+      else if (e.key === "Home") next = 0;
+      else next = items.length - 1;
+      items[next].focus();
+      items[next].click();
+    });
+  });
+
+  // Right drawer toggle: aria-expanded follows the drawer's closed class.
+  const drawer = document.getElementById("sidebarRight");
+  const drawerBtn = document.getElementById("toggleRightDrawerBtn");
+  if (drawer && drawerBtn) {
+    const syncDrawer = () => drawerBtn.setAttribute("aria-expanded", drawer.classList.contains("sidebar-right-closed") ? "false" : "true");
+    syncDrawer();
+    new MutationObserver(syncDrawer).observe(drawer, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  // DM section collapse: aria-expanded follows the list's collapsed class.
+  const dmHeader = document.getElementById("dmSectionHeader");
+  const dmList = document.getElementById("dmList");
+  if (dmHeader && dmList) {
+    const syncDm = () => dmHeader.setAttribute("aria-expanded", dmList.classList.contains("collapsed") ? "false" : "true");
+    syncDm();
+    new MutationObserver(syncDm).observe(dmList, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  // Keyboard activation for div-based controls.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const el = e.target;
+    if (!(el instanceof Element) || !el.matches(A11Y_CLICKABLE)) return;
+    e.preventDefault();
+    el.click();
+  });
+
+  // Skip link: move focus into the main region.
+  document.querySelector(".skip-link")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("mainContent")?.focus();
+  });
+}

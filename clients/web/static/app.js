@@ -248,10 +248,13 @@ function setupEventListeners() {
       btnTriggerRuleAudit.disabled = true;
       btnTriggerRuleAudit.innerHTML = "<span>⏳ Auditing...</span>";
       try {
-        await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        const res = await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        if (!res.ok) throw new Error(await describeHttpError(res));
+        showToast("success", "Rule audit complete — opening Decay Review.");
         await switchTopic("detections", "decay-review");
       } catch (err) {
         console.error("Rule audit failed:", err);
+        showToast("error", `Rule audit failed: ${err.message}`);
       } finally {
         btnTriggerRuleAudit.disabled = false;
         btnTriggerRuleAudit.innerHTML = "<span>🛡️ Audit Rules</span>";
@@ -264,10 +267,13 @@ function setupEventListeners() {
       btnTriggerMitreAudit.disabled = true;
       btnTriggerMitreAudit.innerHTML = "<span>⏳ Analyzing...</span>";
       try {
-        await fetch("/api/mitre/audit?profile=global_baseline", { method: "POST" });
+        const res = await fetch("/api/mitre/audit?profile=global_baseline", { method: "POST" });
+        if (!res.ok) throw new Error(await describeHttpError(res));
+        showToast("success", "MITRE coverage assessment complete.");
         await switchTopic("threat_intel", "mitre-coverage");
       } catch (err) {
         console.error("MITRE audit failed:", err);
+        showToast("error", `MITRE coverage assessment failed: ${err.message}`);
       } finally {
         btnTriggerMitreAudit.disabled = false;
         btnTriggerMitreAudit.innerHTML = "<span>🎯 MITRE Coverage</span>";
@@ -3632,14 +3638,27 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
       const req = f.required ? ' required aria-required="true"' : "";
       const minLen = f.minLength ? ` minlength="${f.minLength}"` : "";
       const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : "";
-      const input = f.type === "textarea"
-        ? `<textarea id="${id}" name="${escapeHtml(f.name)}" rows="3"${req}${minLen}${ph}>${escapeHtml(f.value || "")}</textarea>`
-        : `<input id="${id}" name="${escapeHtml(f.name)}" type="text" value="${escapeHtml(f.value || "")}"${req}${minLen}${ph} />`;
-      return `
+      const renderOption = (o) => `<option value="${escapeHtml(o.value)}"${o.value === f.value ? " selected" : ""}${o.disabled ? " disabled" : ""}>${escapeHtml(o.label || o.value)}</option>`;
+      let input;
+      if (f.type === "textarea") {
+        input = `<textarea id="${id}" name="${escapeHtml(f.name)}" rows="3"${req}${minLen}${ph}>${escapeHtml(f.value || "")}</textarea>`;
+      } else if (f.type === "select") {
+        const body = (f.groups || [{ options: f.options || [] }])
+          .filter((g) => g.options && g.options.length)
+          .map((g) => g.label
+            ? `<optgroup label="${escapeHtml(g.label)}">${g.options.map(renderOption).join("")}</optgroup>`
+            : g.options.map(renderOption).join(""))
+          .join("");
+        input = `<select id="${id}" name="${escapeHtml(f.name)}"${req}>${body}</select>`;
+      } else {
+        input = `<input id="${id}" name="${escapeHtml(f.name)}" type="text" value="${escapeHtml(f.value || "")}"${req}${minLen}${ph} />`;
+      }
+      const hint = f.hint ? `<div class="action-dialog-hint" id="${id}-hint">${escapeHtml(f.hint)}</div>` : "";
+      return `<div class="action-dialog-field" data-field-wrap="${escapeHtml(f.name)}">
         <label class="action-dialog-label" for="${id}">
           ${escapeHtml(f.label)}${f.required ? ' <span class="action-dialog-req" aria-hidden="true">*</span>' : ' <span class="action-dialog-opt">(optional)</span>'}
         </label>
-        ${input}`;
+        ${input}${hint}</div>`;
     }).join("");
 
     overlay.innerHTML = `
@@ -3671,7 +3690,7 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
         close(null);
       } else if (e.key === "Tab") {
         // Simple focus trap
-        const focusables = form.querySelectorAll("input, textarea, button");
+        const focusables = Array.from(form.querySelectorAll("input, textarea, select, button")).filter((el) => !el.disabled && !el.hidden && el.offsetParent !== null);
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -3684,6 +3703,8 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
       const values = {};
       for (const f of fields) {
         const el = form.elements[f.name];
+        const wrap = el.closest("[data-field-wrap]");
+        if (wrap && wrap.hidden) { values[f.name] = ""; continue; }
         const v = (el.value || "").trim();
         if (f.required && !v) {
           errorEl.textContent = `${f.label} is required.`;
@@ -3701,12 +3722,20 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
       }
       close(values);
     });
+    fields.forEach((f) => {
+      if (typeof f.onChange === "function") {
+        const el = form.elements[f.name];
+        const fire = () => f.onChange(el.value, form);
+        el.addEventListener("change", fire);
+        fire();
+      }
+    });
     overlay.querySelector('[data-action="cancel"]').addEventListener("click", () => close(null));
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(null); });
     document.addEventListener("keydown", onKey, true);
 
     document.body.appendChild(overlay);
-    const firstInput = form.querySelector("input, textarea");
+    const firstInput = form.querySelector("input, textarea, select");
     (firstInput || form.querySelector('button[type="submit"]')).focus();
     if (firstInput && firstInput.select) firstInput.select();
   });
@@ -3945,11 +3974,14 @@ async function renderDecayDrawer() {
       btnAuditDrawer.innerHTML = "<span>⏳ Auditing...</span>";
       btnAuditDrawer.disabled = true;
       try {
-        await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        const res = await fetch("/api/rules/audit?include_curated=true&sync_embeddings=true&lookback_days=90&run_conflict_scan=true", { method: "POST" });
+        if (!res.ok) throw new Error(await describeHttpError(res));
+        showToast("success", "Rule audit complete.");
         await switchTopic("detections", "decay-review");
         renderDecayDrawer();
       } catch (e) {
         console.error(e);
+        showToast("error", `Rule audit failed: ${e.message}`);
       } finally {
         btnAuditDrawer.innerHTML = "<span>🛡️ Audit Rules</span>";
         btnAuditDrawer.disabled = false;
@@ -3962,11 +3994,14 @@ async function renderDecayDrawer() {
     btn.innerHTML = "<span>⏳ Syncing...</span>";
     btn.disabled = true;
     try {
-      await fetch("/api/decay/sync?lookback_days=90", { method: "POST" });
+      const res = await fetch("/api/decay/sync?lookback_days=90", { method: "POST" });
+      if (!res.ok) throw new Error(await describeHttpError(res));
+      showToast("success", "90-day telemetry sync complete.");
       await switchTopic("detections", "decay-review");
       renderDecayDrawer();
     } catch (e) {
       console.error(e);
+      showToast("error", `Telemetry sync failed: ${e.message}`);
     } finally {
       btn.innerHTML = "<span>🔄 Sync 90d</span>";
       btn.disabled = false;
@@ -4040,31 +4075,60 @@ async function renderDecayDrawer() {
   }
 }
 
+let drawerProposalFilter = "OPEN";
+
 function renderProposalsDrawer() {
   const container = document.getElementById("drawerContent");
+  // loadProposals() refreshes in the background; don't clobber another drawer tab.
+  if (!container || state.activeDrawerTab !== "proposals") return;
   container.innerHTML = "";
 
-  if (state.proposals.length === 0) {
-    container.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:20px;">No proposals in .proposals/</div>`;
+  const all = Array.isArray(state.proposals) ? state.proposals : [];
+  const openCount = all.filter((p) => (p.status || "").toUpperCase() === "OPEN").length;
+  const list = drawerProposalFilter === "OPEN"
+    ? all.filter((p) => (p.status || "").toUpperCase() === "OPEN")
+    : all;
+
+  const filterBar = document.createElement("div");
+  filterBar.className = "drawer-filter-bar";
+  filterBar.setAttribute("role", "group");
+  filterBar.setAttribute("aria-label", "Filter proposals");
+  filterBar.innerHTML = `
+    <button type="button" class="drawer-filter-chip ${drawerProposalFilter === "OPEN" ? "active" : ""}" data-filter="OPEN" aria-pressed="${drawerProposalFilter === "OPEN"}">Needs review (${openCount})</button>
+    <button type="button" class="drawer-filter-chip ${drawerProposalFilter === "ALL" ? "active" : ""}" data-filter="ALL" aria-pressed="${drawerProposalFilter === "ALL"}">All (${all.length})</button>
+  `;
+  filterBar.querySelectorAll("[data-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      drawerProposalFilter = btn.dataset.filter;
+      renderProposalsDrawer();
+    });
+  });
+  container.appendChild(filterBar);
+
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "drawer-empty";
+    empty.textContent = drawerProposalFilter === "OPEN"
+      ? (all.length ? "Nothing waiting for review." : "No proposals yet.")
+      : "No proposals yet.";
+    container.appendChild(empty);
     return;
   }
 
-  state.proposals.forEach((p) => {
-    const item = document.createElement("div");
+  list.forEach((p) => {
+    const status = String(p.status || "UNKNOWN").toUpperCase();
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "drawer-proposal-item";
+    item.title = status === "OPEN" ? "Review diff and approve or reject" : "View proposal details";
     item.innerHTML = `
-      <div class="drawer-prop-title">${escapeHtml(p.title)}</div>
+      <div class="drawer-prop-title">${escapeHtml(p.title || p.id || "Untitled proposal")}</div>
       <div class="drawer-prop-sub">
-        <span>${p.subsystem} &bull; ${p.action_type}</span>
-        <span class="badge badge-${p.status.toLowerCase()}">${p.status}</span>
+        <span>${escapeHtml(p.subsystem || "—")} &bull; ${escapeHtml(p.action_type || "—")}</span>
+        <span class="badge badge-${escapeHtml(status.toLowerCase())}">${escapeHtml(status)}</span>
       </div>
     `;
-    item.addEventListener("click", () => {
-      // Jump to proposal stream/topic if rule
-      if (p.subsystem === "detection_rules") {
-        switchTopic("detections", "rule-proposals");
-      }
-    });
+    item.addEventListener("click", () => openGastownDiffModal(p.id));
     container.appendChild(item);
   });
 }
@@ -4488,18 +4552,70 @@ function formatUnifiedDiff(diffText) {
 // ====================================================================
 // Toast Notification System
 // ====================================================================
-function showToast(type, message, duration = 4500) {
+// Errors stay until dismissed; everything else auto-dismisses (paused while hovered/focused).
+// Pass duration = 0 to make any toast sticky.
+const TOAST_MAX_VISIBLE = 5;
+
+function showToast(type, message, duration) {
   const container = document.getElementById("toastContainer");
   if (!container) return;
+  if (duration === undefined) duration = type === "error" ? 0 : 4500;
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  // Errors interrupt screen readers; others are announced politely via the container's live region.
+  if (type === "error") toast.setAttribute("role", "alert");
   const icon = type === "success" ? "✅" : type === "error" ? "❌" : type === "warning" ? "⚠️" : "ℹ️";
-  toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span style="flex:1;">${escapeHtml(message)}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => {
+  toast.innerHTML = `
+    <span class="toast-icon" aria-hidden="true">${icon}</span>
+    <span class="toast-message">${escapeHtml(message)}</span>`;
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "toast-close";
+  closeBtn.setAttribute("aria-label", "Dismiss notification");
+  closeBtn.textContent = "×";
+  toast.appendChild(closeBtn);
+
+  let timer = null;
+  const dismiss = () => {
+    if (toast._dismissed) return;
+    toast._dismissed = true;
+    clearTimeout(timer);
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 250);
-  }, duration);
+  };
+  const arm = () => {
+    if (duration > 0 && !toast._dismissed) timer = setTimeout(dismiss, duration);
+  };
+  closeBtn.addEventListener("click", dismiss);
+  toast.addEventListener("mouseenter", () => clearTimeout(timer));
+  toast.addEventListener("mouseleave", arm);
+  toast.addEventListener("focusin", () => clearTimeout(timer));
+  toast.addEventListener("focusout", arm);
+
+  container.appendChild(toast);
+  // Cap the stack: drop the oldest non-error toasts first, then oldest overall.
+  const live = Array.from(container.children).filter((t) => !t._dismissed);
+  if (live.length > TOAST_MAX_VISIBLE) {
+    const victim = live.find((t) => !t.classList.contains("toast-error")) || live[0];
+    if (victim && victim !== toast) {
+      victim._dismissed = true;
+      victim.remove();
+    }
+  }
+  arm();
+  return dismiss;
+}
+
+async function describeHttpError(res) {
+  let detail = "";
+  try {
+    const data = await res.clone().json();
+    detail = data && (data.detail || data.error || data.message);
+    if (detail && typeof detail !== "string") detail = JSON.stringify(detail);
+  } catch (_) { /* non-JSON body */ }
+  if (res.status === 404 && !detail) return "endpoint not available on this server (404)";
+  return detail ? `${detail} (HTTP ${res.status})` : `HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}`;
 }
 
 // ====================================================================
@@ -6178,8 +6294,12 @@ function deactivateModal(modal) {
 }
 
 function openGastownDiffModal(proposalId) {
-  const p = (gastownState.proposals || []).find((item) => item.id === proposalId);
-  if (!p) return;
+  const p = (gastownState.proposals || []).find((item) => item.id === proposalId)
+    || (state.proposals || []).find((item) => item.id === proposalId);
+  if (!p) {
+    showToast("warning", `Proposal ${proposalId} is no longer available — it may have been resolved.`);
+    return;
+  }
 
   const modal = document.getElementById("gastownDiffModal");
   if (!modal) return;
@@ -6444,6 +6564,8 @@ async function renderGastownWorkQueue() {
 
     const issues = issuesRes.ok ? await issuesRes.json() : [];
     const workers = workersRes.ok ? await workersRes.json() : [];
+    socQueueCache.issues = issues;
+    socQueueCache.workers = workers;
 
     // Render Issues Table
     if (issuesTableBody) {
@@ -6475,23 +6597,20 @@ async function renderGastownWorkQueue() {
           if (iss.lease && (iss.lease.holder_agent || iss.lease.owner)) {
             const holder = iss.lease.holder_agent || iss.lease.owner;
             ownerHtml = `<span style="font-weight:600; color:var(--text-bright); display:flex; align-items:center; gap:4px;">${getAgentAvatarSvg(holder, 14)} ${escapeHtml(holder)}</span>`;
-            let expSec = iss.lease.expires_at;
-            if (typeof expSec === "string") {
-              expSec = new Date(expSec).getTime() / 1000;
-            }
-            const rem = Math.max(0, Math.floor((expSec || nowSec) - nowSec));
-            if (rem > 0) {
-              expiresHtml = `<span style="color:#34d399; font-family:var(--font-mono); font-size:11.5px; font-weight:600;">${rem}s left</span>`;
-            } else {
-              expiresHtml = `<span style="color:#f87171; font-family:var(--font-mono); font-size:11.5px; font-weight:600;">EXPIRED</span>`;
+            const expSec = leaseExpirySeconds(iss.lease);
+            if (expSec) {
+              const abs = new Date(expSec * 1000);
+              expiresHtml = `<span class="lease-expiry" data-lease-expires="${expSec}" title="Lease expires ${escapeHtml(abs.toLocaleString())}">${formatLeaseRemaining(expSec - nowSec)}</span>
+                <span class="lease-expiry-abs">${escapeHtml(abs.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</span>`;
             }
           }
+          const leaseExpired = !!(iss.lease && leaseExpirySeconds(iss.lease) && leaseExpirySeconds(iss.lease) <= nowSec);
 
           // Action buttons
           let actionButtons = `
             <button class="btn btn-xs btn-secondary" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})" title="Inspect durable Git ledger & events">Ledger</button>
           `;
-          if (status === "AVAILABLE" || (iss.lease && Math.max(0, Math.floor(iss.lease.expires_at - nowSec)) === 0)) {
+          if (status === "AVAILABLE" || leaseExpired) {
             actionButtons += `
               <button class="btn btn-xs btn-primary" onclick="handleClaimSocIssue(${jsArg(iss.issue_id || iss.id)})" title="Claim lease for autonomous worker">Claim</button>
             `;
@@ -6566,6 +6685,60 @@ async function renderGastownWorkQueue() {
   }
 }
 window.renderGastownWorkQueue = renderGastownWorkQueue;
+
+const socQueueCache = { issues: [], workers: [] };
+
+function leaseExpirySeconds(lease) {
+  if (!lease) return 0;
+  let v = lease.expires_at;
+  if (typeof v === "string") {
+    const n = Number(v);
+    v = Number.isFinite(n) ? n : new Date(v).getTime() / 1000;
+  }
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function formatLeaseRemaining(remSec) {
+  const rem = Math.floor(remSec);
+  if (rem <= 0) return "Expired";
+  if (rem < 60) return `${rem}s left`;
+  const m = Math.floor(rem / 60), s = rem % 60;
+  if (m < 60) return `${m}m ${String(s).padStart(2, "0")}s left`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m left`;
+}
+
+// One shared ticker for every visible lease countdown. When a lease crosses zero we
+// re-render the queue once so the Claim button appears without a manual refresh.
+let leaseTickerHandle = null;
+function tickLeaseCountdowns() {
+  const els = document.querySelectorAll("[data-lease-expires]");
+  if (!els.length) return;
+  const now = Date.now() / 1000;
+  let crossed = false;
+  els.forEach((el) => {
+    const exp = Number(el.dataset.leaseExpires);
+    const rem = exp - now;
+    const wasExpired = el.classList.contains("is-expired");
+    el.textContent = formatLeaseRemaining(rem);
+    el.classList.toggle("is-expired", rem <= 0);
+    el.classList.toggle("is-expiring", rem > 0 && rem <= 60);
+    if (rem <= 0 && !wasExpired) crossed = true;
+  });
+  if (crossed && !document.hidden) renderGastownWorkQueue();
+}
+function ensureLeaseTicker() {
+  if (leaseTickerHandle) return;
+  leaseTickerHandle = setInterval(tickLeaseCountdowns, 1000);
+}
+ensureLeaseTicker();
+
+function workerCoversIssue(worker, issue) {
+  const plane = String(issue?.operational_plane || issue?.plane || "").toLowerCase();
+  if (!plane) return false;
+  const planes = (worker.operational_planes || worker.supported_planes || []).map((x) => String(x).toLowerCase());
+  return planes.includes(plane);
+}
 
 async function viewSocIssueDetail(issueId) {
   const modal = document.getElementById("modalSocIssue");
@@ -6688,15 +6861,47 @@ function closeSocIssueModal() {
 }
 window.closeSocIssueModal = closeSocIssueModal;
 
+const CLAIM_CUSTOM_HANDLE = "__custom__";
+
 async function handleClaimSocIssue(issueId) {
+  const issue = (socQueueCache.issues || []).find((i) => (i.issue_id || i.id) === issueId);
+  const plane = issue ? String(issue.operational_plane || issue.plane || "") : "";
+  const workers = (socQueueCache.workers || []).filter((w) => w.agent_handle);
+  const toOpt = (w) => ({ value: w.agent_handle, label: `${w.agent_handle} — ${w.max_authority_tier || "tier ?"}` });
+  const capable = workers.filter((w) => workerCoversIssue(w, issue)).map(toOpt);
+  const others = workers.filter((w) => !workerCoversIssue(w, issue)).map(toOpt);
+
+  const fields = [];
+  if (workers.length) {
+    fields.push({
+      name: "worker",
+      label: "Worker",
+      type: "select",
+      required: true,
+      value: (capable[0] || others[0]).value,
+      groups: [
+        { label: plane ? `Covers ${plane} plane` : "Registered workers", options: capable },
+        { label: capable.length ? "Other registered workers" : "", options: others },
+        { label: "", options: [{ value: CLAIM_CUSTOM_HANDLE, label: "Other handle…" }] },
+      ],
+      hint: plane && !capable.length ? `No registered worker lists the ${plane} plane.` : "",
+      onChange: (val, form) => {
+        const wrap = form.querySelector('[data-field-wrap="handle"]');
+        if (wrap) wrap.hidden = val !== CLAIM_CUSTOM_HANDLE;
+      },
+    });
+  }
+  fields.push({ name: "handle", label: "Worker agent handle", type: "text", required: true, placeholder: "@parser-doctor" });
+
   const result = await openActionDialog({
     title: "Claim issue",
-    message: `Assign a 5-minute lease on ${issueId} to a worker agent.`,
+    message: `Assign a 5-minute lease on ${issueId}${plane ? ` (${plane} plane)` : ""} to a worker agent.`,
     confirmLabel: "Claim",
-    fields: [{ name: "handle", label: "Worker agent handle", type: "text", required: true, placeholder: "@parser-doctor" }],
+    fields,
   });
   if (!result) return;
-  const handle = result.handle.startsWith("@") ? result.handle : `@${result.handle}`;
+  const raw = (result.worker && result.worker !== CLAIM_CUSTOM_HANDLE) ? result.worker : result.handle;
+  const handle = raw.startsWith("@") ? raw : `@${raw}`;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/claim`, {
       method: "POST",

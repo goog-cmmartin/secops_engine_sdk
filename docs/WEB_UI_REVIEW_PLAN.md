@@ -28,11 +28,11 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 20 | Composer auto-grow (rows=1, no resize) | 6 Chat | Done |
 | 21 | Agent-status 180s timeout hides silently → show "no response yet — still running?" state | 6 Chat | Done |
 | 22 | Back/forward: switchTopic/switchView use replaceState → pushState | 6 Chat | Done |
-| 23 | Drawer proposals: click opens diff modal for any subsystem; default filter OPEN; drop ".proposals/" copy | 7 Actions | Todo |
-| 24 | Lease "Ns left" frozen at render → absolute expiry time or ticking countdown | 7 Actions | Todo |
-| 25 | Claim dialog free-text handle → select from capable workers (already fetched) | 7 Actions | Todo |
-| 26 | Toasts: aria-live, close button, errors persist until dismissed | 7 Actions | Todo |
-| 27 | Audit Rules / MITRE header buttons: check res.ok, toast on failure (currently console-only) | 7 Actions | Todo |
+| 23 | Drawer proposals: click opens diff modal for any subsystem; default filter OPEN; drop ".proposals/" copy | 7 Actions | Done |
+| 24 | Lease "Ns left" frozen at render → absolute expiry time or ticking countdown | 7 Actions | Done |
+| 25 | Claim dialog free-text handle → select from capable workers (already fetched) | 7 Actions | Done |
+| 26 | Toasts: aria-live, close button, errors persist until dismissed | 7 Actions | Done |
+| 27 | Audit Rules / MITRE header buttons: check res.ok, toast on failure (currently console-only) | 7 Actions | Done |
 
 ## #11 fabricated data on approval surfaces
 - `openGastownDiffModal`: preflight box always renders "Invariant/Backtest/Zero-Synthetic: PASS" + "validated against live API" regardless of `p.preflight`.
@@ -63,6 +63,7 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | Telemetry Hooks | Data Sources |
 
 ## Medium priority (backlog)
+- Backend: `POST /api/mitre/audit` is called by the MITRE Coverage header button but no route exists in server.py (404). UI now surfaces the error; implement the route or hide the button
 - Remaining native confirm()/alert(): noise-exclusion deploy, clear-topic, send failure — migrate to openActionDialog()/showToast()
 - Diff modal shows raw diff text; chat widget uses coloured formatUnifiedDiff() — unify
 - Work-queue filter change wipes table with "Refreshing…" — keep rows, show inline spinner

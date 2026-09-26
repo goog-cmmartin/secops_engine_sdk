@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from agents.core.base_adk_agent import BaseSecOpsAdkAgent
 from agents.core.communication_router import CommunicationRouter, get_communication_router
 from agents.core.evidence_store import EvidenceFabricStore, normalize_doc_id
+from agents.core.issue_worker import IssueWorker, autonomous_workers_enabled
 from agents.core.knowledge_store import BaseKnowledgeStore, get_knowledge_store
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.work_queue import BaseWorkQueue
@@ -142,6 +143,7 @@ class FleetScheduler:
         work_queue: Optional[BaseWorkQueue] = None,
         communication_router: Optional[CommunicationRouter] = None,
         knowledge_store: Optional[BaseKnowledgeStore] = None,
+        issue_worker: Optional[IssueWorker] = None,
     ):
         self.fleet = fleet
         self.evidence_store = evidence_store
@@ -158,6 +160,11 @@ class FleetScheduler:
         self._last_heartbeat_at: Optional[str] = datetime.now(timezone.utc).isoformat()
         self._total_patrols_run: int = 0
         self._patrol_history: List[Dict[str, Any]] = []
+        # Autonomous issue pickup is opt-in (SECOPS_AUTONOMOUS_WORKERS=1) unless a worker is injected.
+        queue = self.work_queue or getattr(self.lifecycle_manager, "work_queue", None)
+        if issue_worker is None and queue is not None and autonomous_workers_enabled():
+            issue_worker = IssueWorker(fleet=self.fleet, work_queue=queue, chat_store=self.chat_store)
+        self.issue_worker = issue_worker
         self._load_all_schedules()
 
 
@@ -271,6 +278,7 @@ class FleetScheduler:
             "total_patrols_run": self._total_patrols_run,
             "poll_interval_seconds": self.poll_interval_seconds,
             "recent_patrols": self._patrol_history[-10:],
+            "autonomous_workers": self.get_worker_status(),
         }
 
     async def trigger_patrol_all(self) -> Dict[str, Any]:
@@ -1177,6 +1185,7 @@ class FleetScheduler:
                 now = datetime.now(timezone.utc)
                 self._last_heartbeat_at = now.isoformat()
                 self._reclaim_expired_leases()
+                await self._dispatch_issue_work()
                 for handle, sched in list(self._schedules.items()):
                     if not sched.get("enabled", False):
                         continue
@@ -1212,6 +1221,21 @@ class FleetScheduler:
             logger.error("Lease reclamation failed: %s", e)
             return []
 
+    async def _dispatch_issue_work(self) -> List[str]:
+        """Lets idle agents claim and work eligible issues (no-op when disabled)."""
+        if self.issue_worker is None:
+            return []
+        try:
+            return await self.issue_worker.dispatch()
+        except Exception as e:
+            logger.error("Issue worker dispatch failed: %s", e)
+            return []
+
+    def get_worker_status(self) -> Dict[str, Any]:
+        if self.issue_worker is None:
+            return {"enabled": False, "in_flight": [], "recent_runs": [], "playbooks": []}
+        return self.issue_worker.status()
+
     def start(self) -> None:
         """Starts the scheduler background task."""
         if self._running:
@@ -1223,6 +1247,8 @@ class FleetScheduler:
     def stop(self) -> None:
         """Stops the scheduler background task."""
         self._running = False
+        if self.issue_worker is not None:
+            self.issue_worker.cancel_all()
         if self._task and not self._task.done():
             self._task.cancel()
         logger.info("FleetScheduler background task stopped")

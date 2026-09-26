@@ -26,6 +26,7 @@ except (ImportError, AttributeError):
     types = None  # type: ignore
 
 from agents.core.evidence_store import EvidenceFabricStore
+from agents.core.issue_worker import current_issue_id
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.proposal_manager import (
     ChangeProposal,
@@ -962,7 +963,19 @@ class BaseSecOpsAdkAgent:
         topic: Optional[str] = None,
         issue_id: Optional[str] = None,
     ) -> ChangeProposal:
-        """Submits a change proposal to Gas Town .proposals/ and notifies the Zulip topic."""
+        """Submits a change proposal to Gas Town .proposals/ and notifies the Zulip topic.
+
+        When called inside an autonomous worker run, the claimed issue is linked
+        deterministically and overrides any ``issue_id`` supplied by the model.
+        """
+        bound_issue_id = current_issue_id()
+        if bound_issue_id:
+            if issue_id and issue_id != bound_issue_id:
+                logger.warning(
+                    "%s passed issue_id=%s while working %s; linking to the claimed issue",
+                    self.handle, issue_id, bound_issue_id,
+                )
+            issue_id = bound_issue_id
         proof = preflight or PreflightProof()
         proposal = ChangeProposal(
             id="",

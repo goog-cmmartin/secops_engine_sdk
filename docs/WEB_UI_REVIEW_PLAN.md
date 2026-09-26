@@ -89,6 +89,7 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - **Cadence label:** `_format_cadence()` in server.py: no schedule → "On-Demand" (was "Manual" for all 13), disabled → "Manual", sub-hour → "Every 30m" (was "Every 0.5h").
 - **test_agent_library_endpoints:** asserted "Every 12h"; the decay agent default has been 24h since 400dbff. Now asserts against the live scheduler config, plus On-Demand / no-phantom checks.
 - **Dispatcher tests:** `_FakeGenAI` offline stand-in for `google.genai` (plays the model and calls the agent's real budgeted tools as AFC would). The yaral test runs `submit_rule_proposal` end to end (preflight, computed diff, OPEN proposal, HITL card). Added a no-credentials → "Agent Configuration Error" test. Inert adapter now returns `text` (the Chronicle field `_map_rule_detail` reads) as well as `rule_text`.
+- **Audits cards:** `formatCadence()` in app.js mirrors `_format_cadence()`; the cadence badge no longer hard-codes `Every ${interval_hours || 24}h` (disabled schedules showed "Every 24h", 0.5h showed "Every 0.5h").
 - Result: test_chat_server 23/23; full suite 41 → 38 failures (all tenant-config), 0 new.
 
 ## #5 terminology map (screen text only)

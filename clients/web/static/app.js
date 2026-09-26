@@ -544,6 +544,17 @@ function formatAgeShort(ms) {
   return `${Math.floor(secs / 86400)}d`;
 }
 
+// Operator-facing cadence label for a schedule dict. Mirrors server _format_cadence():
+// no schedule -> "On-Demand", disabled/invalid -> "Manual", sub-hour -> "Every 30m", else "Every 12h".
+function formatCadence(sched) {
+  if (!sched) return "On-Demand";
+  if (sched.enabled === false) return "Manual";
+  const hours = Number(sched.interval_hours);
+  if (!Number.isFinite(hours) || hours <= 0) return "Manual";
+  if (hours < 1) return `Every ${Math.round(hours * 60)}m`;
+  return `Every ${Number(hours.toFixed(2))}h`;
+}
+
 const REVIEW_AGE_WARN_MS = 4 * 3600 * 1000;
 const REVIEW_AGE_CRIT_MS = 24 * 3600 * 1000;
 
@@ -7382,7 +7393,7 @@ async function renderGastownPatrols() {
                     <div class="patrol-agent-handle">${handle}</div>
                   </div>
                 </div>
-                <span class="patrol-cadence-badge">Every ${sched.interval_hours || 24}h</span>
+                <span class="patrol-cadence-badge">${formatCadence(sched)}</span>
               </div>
               <p class="patrol-desc">${meta.desc}</p>
               <div class="patrol-meta-grid">

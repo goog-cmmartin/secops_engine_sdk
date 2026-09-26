@@ -4012,3 +4012,74 @@ body.view-gastown-active .main-content-area {
 }
 .new-messages-pill[hidden] { display: none; }
 .new-messages-pill:hover { background: var(--accent-blue-hover); }
+
+/* --- Group 6 (chat, part 2): day separators, unread, stale agent status --- */
+.day-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.day-separator::before,
+.day-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+.day-separator span {
+  padding: 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+}
+
+.unread-badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-blue);
+  color: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+.stream-header-badges { display: inline-flex; align-items: center; gap: 6px; }
+.topic-item.has-unread,
+.dm-item.has-unread { color: var(--text-main); font-weight: 700; }
+.dm-item .unread-badge { margin-left: auto; }
+.topic-count { font-size: 11px; opacity: 0.6; }
+.nav-unread-badge { background: var(--accent-blue); color: var(--bg-primary); }
+.nav-unread-badge[hidden] { display: none; }
+
+.agent-status-elapsed {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.agent-status-card.is-stale .agent-status-spinner,
+.agent-status-card.is-stale .agent-progress-track { display: none; }
+.agent-status-card.is-stale .pulsing-avatar { animation: none; }
+.agent-status-card.is-stale .agent-status-badge {
+  background: rgba(250, 123, 23, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(250, 123, 23, 0.4);
+}
+.agent-status-actions { display: flex; gap: 8px; margin-top: 8px; }
+.agent-status-action-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agent-status-action-btn:hover { background: var(--bg-hover); }

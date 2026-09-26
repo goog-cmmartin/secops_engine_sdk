@@ -13,7 +13,110 @@ const state = {
   activeDrawerTab: "proposals",
   evtSource: null,
   isRightDrawerOpen: false,
+  currentView: "chat",
 };
+
+// --- Routing (#22): pushState for user navigation, replaceState while restoring ---
+let routeRestoring = false;
+
+function setRoute(hash, { replace = false } = {}) {
+  if (window.location.hash === hash) return;
+  if (replace || routeRestoring) history.replaceState(null, "", hash);
+  else history.pushState(null, "", hash);
+}
+
+function isViewHash(h) {
+  return /^(dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture)(\/|$)/.test(h);
+}
+
+// Applies the current URL hash to the UI. Callers set routeRestoring.
+function routeFromHash() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (hash.startsWith("dashboards") || hash.startsWith("ingestion")) {
+    switchView("dashboards");
+    const sub = hash.includes("/") ? hash.split("/")[1] : null;
+    if (sub && ["feeds", "parsers", "diagnostics", "finops", "namespacelabels"].includes(sub)) {
+      switchIngestionSubtab(sub);
+    }
+  } else if (/^(gastown|board|actions|issues|todos?)$/.test(hash)) {
+    switchView("gastown");
+  } else if (hash.startsWith("library")) {
+    switchView("library");
+  } else if (hash.startsWith("briefings") || hash === "posture") {
+    switchView("briefings");
+  } else if (hash.includes("/")) {
+    const parts = hash.split("/");
+    const stream = decodeURIComponent(parts[0]);
+    const topic = decodeURIComponent(parts.slice(1).join("/"));
+    if (state.currentView !== "chat") switchView("chat", { skipRoute: true });
+    if (stream !== state.activeStream || topic !== state.activeTopic) {
+      switchTopic(stream, topic);
+    }
+  } else if (state.currentView !== "chat") {
+    switchView("chat");
+  }
+}
+
+// --- Unread counts (#19): live SSE counts per channel, persisted locally ---
+const UNREAD_STORAGE_KEY = "secops_unread_v1";
+const unreadCounts = (() => {
+  try { return JSON.parse(localStorage.getItem(UNREAD_STORAGE_KEY)) || {}; } catch (_) { return {}; }
+})();
+
+function channelKey(stream, topic) {
+  return `${stream}/${topic}`;
+}
+
+function saveUnread() {
+  try { localStorage.setItem(UNREAD_STORAGE_KEY, JSON.stringify(unreadCounts)); } catch (_) { /* quota / private mode */ }
+}
+
+function unreadFor(stream, topic) {
+  return unreadCounts[channelKey(stream, topic)] || 0;
+}
+
+function unreadForStream(stream) {
+  const prefix = `${stream}/`;
+  return Object.keys(unreadCounts).reduce((n, k) => (k.startsWith(prefix) ? n + unreadCounts[k] : n), 0);
+}
+
+function bumpUnread(stream, topic) {
+  const key = channelKey(stream, topic);
+  unreadCounts[key] = (unreadCounts[key] || 0) + 1;
+  saveUnread();
+  const known = stream === "dm" || (state.streams || []).some(
+    (s) => s.id === stream && (s.topics || []).some((t) => t.name === topic)
+  );
+  if (known) renderUnreadIndicators();
+  else loadStreams().then(renderUnreadIndicators); // new topic: refresh sidebar
+}
+
+function clearUnread(stream, topic) {
+  const key = channelKey(stream, topic);
+  if (!unreadCounts[key]) return;
+  delete unreadCounts[key];
+  saveUnread();
+  renderUnreadIndicators();
+}
+
+function renderUnreadIndicators() {
+  renderStreams();
+  renderDirectMessages();
+  const total = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
+  const navBadge = document.getElementById("navChatBadge");
+  if (navBadge) {
+    navBadge.textContent = total > 99 ? "99+" : String(total);
+    navBadge.hidden = total === 0;
+    navBadge.setAttribute("aria-label", `${total} unread message${total === 1 ? "" : "s"}`);
+  }
+  const baseTitle = "Google SecOps Multi-Agent Fleet";
+  document.title = total > 0 ? `(${total}) ${baseTitle}` : baseTitle;
+}
+
+function unreadBadgeHtml(n) {
+  if (!n) return "";
+  return `<span class="unread-badge" aria-label="${n} unread">${n > 99 ? "99+" : n}</span>`;
+}
 
 // --- Theme Management ---
 function getPreferredTheme() {
@@ -66,27 +169,22 @@ function initTheme() {
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   const hash = window.location.hash.replace(/^#/, "");
-  if (hash === "dashboards" || hash.startsWith("dashboards") || hash === "ingestion" || hash.startsWith("ingestion")) {
-    switchView("dashboards");
-    const sub = hash.includes("/") ? hash.split("/")[1] : null;
-    if (sub && ["feeds", "parsers", "diagnostics", "finops"].includes(sub)) {
-      switchIngestionSubtab(sub);
-    }
-  } else if (hash === "gastown" || hash === "board" || hash === "actions" || hash === "issues" || hash === "todo" || hash === "todos") {
-    switchView("gastown");
-  } else if (hash === "library" || hash.startsWith("library")) {
-    switchView("library");
-  } else if (hash === "briefings" || hash.startsWith("briefings") || hash === "posture") {
-    switchView("briefings");
-  } else if (hash.includes("/")) {
-
+  if (hash.includes("/") && !isViewHash(hash)) {
     const parts = hash.split("/");
-    state.activeStream = parts[0];
-    state.activeTopic = parts.slice(1).join("/");
+    state.activeStream = decodeURIComponent(parts[0]);
+    state.activeTopic = decodeURIComponent(parts.slice(1).join("/"));
   }
   setupEventListeners();
   await Promise.all([loadStreams(), loadAgents(), loadProposals()]);
-  await switchTopic(state.activeStream, state.activeTopic);
+  routeRestoring = true;
+  try {
+    routeFromHash();
+    // Always load the active chat topic (in the background if another view is showing).
+    await switchTopic(state.activeStream, state.activeTopic);
+  } finally {
+    routeRestoring = false;
+  }
+  renderUnreadIndicators();
   initSSE();
 });
 
@@ -356,40 +454,75 @@ function setupEventListeners() {
     });
   }
 
-  // URL Hash Navigation
-  const handleHashRouting = () => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (hash === "dashboards" || hash.startsWith("dashboards") || hash === "ingestion" || hash.startsWith("ingestion")) {
-      switchView("dashboards");
-      const sub = hash.includes("/") ? hash.split("/")[1] : null;
-      if (sub && ["feeds", "parsers", "diagnostics", "finops", "namespacelabels"].includes(sub)) {
-        switchIngestionSubtab(sub);
-      }
-      return;
+  // URL navigation: Back/Forward and manual hash edits both fire popstate.
+  window.addEventListener("popstate", () => {
+    routeRestoring = true;
+    try {
+      routeFromHash();
+    } finally {
+      routeRestoring = false;
     }
-    if (hash === "gastown" || hash === "board" || hash === "actions" || hash === "issues" || hash === "todo" || hash === "todos") {
-      switchView("gastown");
-      return;
-    }
-    if (hash.includes("/")) {
-      const parts = hash.split("/");
-      if (parts[0] !== state.activeStream || parts.slice(1).join("/") !== state.activeTopic) {
-        switchView("chat");
-        switchTopic(parts[0], parts.slice(1).join("/"));
-      }
-    }
-  };
-
-  window.addEventListener("hashchange", handleHashRouting);
-  if (window.location.hash) {
-    handleHashRouting();
-  }
+  });
 }
 
 // --- SSE Real-time Feed ---
 let agentStatusTimeout = null;
+let agentStatusTicker = null;
+const AGENT_STALE_MS = 120000; // no progress update for 2 min -> show "no recent updates"
 
-function showAgentStatusIndicator(agentHandle, statusText, userHandle) {
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m > 0 ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`;
+}
+
+function tickAgentElapsed() {
+  const card = document.getElementById("agentStatusCard");
+  const el = document.getElementById("agentStatusElapsed");
+  if (!card || !el) {
+    if (agentStatusTicker) { clearInterval(agentStatusTicker); agentStatusTicker = null; }
+    return;
+  }
+  el.textContent = formatElapsed(Date.now() - card._startedAt);
+}
+
+function armAgentStaleTimer() {
+  if (agentStatusTimeout) clearTimeout(agentStatusTimeout);
+  agentStatusTimeout = setTimeout(markAgentStatusStale, AGENT_STALE_MS);
+}
+
+function markAgentStatusStale() {
+  agentStatusTimeout = null;
+  const card = document.getElementById("agentStatusCard");
+  if (!card || card.classList.contains("is-stale")) return;
+  card.classList.add("is-stale");
+  const badge = card.querySelector(".agent-status-badge");
+  if (badge) badge.textContent = "No recent updates";
+  const label = document.getElementById("agentStatusLabel");
+  if (label) {
+    label.textContent = `No update from ${card.dataset.agent || "the agent"} for ${Math.round(AGENT_STALE_MS / 60000)} min. It may still be working, or it may have stopped.`;
+  }
+  const actions = document.createElement("div");
+  actions.className = "agent-status-actions";
+  actions.innerHTML = `
+    <button type="button" class="agent-status-action-btn" data-act="refresh">Check again</button>
+    <button type="button" class="agent-status-action-btn" data-act="dismiss">Dismiss</button>
+  `;
+  actions.querySelector('[data-act="refresh"]').addEventListener("click", recheckAgentStatus);
+  actions.querySelector('[data-act="dismiss"]').addEventListener("click", hideAgentStatusIndicator);
+  (card.querySelector(".agent-status-body") || card).appendChild(actions);
+}
+
+// Reload the topic (picks up any reply missed while disconnected) and re-hydrate the active job.
+async function recheckAgentStatus() {
+  await loadMessages(state.activeStream, state.activeTopic);
+  if (!document.getElementById("agentStatusCard")) {
+    showToast("info", "No active job for this topic. The agent has finished or stopped — any reply is shown in the timeline.");
+  }
+}
+
+function showAgentStatusIndicator(agentHandle, statusText, userHandle, startedAt) {
   hideAgentStatusIndicator();
   const container = document.getElementById("messageTimeline");
   if (!container) return;
@@ -397,6 +530,10 @@ function showAgentStatusIndicator(agentHandle, statusText, userHandle) {
   const card = document.createElement("div");
   card.id = "agentStatusCard";
   card.className = "agent-status-card";
+  card.dataset.agent = agentHandle || "@secops-agent";
+  card.dataset.user = userHandle || "";
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+  card._startedAt = Number.isFinite(startedMs) ? startedMs : Date.now();
   const userContextHtml = userHandle ? `<span class="agent-status-user-context">working on ${escapeHtml(userHandle)}'s request</span>` : "";
   card.innerHTML = `
     <div class="msg-avatar avatar-agent pulsing-avatar">
@@ -416,6 +553,7 @@ function showAgentStatusIndicator(agentHandle, statusText, userHandle) {
           THINKING
         </span>
         ${userContextHtml}
+        <span class="agent-status-elapsed" id="agentStatusElapsed" title="Time since the request started"></span>
       </div>
       <div class="agent-status-text-row">
         <div class="agent-status-spinner"></div>
@@ -431,18 +569,20 @@ function showAgentStatusIndicator(agentHandle, statusText, userHandle) {
   container.appendChild(card);
   if (wasNearBottom) scrollToBottom();
 
-  if (agentStatusTimeout) clearTimeout(agentStatusTimeout);
-  agentStatusTimeout = setTimeout(() => {
-    hideAgentStatusIndicator();
-  }, 180000);
+  armAgentStaleTimer();
+  tickAgentElapsed();
+  agentStatusTicker = setInterval(tickAgentElapsed, 1000);
 }
 
-function updateAgentStatusIndicator(agentHandle, statusText, userHandle) {
+function updateAgentStatusIndicator(agentHandle, statusText, userHandle, startedAt) {
   const card = document.getElementById("agentStatusCard");
-  if (!card) {
-    showAgentStatusIndicator(agentHandle, statusText, userHandle);
+  if (!card || card.classList.contains("is-stale")) {
+    // New job, or progress resumed after going quiet: rebuild the live card.
+    const since = startedAt || (card ? new Date(card._startedAt).toISOString() : undefined);
+    showAgentStatusIndicator(agentHandle, statusText, userHandle || (card && card.dataset.user), since);
     return;
   }
+  armAgentStaleTimer();
   const label = document.getElementById("agentStatusLabel");
   if (label) {
     label.style.opacity = "0.4";
@@ -459,6 +599,10 @@ function hideAgentStatusIndicator() {
   if (agentStatusTimeout) {
     clearTimeout(agentStatusTimeout);
     agentStatusTimeout = null;
+  }
+  if (agentStatusTicker) {
+    clearInterval(agentStatusTicker);
+    agentStatusTicker = null;
   }
   const card = document.getElementById("agentStatusCard");
   if (card) {
@@ -512,20 +656,21 @@ function initSSE() {
             (j) => j.stream === state.activeStream && j.topic === state.activeTopic
           );
           if (matchingJob) {
-            showAgentStatusIndicator(matchingJob.agent_handle, matchingJob.step || matchingJob.status, matchingJob.user_handle);
+            showAgentStatusIndicator(matchingJob.agent_handle, matchingJob.step || matchingJob.status, matchingJob.user_handle, matchingJob.started_at);
           }
         }
       } else if (data.type === "agent_status") {
         if (data.stream === state.activeStream && data.topic === state.activeTopic) {
           const userH = data.user_handle || (data.job && data.job.user_handle);
           const stepText = data.step || data.status;
-          updateAgentStatusIndicator(data.agent_handle, stepText, userH);
+          updateAgentStatusIndicator(data.agent_handle, stepText, userH, data.job && data.job.started_at);
         }
       } else if (data.type === "job_completed" || data.type === "job_failed") {
         if (data.stream === state.activeStream && data.topic === state.activeTopic) {
           hideAgentStatusIndicator();
         }
       } else if (data.type === "topic_cleared") {
+        clearUnread(data.stream, data.topic);
         if (data.stream === state.activeStream && data.topic === state.activeTopic) {
           state.messages = [];
           hideAgentStatusIndicator();
@@ -534,8 +679,13 @@ function initSSE() {
         loadStreams();
       } else if (data.type === "new_message") {
         const msg = data.message;
+        const isActiveChannel = msg.stream === state.activeStream && msg.topic === state.activeTopic;
+        // Count messages from others that the operator isn't currently looking at.
+        if (msg.sender_handle !== "@operator" && !(isActiveChannel && state.currentView === "chat")) {
+          bumpUnread(msg.stream, msg.topic);
+        }
         // If message belongs to current stream and topic, handle timeline update
-        if (msg.stream === state.activeStream && msg.topic === state.activeTopic) {
+        if (isActiveChannel) {
           if (msg.sender_type !== "user") {
             // Agent message arrived! Hide the status indicator
             hideAgentStatusIndicator();
@@ -625,7 +775,7 @@ async function loadMessages(stream, topic) {
         const activeJobs = await jobsRes.json();
         if (activeJobs && activeJobs.length > 0) {
           const job = activeJobs[0];
-          showAgentStatusIndicator(job.agent_handle, job.step || job.status, job.user_handle);
+          showAgentStatusIndicator(job.agent_handle, job.step || job.status, job.user_handle, job.started_at);
         } else {
           hideAgentStatusIndicator();
         }
@@ -643,8 +793,10 @@ async function switchTopic(stream, topic) {
   hideAgentStatusIndicator();
   state.activeStream = stream;
   state.activeTopic = topic;
-  if (window.location.hash !== `#${stream}/${topic}`) {
-    history.replaceState(null, "", `#${stream}/${topic}`);
+  // Only the visible chat view owns the URL (background loads must not clobber #actions etc.).
+  if (state.currentView === "chat") {
+    setRoute(`#${stream}/${topic}`);
+    clearUnread(stream, topic);
   }
 
   // Update Breadcrumbs
@@ -686,9 +838,13 @@ function renderStreams() {
 
     const headerEl = document.createElement("div");
     headerEl.className = "stream-header";
+    const streamUnread = isActive ? 0 : unreadForStream(s.id);
     headerEl.innerHTML = `
-      <span># ${s.name}</span>
-      <span class="stream-badge">${s.topics ? s.topics.length : 0}</span>
+      <span># ${escapeHtml(s.name)}</span>
+      <span class="stream-header-badges">
+        ${unreadBadgeHtml(streamUnread)}
+        <span class="stream-badge" title="Topics">${s.topics ? s.topics.length : 0}</span>
+      </span>
     `;
 
     headerEl.addEventListener("click", () => {
@@ -704,10 +860,13 @@ function renderStreams() {
       s.topics.forEach((t) => {
         const isTopicActive = isActive && t.name === state.activeTopic;
         const topicEl = document.createElement("div");
-        topicEl.className = `topic-item ${isTopicActive ? "active" : ""}`;
+        const topicUnread = unreadFor(s.id, t.name);
+        topicEl.className = `topic-item ${isTopicActive ? "active" : ""} ${topicUnread ? "has-unread" : ""}`;
         topicEl.innerHTML = `
-          <span>${t.name}</span>
-          ${t.message_count > 0 ? `<span style="font-size:10px; opacity:0.6">${t.message_count}</span>` : ""}
+          <span>${escapeHtml(t.name)}</span>
+          ${topicUnread
+            ? unreadBadgeHtml(topicUnread)
+            : (t.message_count > 0 ? `<span class="topic-count" title="Messages">${t.message_count}</span>` : "")}
         `;
         topicEl.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -784,7 +943,8 @@ function renderDirectMessages() {
   filtered.forEach((a) => {
     const isDmActive = state.activeStream === "dm" && state.activeTopic === a.handle;
     const row = document.createElement("div");
-    row.className = `dm-item ${isDmActive ? "active" : ""}`;
+    const dmUnread = unreadFor("dm", a.handle);
+    row.className = `dm-item ${isDmActive ? "active" : ""} ${dmUnread ? "has-unread" : ""}`;
     row.innerHTML = `
       <div class="dm-avatar-wrap">
         <div class="dm-avatar">${renderAvatar("agent", a.handle)}</div>
@@ -794,6 +954,7 @@ function renderDirectMessages() {
         <div class="dm-handle" title="${escapeHtml(a.role || a.name || a.handle)}">${escapeHtml(a.handle)}</div>
         ${query ? `<div style="font-size:10px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.role || a.name || "")}</div>` : ""}
       </div>
+      ${unreadBadgeHtml(dmUnread)}
     `;
     row.addEventListener("click", () => {
       switchTopic("dm", a.handle);
@@ -824,6 +985,7 @@ function insertMention(handle) {
 function renderTimeline() {
   const container = document.getElementById("messageTimeline");
   container.innerHTML = "";
+  container._lastDayKey = null;
   resetNewMessagesPill();
 
   if (state.messages.length === 0) {
@@ -889,7 +1051,21 @@ function appendMessageToTimeline(msg, opts = {}) {
 
   const isAgent = msg.sender_type === "agent";
   const avatarHtml = renderAvatar(msg.sender_type, msg.sender_handle);
-  const timeFormatted = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const created = new Date(msg.created_at);
+  const validDate = !isNaN(created.getTime());
+  const timeFormatted = validDate ? created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+  const timeFull = validDate ? created.toLocaleString([], { dateStyle: "full", timeStyle: "short" }) : "";
+
+  const dayKey = validDate ? localDayKey(created) : null;
+  if (dayKey) card.dataset.day = dayKey;
+  if (dayKey && container._lastDayKey !== dayKey) {
+    const sep = document.createElement("div");
+    sep.className = "day-separator";
+    sep.setAttribute("role", "separator");
+    sep.innerHTML = `<span>${escapeHtml(formatDayLabel(created))}</span>`;
+    insertIntoTimeline(container, sep);
+    container._lastDayKey = dayKey;
+  }
 
   let widgetHtml = "";
   if (msg.widget && msg.widget.type === "hitl_proposal_card") {
@@ -940,7 +1116,7 @@ function appendMessageToTimeline(msg, opts = {}) {
       <div class="msg-header">
         <span class="msg-handle">${escapeHtml(msg.sender_handle)}</span>
         ${isAgent ? `<span class="msg-role-tag">AGENT</span>` : `<span class="msg-role-tag" style="background:rgba(156,163,175,0.15); color:var(--text-muted)">USER</span>`}
-        <span class="msg-timestamp">${timeFormatted}</span>
+        <time class="msg-timestamp" datetime="${escapeHtml(msg.created_at || "")}" title="${escapeHtml(timeFull)}">${timeFormatted}</time>
       </div>
       <div class="msg-content">${formatMarkdown(msg.content)}</div>
       ${widgetHtml}
@@ -960,18 +1136,58 @@ function appendMessageToTimeline(msg, opts = {}) {
     }
   }
 
-  const statusCard = document.getElementById("agentStatusCard");
-  if (statusCard && statusCard.parentNode === container) {
-    container.insertBefore(card, statusCard);
-  } else {
-    container.appendChild(card);
-  }
+  insertIntoTimeline(container, card);
   if (opts.forceScroll || (opts.live && wasNearBottom)) {
     scrollToBottom();
   } else if (opts.live) {
     bumpNewMessagesPill();
   }
   return card;
+}
+
+// Keep the agent status card last in the timeline.
+function insertIntoTimeline(container, el) {
+  const statusCard = document.getElementById("agentStatusCard");
+  if (statusCard && statusCard.parentNode === container) {
+    container.insertBefore(el, statusCard);
+  } else {
+    container.appendChild(el);
+  }
+}
+
+function localDayKey(d) {
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function formatDayLabel(d) {
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const now = new Date();
+  const diffDays = Math.round((startOf(now) - startOf(d)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  const opts = { weekday: "long", month: "short", day: "numeric" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString([], opts);
+}
+
+// Remove a message card; drop its day separator if it's now empty.
+function removeMessageCard(card) {
+  const container = card.parentNode;
+  if (!container) return;
+  const kids = container.children;
+  const idx = Array.prototype.indexOf.call(kids, card);
+  const prev = idx > 0 ? kids[idx - 1] : null;
+  card.remove();
+  const next = container.children[idx] || null; // element that took the card's place
+  if (prev && prev.classList.contains("day-separator") && !(next && next.classList.contains("message-card"))) {
+    prev.remove();
+  }
+  let lastDay = null;
+  for (let i = container.children.length - 1; i >= 0; i--) {
+    const el = container.children[i];
+    if (el.classList.contains("message-card") && el.dataset.day) { lastDay = el.dataset.day; break; }
+  }
+  container._lastDayKey = lastDay;
 }
 
 function renderProposalWidget(widget) {
@@ -3351,7 +3567,7 @@ function markMessageFailed(card, errorText) {
   const discard = () => {
     const idx = state.messages.indexOf(temp);
     if (idx !== -1) state.messages.splice(idx, 1);
-    card.remove();
+    removeMessageCard(card);
   };
   bar.querySelector('[data-act="retry"]').addEventListener("click", () => {
     discard();
@@ -4452,7 +4668,9 @@ function closeMentionDropdown() {
 // ====================================================================
 // View Switcher (Chat vs Dedicated Ingestion Page)
 // ====================================================================
-function switchView(viewName) {
+function switchView(viewName, opts = {}) {
+  state.currentView = viewName === "ingestion" ? "dashboards"
+    : (["gastown", "dashboards", "library", "briefings"].includes(viewName) ? viewName : "chat");
   const navChat = document.getElementById("navBtnChat");
   const navGastown = document.getElementById("navBtnGastown");
   const navDashboards = document.getElementById("navBtnDashboards") || document.getElementById("navBtnIngestion");
@@ -4489,7 +4707,7 @@ function switchView(viewName) {
     document.body.classList.add("view-gastown-active");
 
     if (window.location.hash !== "#gastown" && window.location.hash !== "#board" && window.location.hash !== "#actions") {
-      history.replaceState(null, "", "#actions");
+      setRoute("#actions");
     }
     loadGastownOverview();
   } else if (viewName === "dashboards" || viewName === "ingestion") {
@@ -4516,7 +4734,7 @@ function switchView(viewName) {
     const cur = window.location.hash;
     if (!cur.startsWith("#dashboards") && !cur.startsWith("#ingestion")) {
       const activeSub = (ingestionData && ingestionData.activeSubtab) || "feeds";
-      history.replaceState(null, "", `#dashboards/${activeSub}`);
+      setRoute(`#dashboards/${activeSub}`);
     }
     renderIngestionPage();
   } else if (viewName === "library") {
@@ -4541,7 +4759,7 @@ function switchView(viewName) {
     document.body.classList.add("view-library-active");
 
     if (!window.location.hash.startsWith("#library")) {
-      history.replaceState(null, "", "#library");
+      setRoute("#library");
     }
     loadAgentLibrary();
   } else if (viewName === "briefings") {
@@ -4566,7 +4784,7 @@ function switchView(viewName) {
     document.body.classList.add("view-briefings-active");
 
     if (!window.location.hash.startsWith("#briefings")) {
-      history.replaceState(null, "", "#briefings");
+      setRoute("#briefings");
     }
     loadBriefingsView();
   } else {
@@ -4600,16 +4818,19 @@ function switchView(viewName) {
     document.body.classList.remove("view-library-active");
     document.body.classList.remove("view-briefings-active");
 
-    if (window.location.hash === "#ingestion" || window.location.hash === "#dashboards" || window.location.hash === "#gastown" || window.location.hash === "#board" || window.location.hash === "#actions" || window.location.hash.startsWith("#library") || window.location.hash.startsWith("#briefings")) {
-      history.replaceState(null, "", `#${state.activeStream}/${state.activeTopic}`);
+    const curHash = window.location.hash.replace(/^#/, "");
+    if (!opts.skipRoute && (curHash === "" || isViewHash(curHash))) {
+      setRoute(`#${state.activeStream}/${state.activeTopic}`);
     }
+    clearUnread(state.activeStream, state.activeTopic);
     scrollToBottom();
   }
 
 }
 
 window.switchTopicAndChat = async function (stream, topic, initialText = "") {
-  switchView("chat");
+  // One history entry for the jump (not one for "chat" plus one for the topic).
+  switchView("chat", { skipRoute: true });
   await switchTopic(stream, topic);
   if (initialText) {
     const input = document.getElementById("composerInput");
@@ -4699,7 +4920,7 @@ function switchIngestionSubtab(subtab) {
   if (secNsLabels) secNsLabels.style.display = subtab === "namespacelabels" ? "flex" : "none";
 
   if (window.location.hash.startsWith("#dashboards") || window.location.hash.startsWith("#ingestion")) {
-    history.replaceState(null, "", `#dashboards/${subtab}`);
+    setRoute(`#dashboards/${subtab}`, { replace: true });
   }
 
   if (subtab === "finops" && !ingestionData.finopsReport) {
@@ -6803,7 +7024,7 @@ function selectAgentInLibrary(handle) {
 
   // Update URL hash
   if (window.location.hash.startsWith("#library")) {
-    history.replaceState(null, "", `#library/${encodeURIComponent(handle)}`);
+    setRoute(`#library/${encodeURIComponent(handle)}`, { replace: true });
   }
 
   // Update card active classes

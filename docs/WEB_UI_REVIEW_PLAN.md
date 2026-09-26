@@ -23,11 +23,11 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 15 | Send failure: input cleared before POST, text lost; optimistic msg stuck grey; alert() | 6 Chat | Done |
 | 16 | "Sending…" CSS targets `.msg-meta` (doesn't exist; header is `.msg-header`) | 6 Chat | Done |
 | 17 | Auto-scroll yanks reader to bottom on every message → stick-if-near-bottom + "New messages ↓" pill | 6 Chat | Done |
-| 18 | Day separators + relative dates (history now persists across sessions) | 6 Chat | Todo |
-| 19 | Unread badges per topic/DM from SSE `new_message` for inactive channels | 6 Chat | Todo |
+| 18 | Day separators + relative dates (history now persists across sessions) | 6 Chat | Done |
+| 19 | Unread badges per topic/DM from SSE `new_message` for inactive channels | 6 Chat | Done |
 | 20 | Composer auto-grow (rows=1, no resize) | 6 Chat | Done |
-| 21 | Agent-status 180s timeout hides silently → show "no response yet — still running?" state | 6 Chat | Todo |
-| 22 | Back/forward: switchTopic/switchView use replaceState → pushState | 6 Chat | Todo |
+| 21 | Agent-status 180s timeout hides silently → show "no response yet — still running?" state | 6 Chat | Done |
+| 22 | Back/forward: switchTopic/switchView use replaceState → pushState | 6 Chat | Done |
 | 23 | Drawer proposals: click opens diff modal for any subsystem; default filter OPEN; drop ".proposals/" copy | 7 Actions | Todo |
 | 24 | Lease "Ns left" frozen at render → absolute expiry time or ticking countdown | 7 Actions | Todo |
 | 25 | Claim dialog free-text handle → select from capable workers (already fetched) | 7 Actions | Todo |

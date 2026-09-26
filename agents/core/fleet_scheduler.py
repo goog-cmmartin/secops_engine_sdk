@@ -1113,7 +1113,8 @@ class FleetScheduler:
                 predicate=f"patrol_{action or 'audit'}",
                 value={"status": status, "summary": str(result.get("status") or ""), "created_beads": len(created_beads)},
                 communication_policy=CommunicationPolicy(
-                    urgency=comm_class,
+                    communication_class=comm_class.value,
+                    urgency={"urgent": "critical", "operational": "medium"}.get(comm_class.value, "low"),
                     briefing=True,
                     immediate_notification=(comm_class == CommunicationClass.URGENT),
                     target_channel=f"#{stream}",

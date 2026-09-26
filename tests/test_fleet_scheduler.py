@@ -8,8 +8,24 @@ from pathlib import Path
 from typing import Dict, Any
 
 from agents.core.fleet_scheduler import FleetScheduler, DEFAULT_AGENT_SCHEDULES
+from agents.core.communication_router import CommunicationRouter
 from agents.core.evidence_store import LocalFileEvidenceStore
+from agents.core.knowledge_store import LocalKnowledgeStore
+from agents.core.work_queue import LocalWorkQueue
 from clients.web.chat_engine import ChatStore
+
+
+def _isolated_router(root_dir: Path, chat_store) -> CommunicationRouter:
+    """Router whose work queue / knowledge store live under the test tmpdir.
+
+    Without this the process-wide router singleton writes SOC issues into the
+    repo's live .state/work_queue, which then shows up in the web UI.
+    """
+    return CommunicationRouter(
+        knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
+        work_queue=LocalWorkQueue(root_dir=str(root_dir)),
+        chat_store=chat_store,
+    )
 
 
 class PatrolAgentFixture:
@@ -164,6 +180,8 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 evidence_store=evidence_store,
                 chat_store=chat_store,
                 poll_interval_seconds=1,
+                communication_router=_isolated_router(root_dir, chat_store),
+                knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
             )
 
             # Verify all 6 default domain patrol schedules are present and enabled
@@ -245,6 +263,8 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 evidence_store=evidence_store,
                 chat_store=chat_store,
                 poll_interval_seconds=1,
+                communication_router=_isolated_router(root_dir, chat_store),
+                knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
             )
 
             # 1. Run @feed-agent patrol -> should detect failed feed and sling an ingestion bead
@@ -338,6 +358,8 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
                 evidence_store=evidence_store,
                 chat_store=chat_store,
                 poll_interval_seconds=1,
+                communication_router=_isolated_router(root_dir, chat_store),
+                knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
             )
 
             bulk_res = await scheduler.trigger_patrol_all()
@@ -346,6 +368,34 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(bulk_res["results"]), 9)
             self.assertEqual(bulk_res["deacon_status"]["total_patrols_run"], 9)
 
+
+
+class TestPatrolIssueRouting(unittest.IsolatedAsyncioTestCase):
+    """An all-clear patrol must not open a SOC issue (it clutters Actions > Triage)."""
+
+    async def test_healthy_patrol_opens_no_issue_but_findings_do(self):
+        class _Healthy(PatrolAgentFixture):
+            def audit_feeds(self, lookback_days: int = 7):
+                return {"status": "SUCCESS", "summary": {"total_feeds_audited": 4, "healthy_count": 4,
+                        "irregular_count": 0, "failed_count": 0, "high_latency_count": 0,
+                        "quota_rejections_detected": False}, "findings": [], "widget": None}
+
+        for agent_cls, expect_issue in ((_Healthy, False), (PatrolAgentFixture, True)):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root_dir = Path(tmpdir)
+                chat_store = ChatStore(root_dir=root_dir)
+                router = _isolated_router(root_dir, chat_store)
+                scheduler = FleetScheduler(
+                    fleet={"@feed-agent": agent_cls("Feed Health Agent", "@feed-agent")},
+                    evidence_store=LocalFileEvidenceStore(root_dir=root_dir),
+                    chat_store=chat_store,
+                    communication_router=router,
+                    knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
+                )
+                res = await scheduler.trigger_run_now("@feed-agent")
+                self.assertEqual(res["status"], "SUCCESS")
+                issues = router.work_queue.list_issues(limit=50)
+                self.assertEqual(bool(issues), expect_issue, agent_cls.__name__)
 
 if __name__ == "__main__":
     unittest.main()

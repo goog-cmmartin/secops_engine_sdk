@@ -23,7 +23,12 @@ from engine.domain import (
     VerificationProof,
 )
 from agents.core.materializer import IssueMaterializer
-from agents.core.work_queue import BaseWorkQueue, get_work_queue
+from agents.core.work_queue import (
+    ATTENTION_STATUSES,
+    OPERATOR_REQUEUED_OUTCOME,
+    BaseWorkQueue,
+    get_work_queue,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,4 +262,67 @@ class SOCLifecycleManager:
             commit=commit,
         )
         logger.info("Successfully verified and closed issue %s", issue_id)
+        return True
+
+    # --- Operator interventions on stuck issues ---------------------------
+
+    def requeue_issue(
+        self,
+        issue_id: str,
+        operator: str,
+        guidance: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Returns an issue needing attention to the pool with a fresh retry budget.
+
+        ``guidance`` is recorded on the attempt trail so the next worker sees it.
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status not in ATTENTION_STATUSES:
+            return False
+        previous = issue.status
+        self.work_queue.record_attempt(issue_id, operator, OPERATOR_REQUEUED_OUTCOME, guidance)
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.AVAILABLE.value,
+        )
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="OPERATOR_REQUEUED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.AVAILABLE.value,
+            details={"previous_status": previous, "guidance": guidance},
+            commit=commit,
+        )
+        logger.info("Operator %s requeued %s (was %s)", operator, issue_id, previous)
+        return True
+
+    def close_issue_manually(
+        self,
+        issue_id: str,
+        operator: str,
+        reason: str,
+        commit: bool = True,
+    ) -> bool:
+        """Closes an issue an operator resolved (or dismissed) outside the fleet."""
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status == IssueLifecycleStatus.CLOSED.value:
+            return False
+        previous = issue.status
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.CLOSED.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="OPERATOR_CLOSED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+            details={"previous_status": previous, "reason": reason},
+            commit=commit,
+        )
+        logger.info("Operator %s closed %s (was %s)", operator, issue_id, previous)
         return True

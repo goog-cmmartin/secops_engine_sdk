@@ -45,6 +45,16 @@ RECLAIMABLE_STATUSES = frozenset({
 })
 
 LEASE_EXPIRED_OUTCOME = "LEASE_EXPIRED"
+# Recorded when an operator returns a stuck issue to the pool; resets the retry budget.
+OPERATOR_REQUEUED_OUTCOME = "OPERATOR_REQUEUED"
+
+# Dead-end states that no worker will pick up again: an operator has to act.
+ATTENTION_STATUSES = frozenset({
+    IssueLifecycleStatus.NEEDS_HUMAN.value,
+    IssueLifecycleStatus.BLOCKED.value,
+    IssueLifecycleStatus.VALIDATION_FAILED.value,
+    IssueLifecycleStatus.ROLLED_BACK.value,
+})
 
 
 def is_reclaimable(issue: SOCIssue) -> bool:

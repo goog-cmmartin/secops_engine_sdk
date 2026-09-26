@@ -26,7 +26,7 @@ from agents.core.target_baseline import StaleTargetError
 from agents.core.proposal_manager import ProposalManager
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
-from agents.core.work_queue import get_work_queue, BaseWorkQueue
+from agents.core.work_queue import get_work_queue, BaseWorkQueue, ATTENTION_STATUSES
 from agents.core.materializer import IssueMaterializer
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.knowledge_store import get_knowledge_store
@@ -215,6 +215,14 @@ class AckEscalationRequest(BaseModel):
 # --- Escalation acknowledgements ---
 # Escalations are derived on each /api/gastown/overview call, so operator
 # acknowledgements are persisted separately, keyed by escalation id.
+# Operator-facing labels for issue states that need a human.
+_ATTENTION_LABELS = {
+    "NEEDS_HUMAN": "Needs human",
+    "BLOCKED": "Blocked",
+    "VALIDATION_FAILED": "Validation failed",
+    "ROLLED_BACK": "Rolled back",
+}
+
 ESCALATION_ACKS_PATH = STATE_ROOT / ".state" / "escalation_acks.json"
 
 
@@ -1019,6 +1027,25 @@ async def get_gastown_overview() -> Dict[str, Any]:
                     "created_at": t.get("created_at"),
                     "age": _humanize_age(t.get("created_at")),
                 })
+    # Issues the fleet gave up on (or a human blocked) are escalations too: no worker will pick them up.
+    all_issues = work_queue.list_issues(limit=500)
+    for i in all_issues:
+        if i.status not in ATTENTION_STATUSES:
+            continue
+        last = next((a for a in reversed(i.attempts) if isinstance(a, dict)), {})
+        escalations.append({
+            # Attempt count in the id: a re-escalation after requeue needs a fresh ack.
+            "id": f"esc_{i.id}-a{len(i.attempts)}",
+            "severity": "critical" if str(i.severity).upper() == "CRITICAL" else "high",
+            "title": f"{_ATTENTION_LABELS.get(i.status, i.status)}: {i.problem.title or i.id}",
+            "details": last.get("notes", ""),
+            "issue_id": i.id,
+            "soc_issue": True,
+            "target": ", ".join(i.problem.affected_objects or []) or i.problem.target_resource_id or "",
+            "escalated_by": last.get("actor") or i.routing.claimed_by or "@fleet-worker",
+            "created_at": i.updated_at,
+            "age": _humanize_age(i.updated_at),
+        })
     acks = _load_escalation_acks()
     for esc in escalations:
         ack = acks.get(esc["id"])
@@ -1028,10 +1055,15 @@ async def get_gastown_overview() -> Dict[str, Any]:
     summary["escalation_count"] = sum(1 for e in escalations if not e["acked"])
     summary["escalation_total"] = len(escalations)
 
-    soc_issues = [i.to_dict() for i in work_queue.list_issues(limit=50)]
+    top = all_issues[:50]
+    # Never truncate away issues that need a human, whatever their priority.
+    top_ids = {i.id for i in top}
+    attention = [i for i in all_issues if i.status in ATTENTION_STATUSES and i.id not in top_ids]
+    soc_issues = [i.to_dict() for i in top + attention]
     soc_workers = [w.to_dict() for w in work_queue.list_workers(active_only=False)]
     active_leases_count = sum(1 for i in soc_issues if i.get("lease") and i.get("status") in ["LEASED", "CLAIMED", "EXECUTING", "VALIDATING"])
     summary["soc_issues_count"] = len(soc_issues)
+    summary["needs_attention_count"] = sum(1 for i in soc_issues if i.get("status") in ATTENTION_STATUSES)
     summary["soc_leases_active"] = active_leases_count
     summary["soc_workers_count"] = len(soc_workers)
     summary["issue_count"] = len(open_props) + len(todos_pending) + len([i for i in soc_issues if i.get("status") != "CLOSED"])
@@ -1082,6 +1114,16 @@ class HeartbeatIssueRequest(BaseModel):
 class ReleaseIssueRequest(BaseModel):
     agent_handle: Optional[str] = Field(default=None, description="Lease holder agent handle")
     force: bool = Field(default=False, description="Force release regardless of ownership")
+
+
+class RequeueIssueRequest(BaseModel):
+    operator: str = Field(default="secops-operator", description="Operator returning the issue to the pool")
+    guidance: str = Field(default="", max_length=2000, description="Notes for the next worker attempt")
+
+
+class CloseIssueRequest(BaseModel):
+    operator: str = Field(default="secops-operator", description="Operator closing the issue")
+    reason: str = Field(..., min_length=5, max_length=2000, description="Why the issue is closed")
 
 
 class DecideIssueRequest(BaseModel):
@@ -1179,6 +1221,30 @@ async def decide_soc_issue(issue_id: str, body: DecideIssueRequest) -> Dict[str,
         raise HTTPException(status_code=400, detail="Failed to record issue decision.")
     
     return {"status": "DECIDED", "decision": body.decision.upper(), "issue_id": issue_id}
+
+
+@app.post("/api/soc/issues/{issue_id}/requeue")
+async def requeue_soc_issue(issue_id: str, body: RequeueIssueRequest) -> Dict[str, Any]:
+    """Returns an escalated/blocked issue to the worker pool with a fresh retry budget."""
+    issue = work_queue.get_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail=f"Issue '{issue_id}' not found.")
+    if issue.status not in ATTENTION_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Issue '{issue_id}' is {issue.status}; only issues needing attention can be requeued.")
+    if not lifecycle_manager.requeue_issue(issue_id, operator=body.operator, guidance=body.guidance, commit=False):
+        raise HTTPException(status_code=400, detail="Failed to requeue issue.")
+    return {"status": "AVAILABLE", "issue_id": issue_id}
+
+
+@app.post("/api/soc/issues/{issue_id}/close")
+async def close_soc_issue(issue_id: str, body: CloseIssueRequest) -> Dict[str, Any]:
+    """Closes an issue an operator resolved or dismissed outside the fleet."""
+    issue = work_queue.get_issue(issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail=f"Issue '{issue_id}' not found.")
+    if not lifecycle_manager.close_issue_manually(issue_id, operator=body.operator, reason=body.reason, commit=False):
+        raise HTTPException(status_code=409, detail=f"Issue '{issue_id}' is already closed.")
+    return {"status": "CLOSED", "issue_id": issue_id}
 
 
 @app.get("/api/soc/workers")

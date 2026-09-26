@@ -525,6 +525,55 @@ class IssueMaterializer:
             )
         return evt_file, commit_sha
 
+    def materialize_operator_action(
+        self,
+        issue_id: str,
+        transition_type: str,
+        actor: str,
+        new_status: str,
+        details: Optional[Dict[str, Any]] = None,
+        commit: bool = True,
+    ) -> Tuple[Path, Optional[str]]:
+        """Records an operator intervention (requeue, manual close) in the append-only ledger."""
+        issue_dir = self._issue_path(issue_id)
+        events_dir = self._events_dir(issue_id)
+        seq = self._next_sequence(issue_id)
+
+        event = IssueEvent(
+            event_id=f"{issue_id}-evt-{seq:03d}",
+            issue_id=issue_id,
+            sequence=seq,
+            transition_type=transition_type,
+            actor=actor,
+            details={"new_status": new_status, **(details or {})},
+        )
+        evt_file = events_dir / f"{seq:03d}-{transition_type.lower().replace('_', '-')}.yaml"
+        with open(evt_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(event.to_dict(), f, sort_keys=False)
+
+        staged_files = [evt_file]
+        issue_file = issue_dir / "issue.yaml"
+        if issue_file.is_file():
+            try:
+                with open(issue_file, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                data["status"] = new_status
+                if new_status == IssueLifecycleStatus.CLOSED.value:
+                    data["closed_at"] = datetime.now(timezone.utc).isoformat()
+                with open(issue_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(data, f, sort_keys=False)
+                staged_files.append(issue_file)
+            except Exception as e:
+                logger.warning("Could not update issue.yaml on %s: %s", transition_type, e)
+
+        commit_sha = None
+        if commit:
+            commit_sha = self._git_commit(
+                staged_files,
+                f"governance(soc-issue): [{issue_id}] {transition_type.lower()} by {actor}",
+            )
+        return evt_file, commit_sha
+
     def get_issue(self, issue_id: str) -> Optional[SOCIssue]:
         """Reads durable issue.yaml from Git directory."""
         issue_file = self._issue_path(issue_id) / "issue.yaml"

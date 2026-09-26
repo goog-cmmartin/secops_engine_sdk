@@ -4756,6 +4756,8 @@ const ACTION_FNS = {
   handleClaimSocIssue: () => handleClaimSocIssue,
   handleReleaseSocIssue: () => handleReleaseSocIssue,
   handleDecideSocIssue: () => handleDecideSocIssue,
+  handleRequeueSocIssue: () => handleRequeueSocIssue,
+  handleCloseSocIssue: () => handleCloseSocIssue,
   closeSocIssueModal: () => closeSocIssueModal,
 };
 
@@ -6800,8 +6802,16 @@ function renderGastownHeader() {
   // Alerts Strip
   const gtAlertItem = document.getElementById("gtAlertItem");
   const openProps = (gastownState.proposals || []).filter((p) => p.status === "OPEN").length;
+  const attentionCount = (ov.soc_issues || []).filter((i) => isAttentionStatus(i.status)).length;
   if (gtAlertItem) {
-    if (openProps > 0) {
+    gtAlertItem.dataset.target = attentionCount > 0 ? "attention" : "review";
+    if (attentionCount > 0) {
+      const extra = openProps > 0 ? ` · ${openProps} awaiting review` : "";
+      gtAlertItem.textContent = `⚠ ${attentionCount} issue${attentionCount > 1 ? "s" : ""} need${attentionCount > 1 ? "" : "s"} a human${extra} →`;
+      gtAlertItem.className = "gt-alert-pill gt-alert-red";
+      gtAlertItem.disabled = false;
+      gtAlertItem.title = "Show the Needs Attention column";
+    } else if (openProps > 0) {
       gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting HITL operator review →`;
       gtAlertItem.className = "gt-alert-pill";
       gtAlertItem.disabled = false;
@@ -6818,10 +6828,12 @@ function renderGastownHeader() {
   setOpenProposalBadges(openProps);
 }
 
-// Alert strip -> Kanban board, scrolled to and briefly highlighting the review column.
+// Alert strip -> Kanban board, scrolled to and briefly highlighting the column the pill refers to.
 function focusReviewColumn() {
   switchGastownSubtab("kanban");
-  const col = document.getElementById("kanbanColReview");
+  const pill = document.getElementById("gtAlertItem");
+  const wantAttention = pill && pill.dataset.target === "attention";
+  const col = document.getElementById(wantAttention ? "kanbanColAttention" : "kanbanColReview");
   if (!col) return;
   if (col.scrollIntoView) col.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   col.classList.remove("kanban-col-flash");
@@ -6897,6 +6909,60 @@ function renderGastownCurrentSubtab() {
   }
 }
 
+// Issue states no worker will pick up again; mirrors work_queue.ATTENTION_STATUSES.
+const SOC_ATTENTION_LABELS = {
+  NEEDS_HUMAN: "Needs human",
+  BLOCKED: "Blocked",
+  VALIDATION_FAILED: "Validation failed",
+  ROLLED_BACK: "Rolled back",
+};
+function isAttentionStatus(status) {
+  return Object.prototype.hasOwnProperty.call(SOC_ATTENTION_LABELS, String(status || "").toUpperCase());
+}
+
+// Most recent attempt note explains why the issue is stuck (e.g. "3 autonomous attempts without a proposal").
+function lastAttemptNote(iss) {
+  const attempts = Array.isArray(iss.attempts) ? iss.attempts : [];
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const a = attempts[i];
+    if (a && a.notes) return { note: String(a.notes), actor: a.actor || "", outcome: a.outcome || "" };
+  }
+  return null;
+}
+
+function renderAttentionKanbanCard(iss) {
+  const issueId = iss.issue_id || iss.id;
+  const id = escapeHtml(issueId);
+  const title = escapeHtml(iss.problem?.title || iss.title || "Operational Issue");
+  const target = escapeHtml((iss.problem?.affected_objects || []).join(", ") || iss.problem?.target_resource_id || "Resource");
+  const status = String(iss.status || "").toUpperCase();
+  const label = SOC_ATTENTION_LABELS[status] || status;
+  const last = lastAttemptNote(iss);
+  const tries = (Array.isArray(iss.attempts) ? iss.attempts : []).filter((a) => a && a.actor && a.outcome !== "ESCALATED_TO_HUMAN" && a.outcome !== "OPERATOR_REQUEUED").length;
+  const reason = last
+    ? `<div class="kanban-card-reason" title="${escapeHtml(last.note)}">${escapeHtml(last.note)}</div>`
+    : "";
+  return `
+    <div class="kanban-card" role="button" tabindex="0" ${act("viewSocIssueDetail", issueId)} style="border-left: 3px solid var(--c-danger-solid);">
+      <div class="kanban-card-head">
+        <span class="kanban-card-id">${id}</span>
+        <div style="display:flex; align-items:center; gap:4px;">
+          ${renderReviewAgeChip(iss.updated_at || iss.created_at, `${label} since`)}
+          <span class="kanban-card-badge badge-risk-high">${escapeHtml(label.toUpperCase())}</span>
+        </div>
+      </div>
+      <div class="kanban-card-title">${title}</div>
+      <div class="kanban-card-target">${target}${tries ? ` · ${tries} attempt${tries === 1 ? "" : "s"}` : ""}</div>
+      ${reason}
+      <div class="kanban-card-actions">
+        <button class="kanban-card-action-btn" ${act("handleRequeueSocIssue", issueId)} title="Return to the worker pool with a fresh retry budget">Requeue</button>
+        <button class="kanban-card-action-btn is-quiet" ${act("handleCloseSocIssue", issueId)} title="Close the issue: you resolved it yourself or it no longer applies">Mark resolved</button>
+        <button class="kanban-card-action-btn is-quiet" ${act("viewSocIssueDetail", issueId)}>Ledger 📜</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderSocKanbanCard(iss, opts = {}) {
   const id = escapeHtml(iss.issue_id);
   const title = escapeHtml(iss.problem?.title || iss.title || "Operational Issue");
@@ -6930,6 +6996,19 @@ function renderGastownKanban() {
   const proposals = gastownState.proposals || [];
   const overview = gastownState.overview || {};
   const socIssues = overview.soc_issues || [];
+
+  // Col 0: Needs Attention — escalated/blocked issues. Hidden when empty so the usual 4-column board is unchanged.
+  const socAttention = socIssues
+    .filter((i) => isAttentionStatus(i.status))
+    .sort((a, b) => (ageMsFrom(b.updated_at) ?? -1) - (ageMsFrom(a.updated_at) ?? -1));
+  const colAttentionEl = document.getElementById("kanbanColAttention");
+  const hasAttention = socAttention.length > 0;
+  if (colAttentionEl) colAttentionEl.hidden = !hasAttention;
+  document.getElementById("kanbanGrid")?.classList.toggle("has-attention", hasAttention);
+  const countColAttention = document.getElementById("countColAttention");
+  if (countColAttention) countColAttention.textContent = socAttention.length;
+  const cardsColAttention = document.getElementById("cardsColAttention");
+  if (cardsColAttention) cardsColAttention.innerHTML = socAttention.map(renderAttentionKanbanCard).join("");
 
   // Col 1: Triage / Backlog
   const colTriage = document.getElementById("cardsColTriage");
@@ -7275,7 +7354,9 @@ function renderGastownEscalations() {
       <td>
         <div style="display:flex; gap:6px; align-items:center;">
           ${ackCell}
-          <button class="btn btn-primary btn-sm" ${act("switchTopicAndChat", escStream, escTopic, escPrompt)}>Resolve</button>
+          ${esc.soc_issue
+            ? `<button class="btn btn-primary btn-sm" ${act("viewSocIssueDetail", esc.issue_id)}>Open issue</button>`
+            : `<button class="btn btn-primary btn-sm" ${act("switchTopicAndChat", escStream, escTopic, escPrompt)}>Resolve</button>`}
         </div>
       </td>
     </tr>
@@ -7675,6 +7756,7 @@ async function renderGastownWorkQueue() {
           else if (status === "VALIDATING") statusBadgeClass = "badge-purple";
           else if (status === "APPROVED" || status === "APPLIED") statusBadgeClass = "badge-green";
           else if (status === "VERIFIED" || status === "CLOSED") statusBadgeClass = "badge-teal";
+          else if (isAttentionStatus(status)) statusBadgeClass = "badge-red";
 
           // Lease Owner & Expiry
           let ownerHtml = `<span style="color:var(--text-dim); font-style:italic;">Unassigned</span>`;
@@ -7709,6 +7791,11 @@ async function renderGastownWorkQueue() {
               <button class="btn btn-xs btn-success" ${act("handleDecideSocIssue", iss.issue_id || iss.id, "APPROVED")} title="Approve issue change">Approve</button>
             `;
           }
+          if (isAttentionStatus(status)) {
+            actionButtons += `
+              <button class="btn btn-xs btn-primary" ${act("handleRequeueSocIssue", iss.issue_id || iss.id)} title="Return to the worker pool with a fresh retry budget">Requeue</button>
+            `;
+          }
 
           return `
             <tr>
@@ -7719,7 +7806,7 @@ async function renderGastownWorkQueue() {
                 <div style="font-size:11px; color:var(--text-dim); font-family:var(--font-mono); margin-top:2px;">${target}</div>
               </td>
               <td><span class="kanban-card-badge ${sevClass}" style="font-size:11px;">${sev}</span></td>
-              <td><span class="badge ${statusBadgeClass}" style="font-size:11px; font-weight:700;">${status}</span></td>
+              <td><span class="badge ${statusBadgeClass}" style="font-size:11px; font-weight:700;">${escapeHtml(SOC_ATTENTION_LABELS[status] || status)}</span></td>
               <td>${ownerHtml}</td>
               <td>${expiresHtml}</td>
               <td style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${authority}</td>
@@ -7930,7 +8017,12 @@ async function viewSocIssueDetail(issueId) {
     const footerEl = document.getElementById("modalSocIssueFooter");
     if (footerEl) {
       let footerBtns = `<button class="btn btn-secondary" ${act("closeSocIssueModal")}>Close</button>`;
-      if (iss.status === "AVAILABLE") {
+      if (isAttentionStatus(iss.status)) {
+        footerBtns += `
+          <button class="btn btn-secondary" ${act("handleCloseSocIssue", issueId)}>Mark Resolved…</button>
+          <button class="btn btn-primary" ${act("handleRequeueSocIssue", issueId)}>Requeue for Agents</button>
+        `;
+      } else if (iss.status === "AVAILABLE") {
         footerBtns += `<button class="btn btn-primary" ${act("handleClaimSocIssue", issueId)}>Claim Issue</button>`;
       } else if (iss.status === "LEASED" || iss.status === "VALIDATING") {
         footerBtns += `
@@ -8072,6 +8164,68 @@ async function handleDecideSocIssue(issueId, decision) {
   }
 }
 window.handleDecideSocIssue = handleDecideSocIssue;
+
+// Refresh everything that shows SOC issue state (board, queue table, header counts).
+async function refreshSocIssueViews() {
+  await Promise.allSettled([loadGastownOverview(true), renderGastownWorkQueue()]);
+}
+
+async function handleRequeueSocIssue(issueId) {
+  const result = await openActionDialog({
+    title: "Requeue for agents",
+    message: `Return ${issueId} to the worker pool with a fresh retry budget. Add guidance if you know what the agents missed; it is saved on the issue's attempt history.`,
+    confirmLabel: "Requeue",
+    fields: [{ name: "guidance", label: "Guidance for the next attempt (optional)", type: "textarea", placeholder: "e.g. The failing samples come from the new EU collector; check the timestamp format." }],
+  });
+  if (!result) return;
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/requeue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator: "secops-operator", guidance: (result.guidance || "").trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast("success", `${issueId} returned to the worker pool`);
+      closeSocIssueModal();
+      await refreshSocIssueViews();
+    } else {
+      showToast("error", `Requeue failed: ${data.detail || res.status}`);
+    }
+  } catch (err) {
+    showToast("error", `Requeue error: ${err.message}`);
+  }
+}
+window.handleRequeueSocIssue = handleRequeueSocIssue;
+
+async function handleCloseSocIssue(issueId) {
+  const result = await openActionDialog({
+    title: "Mark issue resolved",
+    message: `Close ${issueId} without an agent fix. Use this when you resolved it yourself or it no longer applies. The reason is written to the audit trail.`,
+    confirmLabel: "Close issue",
+    variant: "danger",
+    fields: [{ name: "reason", label: "Reason", type: "textarea", required: true, minLength: 5 }],
+  });
+  if (!result) return;
+  try {
+    const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operator: "secops-operator", reason: result.reason.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast("success", `${issueId} closed`);
+      closeSocIssueModal();
+      await refreshSocIssueViews();
+    } else {
+      showToast("error", `Close failed: ${data.detail || res.status}`);
+    }
+  } catch (err) {
+    showToast("error", `Close error: ${err.message}`);
+  }
+}
+window.handleCloseSocIssue = handleCloseSocIssue;
 
 async function triggerGastownPatrolAll() {
   const btn = document.getElementById("btnTriggerPatrolAll");

@@ -297,7 +297,19 @@
 
           <!-- Section 1: Kanban Board -->
           <div id="secGtKanban" role="tabpanel" aria-labelledby="tabGtKanban" tabindex="-1" class="gastown-section">
-            <div class="kanban-grid">
+            <div class="kanban-grid" id="kanbanGrid">
+              <!-- Col 0: Needs Attention (escalated / blocked issues; shown only when non-empty) -->
+              <div class="kanban-column kanban-column-attention" id="kanbanColAttention" hidden>
+                <div class="kanban-column-header">
+                  <div class="kanban-col-title">
+                    <span class="kanban-dot dot-attention"></span>
+                    <span>Needs Attention</span>
+                  </div>
+                  <span class="kanban-col-count" id="countColAttention">0</span>
+                </div>
+                <div class="kanban-cards-list" id="cardsColAttention"></div>
+              </div>
+
               <!-- Col 1: Triage / Backlog -->
               <div class="kanban-column" id="kanbanColTriage">
                 <div class="kanban-column-header">
@@ -547,6 +559,10 @@
                     <option value="APPROVED">Approved</option>
                     <option value="APPLIED">Applied</option>
                     <option value="CLOSED">Closed</option>
+                    <option value="NEEDS_HUMAN">Needs human</option>
+                    <option value="BLOCKED">Blocked</option>
+                    <option value="VALIDATION_FAILED">Validation failed</option>
+                    <option value="ROLLED_BACK">Rolled back</option>
                   </select>
                 </div>
               </div>

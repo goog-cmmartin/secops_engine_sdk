@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
+from agents.core.work_queue import OPERATOR_REQUEUED_OUTCOME
 from engine.domain import IssueLifecycleStatus, SOCIssue
 
 logger = logging.getLogger(__name__)
@@ -94,8 +95,17 @@ def _parse_ts(value: Any) -> Optional[datetime]:
         return None
 
 
+def _attempts_since_requeue(issue: SOCIssue) -> List[Dict[str, Any]]:
+    """Attempts after the most recent operator requeue (the current retry budget window)."""
+    attempts = [a for a in issue.attempts if isinstance(a, dict)]
+    for idx in range(len(attempts) - 1, -1, -1):
+        if attempts[idx].get("outcome") == OPERATOR_REQUEUED_OUTCOME:
+            return attempts[idx + 1:]
+    return attempts
+
+
 def failed_attempt_count(issue: SOCIssue) -> int:
-    return sum(1 for a in issue.attempts if isinstance(a, dict) and a.get("outcome") in FAILED_OUTCOMES)
+    return sum(1 for a in _attempts_since_requeue(issue) if a.get("outcome") in FAILED_OUTCOMES)
 
 
 def in_cooldown(issue: SOCIssue, cooldown_seconds: float, now: Optional[datetime] = None) -> bool:
@@ -103,8 +113,8 @@ def in_cooldown(issue: SOCIssue, cooldown_seconds: float, now: Optional[datetime
     now = now or datetime.now(timezone.utc)
     stamps = [
         _parse_ts(a.get("timestamp"))
-        for a in issue.attempts
-        if isinstance(a, dict) and a.get("outcome") in FAILED_OUTCOMES
+        for a in _attempts_since_requeue(issue)
+        if a.get("outcome") in FAILED_OUTCOMES
     ]
     stamps = [s for s in stamps if s]
     return bool(stamps) and (now - max(stamps)).total_seconds() < cooldown_seconds

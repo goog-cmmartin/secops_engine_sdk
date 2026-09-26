@@ -2476,6 +2476,12 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   border-color: rgba(16, 185, 129, 0.3);
 }
 
+.gt-alert-pill.gt-alert-red {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border-color: var(--c-danger-bd);
+}
+
 .gt-alert-pill.gt-alert-unknown {
   background: rgba(148, 163, 184, 0.12);
   color: var(--text-dim);
@@ -2564,6 +2570,31 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
 .dot-progress { background: var(--accent-blue); }
 .dot-review { background: var(--accent-amber); }
 .dot-merged { background: var(--accent-green); }
+.dot-attention { background: var(--c-danger-solid); }
+
+/* Needs Attention column: only rendered when escalated/blocked issues exist. */
+.kanban-grid.has-attention { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1200px) {
+  .kanban-grid.has-attention { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .kanban-grid.has-attention { grid-template-columns: 1fr; }
+}
+.kanban-column-attention { border-color: var(--c-danger-bd); }
+.kanban-column-attention .kanban-column-header { background: var(--c-danger-bg); }
+.kanban-card-reason {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  border-left: 2px solid var(--c-danger-bd);
+  padding-left: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kanban-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.kanban-card-action-btn.is-quiet { background: transparent; border-color: var(--border-subtle); color: var(--text-muted); }
 
 .kanban-col-count {
   font-size: 11px;

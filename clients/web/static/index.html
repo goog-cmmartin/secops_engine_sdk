@@ -269,7 +269,7 @@
               </button>
             </div>
             <div class="gastown-actions">
-              <button id="btnTriggerPatrolAll" class="btn btn-primary" onclick="triggerGastownPatrolAll()">
+              <button id="btnTriggerPatrolAll" class="btn btn-primary" data-act="triggerGastownPatrolAll">
                 <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 <span>Run All Audits</span>
               </button>
@@ -451,7 +451,7 @@
                 </p>
               </div>
               <div class="deacon-patrol-header-actions">
-                <button class="btn btn-primary" onclick="triggerGastownPatrolAll()" id="btnHeaderPatrolAll">
+                <button class="btn btn-primary" data-act="triggerGastownPatrolAll" id="btnHeaderPatrolAll">
                   <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   <span>Run All Audits Now</span>
                 </button>
@@ -1335,13 +1335,13 @@
           <span id="modalSocIssueBadge" class="badge-blue">SOC ISSUE</span>
           <h2 id="modalSocIssueTitle" class="gt-modal-title">SOC Issue Detail</h2>
         </div>
-        <button id="btnCloseSocModal" class="gt-modal-close-btn" onclick="closeSocIssueModal()" aria-label="Close issue details" title="Close (Esc)">&times;</button>
+        <button id="btnCloseSocModal" class="gt-modal-close-btn" data-act="closeSocIssueModal" aria-label="Close issue details" title="Close (Esc)">&times;</button>
       </div>
       <div id="modalSocIssueBody" class="gt-modal-body" style="overflow-y:auto; padding:16px;">
         <!-- Populated dynamically by app.js -->
       </div>
       <div class="gt-modal-footer" id="modalSocIssueFooter">
-        <button class="btn btn-secondary" onclick="closeSocIssueModal()">Close</button>
+        <button class="btn btn-secondary" data-act="closeSocIssueModal">Close</button>
       </div>
     </div>
   </div>
@@ -1352,6 +1352,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.6.2"></script>
+  <script src="/static/app.js?v=2.6.3"></script>
 </body>
 </html>

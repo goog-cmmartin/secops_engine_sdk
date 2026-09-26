@@ -15,7 +15,9 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 10 | Actions summary cards clickable → sub-tab; alert strip links to review column | 2 Polish | Done |
 | 7 | Accessibility: focus-visible, tablist roles, aria-live, icon button labels | 3 A11y | Done |
 | 8 | Minimum 11px text | 3 A11y | Done |
-| — | Module split, inline styles → theme tokens, inline onclick → listeners | 4 Cleanup | Todo |
+| 4a | Inline onclick → delegated `data-act` listener | 4 Cleanup | Done |
+| 4b | Inline styles → theme tokens / CSS classes (944 `style=` in app.js, 131 in HTML) | 4 Cleanup | Todo |
+| 4c | Module split of app.js (~8.1k lines) | 4 Cleanup | Todo |
 | 11 | Approval surfaces still show fabricated data (see below) | 5 Trust | Done |
 | 12 | Diff modal: cancel in approve/reject dialog still closes modal; no Esc/backdrop/focus trap | 5 Trust | Done |
 | 13 | Unescaped values interpolated into inline onclick (kanban Triage/Inspect, escalation Resolve) | 5 Trust | Done |

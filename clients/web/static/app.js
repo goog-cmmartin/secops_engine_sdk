@@ -176,6 +176,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   setupEventListeners();
   setupA11y();
+  setupActions();
   await Promise.all([loadStreams(), loadAgents(), loadProposals()]);
   routeRestoring = true;
   try {
@@ -1617,7 +1618,7 @@ function renderDecayAuditWidget(widget) {
           <span style="color:var(--text-accent); font-weight:600; margin-left:4px;">${escapeHtml(widget.recommendation || "INVESTIGATE")}</span>
         </div>
         <div style="display:flex; gap:6px;">
-          <button class="btn-approve" style="background:#4f46e5; padding:4px 10px; font-size:11px;" onclick="promptRemediateRule('${widget.rule_id}')">
+          <button class="btn-approve" style="background:#4f46e5; padding:4px 10px; font-size:11px;" ${act("promptRemediateRule", widget.rule_id)}>
             ✨ Ask @DecayAgent to Remediate
           </button>
         </div>
@@ -1648,7 +1649,7 @@ function renderDecaySyncWidget(widget) {
           <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background-color:${c.is_live ? '#10b981' : '#64748b'}; box-shadow:${c.is_live ? '0 0 6px rgba(16,185,129,0.6)' : 'none'}; vertical-align:middle;"></span>
         </td>
         <td style="padding:6px 8px; text-align:right;">
-          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" onclick="auditRuleInChat('${c.rule_id}')">
+          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" ${act("auditRuleInChat", c.rule_id)}>
             Audit
           </button>
         </td>
@@ -1829,7 +1830,7 @@ function renderNoiseTuningWidget(widget) {
           <span>${ICONS.shield || "🛡️"}</span> Multi-Factor Verified (Zero Blinding)
         </div>
         <div style="display:flex; gap:6px;">
-          <button class="btn-approve" style="background:#059669; padding:5px 12px; font-size:11.5px; font-weight:700;" onclick="deployTuningProposal('${widget.rule_id}', '${escapeHtml(widget.rule_name || widget.rule_id)}')">
+          <button class="btn-approve" style="background:#059669; padding:5px 12px; font-size:11.5px; font-weight:700;" ${act("deployTuningProposal", widget.rule_id, widget.rule_name || widget.rule_id)}>
             🚀 Approve & Deploy to Chronicle
           </button>
         </div>
@@ -1842,7 +1843,7 @@ function renderNoiseTuningWidget(widget) {
           ${guardrailNotes.length > 0 ? escapeHtml(guardrailNotes.join("; ")) : "Rule has low trigger concentration or benign diversity"}
         </div>
         <div>
-          <button class="btn-approve" style="background:#4b5563; padding:4px 10px; font-size:11px;" onclick="promptTuneRule('${widget.rule_id}')">
+          <button class="btn-approve" style="background:#4b5563; padding:4px 10px; font-size:11px;" ${act("promptTuneRule", widget.rule_id)}>
             🔄 Re-Evaluate (10% Threshold)
           </button>
         </div>
@@ -1942,7 +1943,7 @@ function renderFeedHealthWidget(widget) {
     handoffHtml = `
       <div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:6px; padding:8px 12px; margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
         <span style="font-size:12px; color:#c7d2fe;">⚠️ <strong>Volume Funnel Drop Detected:</strong> Feeds for <code>${escapeHtml(parsingErrorFeeds.join(", "))}</code> are ingesting raw logs, but downstream normalization errors were detected.</span>
-        <button class="btn btn-sm" style="background:#6366f1; color:#fff; font-size:11px; padding:3px 10px;" onclick="triggerCrossAgentHandoff('ingestion', 'parser-drops', '@parser-doctor diagnose unparsed logs for ${escapeHtml(parsingErrorFeeds[0])}')">Hand off to @parser-doctor</button>
+        <button class="btn btn-sm" style="background:#6366f1; color:#fff; font-size:11px; padding:3px 10px;" ${act("triggerCrossAgentHandoff", "ingestion", "parser-drops", `@parser-doctor diagnose unparsed logs for ${parsingErrorFeeds[0]}`)}>Hand off to @parser-doctor</button>
       </div>
     `;
   }
@@ -2059,7 +2060,7 @@ function renderParserHealthWidget(widget) {
         <td style="padding:6px 8px;">${driftBadge}</td>
         <td style="padding:6px 8px; font-size:11px; color:#f87171;">${escapeHtml(f.drop_reason_code || "-")}</td>
         <td style="padding:6px 8px; text-align:right;">
-          <button class="btn btn-sm" style="font-size:11px; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3);" onclick="triggerCrossAgentHandoff('ingestion', 'parser-drops', '@parser-doctor diagnose unparsed logs for ${escapeHtml(f.log_type)}')">Diagnose</button>
+          <button class="btn btn-sm" style="font-size:11px; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3);" ${act("triggerCrossAgentHandoff", "ingestion", "parser-drops", `@parser-doctor diagnose unparsed logs for ${f.log_type}`)}>Diagnose</button>
         </td>
       </tr>
     `;
@@ -2155,7 +2156,7 @@ function renderUnparsedDiagnosticWidget(widget) {
       ${sampleBlocks}
 
       <div style="margin-top:10px; display:flex; justify-content:flex-end;">
-        <button class="btn btn-sm" style="background:#8b5cf6; color:#fff; font-size:11.5px; padding:4px 12px;" onclick="triggerCrossAgentHandoff('ingestion', 'parser-drops', '@parser-doctor propose CBN patch for ${escapeHtml(logType)}')">Propose Logstash CBN Patch</button>
+        <button class="btn btn-sm" style="background:#8b5cf6; color:#fff; font-size:11.5px; padding:4px 12px;" ${act("triggerCrossAgentHandoff", "ingestion", "parser-drops", `@parser-doctor propose CBN patch for ${logType}`)}>Propose Logstash CBN Patch</button>
       </div>
     </div>
   `;
@@ -2533,13 +2534,13 @@ function renderPlaybookHealthWidget(widget) {
           <!-- Interactive Expanders: Mermaid Flowchart & Executive Brief -->
           <div style="display:flex; gap:6px; margin-top:6px;">
             ${mermaidDag ? `
-              <button onclick="const el=document.getElementById('${cardId}_dag'); el.style.display=el.style.display==='none'?'block':'none';" 
+              <button ${act("toggleDisplay", `${cardId}_dag`)} 
                       class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
                 ⚡ Toggle Flowchart DAG
               </button>
             ` : ''}
             ${brief ? `
-              <button onclick="const el=document.getElementById('${cardId}_brief'); el.style.display=el.style.display==='none'?'block':'none';" 
+              <button ${act("toggleDisplay", `${cardId}_brief`)} 
                       class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
                 📋 View GenAI Brief
               </button>
@@ -2550,7 +2551,7 @@ function renderPlaybookHealthWidget(widget) {
             <div id="${cardId}_dag" style="display:none; margin-top:8px; padding:8px; background:rgba(0,0,0,0.5); border-radius:4px; border:1px solid rgba(255,255,255,0.1);">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                 <span style="font-size:11px; color:var(--text-muted); font-weight:600;">Mermaid.js Flowchart DAG</span>
-                <button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(mermaidDag)}')); showToast('success', 'Mermaid DAG copied to clipboard');" 
+                <button ${act("copyText", mermaidDag, "Mermaid DAG copied to clipboard")} 
                         class="btn btn-secondary" style="font-size:11px; padding:2px 6px;">Copy Syntax</button>
               </div>
               <pre class="mermaid" style="font-family:var(--font-mono); font-size:11px; color:#93c5fd; white-space:pre-wrap; margin:0; overflow-x:auto;">${escapeHtml(mermaidDag)}</pre>
@@ -2750,7 +2751,7 @@ function renderTimestampIntegrityWidget(widget) {
 
       ${narrative ? `
         <div style="display:flex; gap:6px; margin-top:6px;">
-          <button onclick="const el=document.getElementById('${briefId}'); el.style.display=el.style.display==='none'?'block':'none';" 
+          <button ${act("toggleDisplay", briefId)} 
                   class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:4px;">
             📋 Toggle Operational Runbook & Brief
           </button>
@@ -2842,10 +2843,10 @@ function renderRuleConflictWidget(widget) {
               ` : ''}
 
               <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                <button onclick="promptRuleConflictAudit('${escapeHtml(c.similar_rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer;">
+                <button ${act("promptRuleConflictAudit", c.similar_rule_id)} style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer;">
                   🔍 Deep Audit Sibling
                 </button>
-                <button onclick="promptRuleConflictConsolidate('${escapeHtml(widget.rule_id)}', '${escapeHtml(c.similar_rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer; font-weight:600;">
+                <button ${act("promptRuleConflictConsolidate", widget.rule_id, c.similar_rule_id)} style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer; font-weight:600;">
                   ⚡ Propose Consolidation
                 </button>
               </div>
@@ -2941,7 +2942,7 @@ function renderRuleConflictBatchWidget(widget) {
                 <span class="badge" style="background:${r.highest_cos >= 75 ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}; color:${r.highest_cos >= 75 ? '#f87171' : '#fbbf24'}; font-weight:700;">
                   ${Math.round(r.highest_cos)} COS
                 </span>
-                <button onclick="promptRuleConflictAudit('${escapeHtml(r.rule_id)}')" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                <button ${act("promptRuleConflictAudit", r.rule_id)} style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#c7d2fe; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                   Audit
                 </button>
               </div>
@@ -3101,22 +3102,22 @@ function renderRuleAuditCard(widget) {
 
                 <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
                   ${f.shadowed_by_curated_id ? `
-                    <button onclick="promptRuleConflictConsolidate('${escapeHtml(f.rule_id)}', '${escapeHtml(f.shadowed_by_curated_id)}')" style="background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.4); color:#fed7aa; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer; font-weight:600;">
+                    <button ${act("promptRuleConflictConsolidate", f.rule_id, f.shadowed_by_curated_id)} style="background:rgba(251,146,60,0.2); border:1px solid rgba(251,146,60,0.4); color:#fed7aa; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer; font-weight:600;">
                       ⚡ Retire in Favor of Curated
                     </button>
                   ` : ''}
                   ${f.highest_conflict_cos >= 75 ? `
-                    <button onclick="promptRuleConflictAudit('${escapeHtml(f.rule_id)}')" style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button ${act("promptRuleConflictAudit", f.rule_id)} style="background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#e9d5ff; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       🔍 Inspect Conflict
                     </button>
                   ` : ''}
                   ${st === "SILENT_DECAY" ? `
-                    <button onclick="promptRuleDecayInvestigate('${escapeHtml(f.rule_id)}')" style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#fde68a; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button ${act("promptRuleDecayInvestigate", f.rule_id)} style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.4); color:#fde68a; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       📉 Investigate Decay
                     </button>
                   ` : ''}
                   ${st === "EXECUTION_ERROR" ? `
-                    <button onclick="promptRuleSyntaxFix('${escapeHtml(f.rule_id)}')" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
+                    <button ${act("promptRuleSyntaxFix", f.rule_id)} style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer;">
                       🛠️ Inspect Runtime Error
                     </button>
                   ` : ''}
@@ -3197,7 +3198,7 @@ function renderFinopsCostCard(widget) {
       ` : ''}
 
       <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
-        <button onclick="switchView('ingestion'); switchIngestionSubtab('finops'); fetchFinopsData();" style="background:#059669; border:none; color:white; font-size:11px; font-weight:600; padding:4px 12px; border-radius:4px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+        <button ${act("openFinopsDashboard")} style="background:#059669; border:none; color:white; font-size:11px; font-weight:600; padding:4px 12px; border-radius:4px; cursor:pointer; display:flex; align-items:center; gap:4px;">
           <span>📊 Open Full FinOps Dashboard</span>
         </button>
       </div>
@@ -3256,7 +3257,7 @@ function renderRawLogSearchCard(w) {
                     </span>
                     ${time ? `<span style="color:var(--text-muted);">${escapeHtml(time)}</span>` : ''}
                   </div>
-                  <button onclick="navigator.clipboard.writeText(${JSON.stringify(snippet)}); showToast('success', 'Raw log snippet copied to clipboard');" style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:11px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
+                  <button ${act("copyText", snippet, "Raw log snippet copied to clipboard")} style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:var(--text-muted); font-size:11px; padding:1px 6px; border-radius:3px; cursor:pointer;" title="Copy verbatim payload">
                     📋 Copy Raw Log
                   </button>
                 </div>
@@ -3411,7 +3412,7 @@ function renderMitreCoverageCard(widget) {
             ${criticalTechniques.slice(0, 5).map(t => `
               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:4px; padding:5px 8px;">
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <button onclick="promptMitreTechniqueInspect('${escapeHtml(t.technique_id || '')}')" class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-size:11px; font-family:var(--font-mono); border:none; cursor:pointer;" title="Click to inspect mapped rules">
+                  <button ${act("promptMitreTechniqueInspect", t.technique_id || '')} class="badge" style="background:rgba(239,68,68,0.2); color:#f87171; font-size:11px; font-family:var(--font-mono); border:none; cursor:pointer;" title="Click to inspect mapped rules">
                     ${escapeHtml(t.technique_id || '')}
                   </button>
                   <span style="font-size:11.5px; font-weight:600; color:#f3f4f6;">${escapeHtml(t.name || '')}</span>
@@ -3427,13 +3428,13 @@ function renderMitreCoverageCard(widget) {
 
       <!-- Interactive Actions -->
       <div style="display:flex; gap:8px; justify-content:flex-end; border-top:1px solid rgba(75,85,99,0.2); padding-top:10px; margin-top:8px;">
-        <button class="btn-drawer-action" onclick="copyMitreExecutiveReport('${escapeHtml(profileId)}')" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+        <button class="btn-drawer-action" ${act("copyMitreExecutiveReport", profileId)} style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
           📄 Copy Full Report
         </button>
-        <button class="btn-drawer-action" onclick="promptMitreCoverageAudit('financial_services')" style="background:rgba(124,58,237,0.2); color:#c084fc; border:1px solid rgba(124,58,237,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+        <button class="btn-drawer-action" ${act("promptMitreCoverageAudit", "financial_services")} style="background:rgba(124,58,237,0.2); color:#c084fc; border:1px solid rgba(124,58,237,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
           🏦 FinServ Profile
         </button>
-        <button class="btn-drawer-action" onclick="promptMitreCoverageAudit('cloud_native')" style="background:rgba(14,165,233,0.2); color:#38bdf8; border:1px solid rgba(14,165,233,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
+        <button class="btn-drawer-action" ${act("promptMitreCoverageAudit", "cloud_native")} style="background:rgba(14,165,233,0.2); color:#38bdf8; border:1px solid rgba(14,165,233,0.4); padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer;">
           ☁️ Cloud-Native Profile
         </button>
       </div>
@@ -3499,10 +3500,10 @@ async function renderTuningDrawer() {
             <span style="color:var(--text-dim);">${(r.ratio_of_total * 100).toFixed(1)}% of tenant</span>
           </div>
           <div style="display:flex; gap:6px;">
-            <button class="btn-approve" style="background:#4f46e5; flex:1; padding:4px 8px; font-size:11px;" onclick="promptTuneRule('${r.rule_id}')">
+            <button class="btn-approve" style="background:#4f46e5; flex:1; padding:4px 8px; font-size:11px;" ${act("promptTuneRule", r.rule_id)}>
               🛡️ Tune Rule
             </button>
-            <button class="btn-reject" style="flex:1; padding:4px 8px; font-size:11px;" onclick="promptViewSamples('${r.rule_id}')">
+            <button class="btn-reject" style="flex:1; padding:4px 8px; font-size:11px;" ${act("promptViewSamples", r.rule_id)}>
               🔍 Samples
             </button>
           </div>
@@ -4163,7 +4164,7 @@ async function renderDecayDrawer() {
       itemsContainer.innerHTML = `
         <div style="text-align:center; padding:24px; color:var(--text-dim); font-size:12px;">
           No rules in decay queue.<br><br>
-          <button onclick="document.getElementById('btnRunSyncNow').click()" style="background:var(--btn-primary-bg, var(--secops-cta-primary, #1a73e8)); border:none; color:white; padding:6px 12px; border-radius:4px; font-size:11.5px; cursor:pointer;">
+          <button ${act("runTelemetrySync")} style="background:var(--btn-primary-bg, var(--secops-cta-primary, #1a73e8)); border:none; color:white; padding:6px 12px; border-radius:4px; font-size:11.5px; cursor:pointer;">
             Run Initial 90-Day Telemetry Sync
           </button>
         </div>
@@ -4193,7 +4194,7 @@ async function renderDecayDrawer() {
           <span>Live: <strong>${item.is_live ? '🟢 Yes' : '⚪ No'}</strong></span>
         </div>
         <div style="margin-top:6px; display:flex; justify-content:flex-end;">
-          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" onclick="auditRuleInChat('${item.rule_id}')">
+          <button style="background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;" ${act("auditRuleInChat", item.rule_id)}>
             Deep Audit &rarr;
           </button>
         </div>
@@ -4424,13 +4425,104 @@ function scrollToBottom(smooth = false) {
 }
 
 /**
- * Encodes a value as a JS string literal that is safe to embed inside a
- * double-quoted inline HTML event attribute, e.g. onclick="fn(${jsArg(x)})".
- * JSON.stringify handles quotes/backslashes/newlines; escapeHtml then protects
- * the attribute boundary (the HTML parser decodes &quot; back before JS runs).
+ * Declarative click actions for rendered HTML (replaces inline onclick=).
+ * Usage in templates: <button ${act("openGastownDiffModal", p.id)}>…</button>
+ * Emits data-act / data-act-args attributes; a single delegated listener
+ * (setupActions) looks the name up in ACTIONS and calls it with the args.
+ * Args are JSON-encoded then HTML-escaped, so no value is ever evaluated as JS.
+ * The innermost [data-act] wins, so buttons inside clickable cards don't
+ * need event.stopPropagation().
  */
-function jsArg(value) {
-  return escapeHtml(JSON.stringify(value == null ? "" : String(value)));
+function act(name, ...args) {
+  const argAttr = args.length
+    ? ` data-act-args="${escapeHtml(JSON.stringify(args.map((a) => (a == null ? "" : a))))}"`
+    : "";
+  return `data-act="${name}"${argAttr}`;
+}
+
+const ACTIONS = {
+  // Small UI helpers that used to be inline multi-statement handlers.
+  toggleDisplay(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+  },
+  async copyText(text, message) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("success", message || "Copied to clipboard");
+    } catch (e) {
+      showToast("error", "Copy failed — clipboard unavailable");
+    }
+  },
+  openFinopsDashboard() {
+    switchView("ingestion");
+    switchIngestionSubtab("finops");
+    fetchFinopsData();
+  },
+  runTelemetrySync() {
+    document.getElementById("btnRunSyncNow")?.click();
+  },
+};
+
+// Anything not in ACTIONS resolves to the (existing) named function, so
+// templates can reference handlers defined anywhere in this file.
+const ACTION_FNS = {
+  promptRemediateRule: () => promptRemediateRule,
+  auditRuleInChat: () => auditRuleInChat,
+  deployTuningProposal: () => window.deployTuningProposal,
+  promptTuneRule: () => window.promptTuneRule,
+  promptViewSamples: () => window.promptViewSamples,
+  triggerCrossAgentHandoff: () => triggerCrossAgentHandoff,
+  promptRuleConflictAudit: () => promptRuleConflictAudit,
+  promptRuleConflictConsolidate: () => promptRuleConflictConsolidate,
+  promptRuleDecayInvestigate: () => promptRuleDecayInvestigate,
+  promptRuleSyntaxFix: () => promptRuleSyntaxFix,
+  promptMitreTechniqueInspect: () => promptMitreTechniqueInspect,
+  copyMitreExecutiveReport: () => copyMitreExecutiveReport,
+  promptMitreCoverageAudit: () => promptMitreCoverageAudit,
+  switchTopicAndChat: () => window.switchTopicAndChat,
+  viewSocIssueDetail: () => viewSocIssueDetail,
+  handleDismissTodo: () => handleDismissTodo,
+  openGastownDiffModal: () => openGastownDiffModal,
+  handleProposalAction: () => window.handleProposalAction,
+  handleAckEscalation: () => handleAckEscalation,
+  triggerGastownAgentPatrol: () => triggerGastownAgentPatrol,
+  triggerGastownPatrolAll: () => triggerGastownPatrolAll,
+  handleClaimSocIssue: () => handleClaimSocIssue,
+  handleReleaseSocIssue: () => handleReleaseSocIssue,
+  handleDecideSocIssue: () => handleDecideSocIssue,
+  closeSocIssueModal: () => closeSocIssueModal,
+};
+
+function resolveAction(name) {
+  if (Object.prototype.hasOwnProperty.call(ACTIONS, name)) return ACTIONS[name];
+  if (Object.prototype.hasOwnProperty.call(ACTION_FNS, name)) return ACTION_FNS[name]();
+  return null;
+}
+
+function setupActions() {
+  document.addEventListener("click", (e) => {
+    const el = e.target instanceof Element ? e.target.closest("[data-act]") : null;
+    if (!el || el.disabled) return;
+    const fn = resolveAction(el.dataset.act);
+    if (typeof fn !== "function") {
+      console.warn("Unknown data-act action:", el.dataset.act);
+      return;
+    }
+    let args = [];
+    try {
+      args = el.dataset.actArgs ? JSON.parse(el.dataset.actArgs) : [];
+    } catch (err) {
+      console.error("Bad data-act-args on", el, err);
+      return;
+    }
+    Promise.resolve()
+      .then(() => fn(...args))
+      .catch((err) => {
+        console.error(`Action ${el.dataset.act} failed:`, err);
+        showToast("error", `Action failed: ${err?.message || err}`);
+      });
+  });
 }
 
 function escapeHtml(str) {
@@ -5266,7 +5358,7 @@ function renderFinopsSection() {
           </div>
           <div style="font-size:11px; background:rgba(0,0,0,0.25); border-radius:4px; padding:6px 8px; color:var(--text-dim); font-family:monospace; white-space:pre-wrap;">${escapeHtml(rec.implementation_guidance || rec.description)}</div>
           <div style="margin-top:8px; display:flex; justify-content:flex-end;">
-            <button class="btn btn-sm btn-ghost" style="font-size:11px; padding:2px 8px;" onclick="switchTopicAndChat('ingestion', 'finops', '@log-cost-agent optimize ${escapeHtml(rec.log_type)} via ${escapeHtml(rec.category)}')">
+            <button class="btn btn-sm btn-ghost" style="font-size:11px; padding:2px 8px;" ${act("switchTopicAndChat", "ingestion", "finops", `@log-cost-agent optimize ${rec.log_type} via ${rec.category}`)}>
               Apply via @log-cost-agent
             </button>
           </div>
@@ -5296,7 +5388,7 @@ function renderFinopsSection() {
             <td>${bloatBadge}</td>
             <td style="font-weight:600; color:#fbbf24;">$${(d.cost_enterprise || 0).toFixed(2)}/mo</td>
             <td>
-              <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'finops', '@log-cost-agent analyze log source ${escapeHtml(d.log_type)}')">
+              <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "finops", `@log-cost-agent analyze log source ${d.log_type}`)}>
                 Inspect
               </button>
             </td>
@@ -5542,7 +5634,7 @@ function renderFeedsTable() {
         <td>${escapeHtml(String(latency))}</td>
         <td style="color:var(--text-dim); font-size:11px;">${escapeHtml(String(lastHeartbeat))}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'feed-health', '@feed-agent check feed latency for ${escapeHtml(f.log_type || f.feed_name)}')">
+          <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "feed-health", `@feed-agent check feed latency for ${f.log_type || f.feed_name}`)}>
             Inspect
           </button>
         </td>
@@ -5593,7 +5685,7 @@ function renderParsersTable() {
         <td style="font-size:11px; ${hasDrift ? 'color:#f59e0b;' : 'color:var(--text-dim);'}">${escapeHtml(driftText)}</td>
         <td style="font-size:11px; color:var(--text-muted);">${escapeHtml(dropReason)}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'parser-drops', '@parser-doctor diagnose unparsed logs for ${escapeHtml(p.log_type)}')">
+          <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "parser-drops", `@parser-doctor diagnose unparsed logs for ${p.log_type}`)}>
             Diagnose
           </button>
         </td>
@@ -5627,7 +5719,7 @@ async function handleAuditFeedsAction() {
     if (banner) {
       banner.innerHTML = `
         <span><strong>Feed Audit Completed:</strong> Evaluated ${summary.total_feeds_audited || 11} feeds (${summary.healthy_count || 11} healthy, ${summary.irregular_count || 0} warn, ${summary.failed_count || 0} degraded). Transport telemetry posted to <strong>#ingestion > feed-health</strong>.</span>
-        <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'feed-health')">View in Chat →</button>
+        <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "feed-health")}>View in Chat →</button>
       `;
     }
     await renderIngestionPage(true);
@@ -5668,7 +5760,7 @@ async function handleAuditParsersAction() {
     if (banner) {
       banner.innerHTML = `
         <span><strong>Parser Audit Completed:</strong> Evaluated ${summary.total_parsers_audited || 0} parsers (${summary.healthy_count || 0} healthy, ${summary.version_drift_count || 0} version drifts, ${summary.extension_conflict_count || 0} conflicts). Normalization report posted to <strong>#ingestion > parser-drops</strong>.</span>
-        <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'parser-drops')">View in Chat →</button>
+        <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "parser-drops")}>View in Chat →</button>
       `;
     }
     await renderIngestionPage(true);
@@ -5708,7 +5800,7 @@ async function handleAuditRulesPageAction() {
     if (banner) {
       banner.innerHTML = `
         <span><strong>Rule Repository Audit Completed:</strong> Evaluated ${report.total_rules_scanned || 0} rules (${report.healthy_count || 0} healthy, ${report.silent_decay_count || 0} silent, ${report.failing_count || 0} errors). Results posted to <strong>#detections &gt; decay-review</strong>.</span>
-        <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('detections', 'decay-review')">View in Chat →</button>
+        <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "detections", "decay-review")}>View in Chat →</button>
       `;
     }
   } catch (err) {
@@ -5799,7 +5891,7 @@ function renderDiagnosticResults(data, logType) {
         ${samplesHtml}
       </div>
       <div style="margin-top:6px; display:flex; justify-content:flex-end;">
-        <button class="btn btn-sm btn-ghost" onclick="switchTopicAndChat('ingestion', 'parser-drops', '@parser-doctor fix unparsed logs for ${escapeHtml(logType)}')">
+        <button class="btn btn-sm btn-ghost" ${act("switchTopicAndChat", "ingestion", "parser-drops", `@parser-doctor fix unparsed logs for ${logType}`)}>
           💬 Hand off to @parser-doctor for automated patch proposal
         </button>
       </div>
@@ -6028,7 +6120,7 @@ function renderSocKanbanCard(iss) {
   const holder = iss.lease?.holder_agent || "unassigned";
 
   return `
-    <div class="kanban-card" role="button" tabindex="0" onclick="viewSocIssueDetail(${jsArg(iss.issue_id)})" style="border-left: 3px solid #6366f1;">
+    <div class="kanban-card" role="button" tabindex="0" ${act("viewSocIssueDetail", iss.issue_id)} style="border-left: 3px solid #6366f1;">
       <div class="kanban-card-head">
         <span class="kanban-card-id" style="color:#a5b4fc;">${id}</span>
         <div style="display:flex; align-items:center; gap:4px;">
@@ -6040,7 +6132,7 @@ function renderSocKanbanCard(iss) {
       <div class="kanban-card-target">${target}</div>
       <div class="kanban-card-footer">
         <span class="kanban-card-author">${getAgentAvatarSvg(holder, 13)} ${escapeHtml(holder)}</span>
-        <button class="kanban-card-action-btn" onclick="event.stopPropagation(); viewSocIssueDetail(${jsArg(iss.issue_id)})">Ledger 📜</button>
+        <button class="kanban-card-action-btn" ${act("viewSocIssueDetail", iss.issue_id)}>Ledger 📜</button>
       </div>
     </div>
   `;
@@ -6089,8 +6181,8 @@ function renderGastownKanban() {
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
               <div style="display:flex; gap:6px;">
-                <button class="kanban-card-action-btn" onclick="switchTopicAndChat(${jsArg(stream)}, ${jsArg(topic)}, ${jsArg(prompt)})">Triage</button>
-                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo(${jsArg(id)})" title="Dismiss or resolve this task">Dismiss</button>
+                <button class="kanban-card-action-btn" ${act("switchTopicAndChat", stream, topic, prompt)}>Triage</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" ${act("handleDismissTodo", id)} title="Dismiss or resolve this task">Dismiss</button>
               </div>
             </div>
           </div>
@@ -6138,8 +6230,8 @@ function renderGastownKanban() {
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
               <div style="display:flex; gap:6px;">
-                <button class="kanban-card-action-btn" onclick="switchTopicAndChat(${jsArg(stream)}, ${jsArg(topic)}, ${jsArg(prompt)})">Inspect</button>
-                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" onclick="handleDismissTodo(${jsArg(id)})" title="Dismiss or resolve this task">Dismiss</button>
+                <button class="kanban-card-action-btn" ${act("switchTopicAndChat", stream, topic, prompt)}>Inspect</button>
+                <button class="kanban-card-action-btn" style="background:transparent; border-color:var(--border-subtle); color:var(--text-muted);" ${act("handleDismissTodo", id)} title="Dismiss or resolve this task">Dismiss</button>
               </div>
             </div>
           </div>
@@ -6166,7 +6258,7 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" role="button" tabindex="0" onclick="openGastownDiffModal(${jsArg(p.id)})">
+          <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)}>
             <div class="kanban-card-head">
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${riskClass}">${p.risk_level || "PROPOSAL"}</span>
@@ -6175,8 +6267,8 @@ function renderGastownKanban() {
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
-              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal(${jsArg(p.id)})">Review Diff ↗</button>
-              <button class="kanban-card-action-btn" style="margin-left:4px;" onclick="event.stopPropagation(); switchTopicAndChat('detections', 'rule-proposals', ${jsArg(`${author} review proposal ${p.id}`)})">Discuss 💬</button>
+              <button class="kanban-card-action-btn" ${act("openGastownDiffModal", p.id)}>Review Diff ↗</button>
+              <button class="kanban-card-action-btn" style="margin-left:4px;" ${act("switchTopicAndChat", "detections", "rule-proposals", `${author} review proposal ${p.id}`)}>Discuss 💬</button>
             </div>
           </div>
         `;
@@ -6202,7 +6294,7 @@ function renderGastownKanban() {
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         return `
-          <div class="kanban-card" role="button" tabindex="0" onclick="openGastownDiffModal(${jsArg(p.id)})" style="opacity:0.85;">
+          <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)} style="opacity:0.85;">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}">${p.status}</span>
@@ -6211,7 +6303,7 @@ function renderGastownKanban() {
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
-              <button class="kanban-card-action-btn" onclick="event.stopPropagation(); openGastownDiffModal(${jsArg(p.id)})">View Details</button>
+              <button class="kanban-card-action-btn" ${act("openGastownDiffModal", p.id)}>View Details</button>
             </div>
           </div>
         `;
@@ -6264,7 +6356,7 @@ function renderGastownConvoys() {
         </div>
       </td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="switchTopicAndChat(${jsArg(c.stream || "detections")}, ${jsArg(c.topic || "rule-proposals")}, ${jsArg(c.action_prompt || `${c.primary_agent || "@secops-dispatcher"} status convoy ${c.id}`)})">Inspect</button>
+        <button class="btn btn-secondary btn-sm" ${act("switchTopicAndChat", c.stream || "detections", c.topic || "rule-proposals", c.action_prompt || `${c.primary_agent || "@secops-dispatcher"} status convoy ${c.id}`)}>Inspect</button>
       </td>
     </tr>
   `;
@@ -6320,10 +6412,10 @@ function renderGastownRefinery() {
         </td>
         <td>
           <div style="display:flex; gap:6px;">
-            <button class="btn btn-secondary btn-sm" onclick="openGastownDiffModal(${jsArg(p.id)})">Inspect</button>
+            <button class="btn btn-secondary btn-sm" ${act("openGastownDiffModal", p.id)}>Inspect</button>
             ${p.status === 'OPEN' ? `
-              <button class="btn btn-primary btn-sm" onclick="handleProposalAction(${jsArg(p.id)}, 'approve')">Approve</button>
-              <button class="btn btn-danger btn-sm" onclick="handleProposalAction(${jsArg(p.id)}, 'reject')">Reject</button>
+              <button class="btn btn-primary btn-sm" ${act("handleProposalAction", p.id, "approve")}>Approve</button>
+              <button class="btn btn-danger btn-sm" ${act("handleProposalAction", p.id, "reject")}>Reject</button>
             ` : ''}
           </div>
         </td>
@@ -6348,7 +6440,7 @@ function renderGastownEscalations() {
     const sev = String(esc.severity || "").toUpperCase();
     const ackCell = esc.acked
       ? `<span class="badge badge-gray" title="Acknowledged by ${escapeHtml(esc.acked_by || "operator")}${esc.acked_at ? " at " + escapeHtml(new Date(esc.acked_at).toLocaleString()) : ""}">Acked</span>`
-      : `<button class="btn btn-secondary btn-sm" onclick="handleAckEscalation(${jsArg(esc.id)})">Ack</button>`;
+      : `<button class="btn btn-secondary btn-sm" ${act("handleAckEscalation", esc.id)}>Ack</button>`;
     return `
     <tr class="${esc.acked ? "row-acked" : ""}">
       <td>
@@ -6370,7 +6462,7 @@ function renderGastownEscalations() {
       <td>
         <div style="display:flex; gap:6px; align-items:center;">
           ${ackCell}
-          <button class="btn btn-primary btn-sm" onclick="switchTopicAndChat(${jsArg(escStream)}, ${jsArg(escTopic)}, ${jsArg(escPrompt)})">Resolve</button>
+          <button class="btn btn-primary btn-sm" ${act("switchTopicAndChat", escStream, escTopic, escPrompt)}>Resolve</button>
         </div>
       </td>
     </tr>
@@ -6653,7 +6745,7 @@ async function renderGastownPatrols() {
                 <span class="badge ${statusClass}">${lastStatus}</span>
                 <span style="font-size:11px; color:var(--text-dim);">${isEnabled ? "✓ Enabled" : "Paused"}</span>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="triggerGastownAgentPatrol(${jsArg(handle)})">
+              <button class="btn btn-primary btn-sm" ${act("triggerGastownAgentPatrol", handle)}>
                 <svg class="ui-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 <span>Run Audit</span>
               </button>
@@ -6769,26 +6861,26 @@ async function renderGastownWorkQueue() {
 
           // Action buttons
           let actionButtons = `
-            <button class="btn btn-xs btn-secondary" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})" title="Inspect durable Git ledger & events">Ledger</button>
+            <button class="btn btn-xs btn-secondary" ${act("viewSocIssueDetail", iss.issue_id || iss.id)} title="Inspect durable Git ledger & events">Ledger</button>
           `;
           if (status === "AVAILABLE" || leaseExpired) {
             actionButtons += `
-              <button class="btn btn-xs btn-primary" onclick="handleClaimSocIssue(${jsArg(iss.issue_id || iss.id)})" title="Claim lease for autonomous worker">Claim</button>
+              <button class="btn btn-xs btn-primary" ${act("handleClaimSocIssue", iss.issue_id || iss.id)} title="Claim lease for autonomous worker">Claim</button>
             `;
           } else if (status === "LEASED" || status === "CLAIMED") {
             actionButtons += `
-              <button class="btn btn-xs btn-outline" onclick="handleReleaseSocIssue(${jsArg(iss.issue_id || iss.id)})" title="Release lease back to pool">Release</button>
+              <button class="btn btn-xs btn-outline" ${act("handleReleaseSocIssue", iss.issue_id || iss.id)} title="Release lease back to pool">Release</button>
             `;
           }
           if (status === "VALIDATING" || status === "LEASED") {
             actionButtons += `
-              <button class="btn btn-xs btn-success" onclick="handleDecideSocIssue(${jsArg(iss.issue_id || iss.id)}, 'APPROVED')" title="Approve issue change">Approve</button>
+              <button class="btn btn-xs btn-success" ${act("handleDecideSocIssue", iss.issue_id || iss.id, "APPROVED")} title="Approve issue change">Approve</button>
             `;
           }
 
           return `
             <tr>
-              <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" onclick="viewSocIssueDetail(${jsArg(iss.issue_id || iss.id)})">${id}</td>
+              <td style="font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--color-primary-light); cursor:pointer;" ${act("viewSocIssueDetail", iss.issue_id || iss.id)}>${id}</td>
               <td><span class="badge" style="background:rgba(99,102,241,0.15); color:#a5b4fc; font-size:11px; font-weight:700;">${plane.toUpperCase()}</span></td>
               <td>
                 <div style="font-weight:600; color:var(--text-bright); font-size:12.5px;">${title}</div>
@@ -6997,13 +7089,13 @@ async function viewSocIssueDetail(issueId) {
     // Modal footer actions
     const footerEl = document.getElementById("modalSocIssueFooter");
     if (footerEl) {
-      let footerBtns = `<button class="btn btn-secondary" onclick="closeSocIssueModal()">Close</button>`;
+      let footerBtns = `<button class="btn btn-secondary" ${act("closeSocIssueModal")}>Close</button>`;
       if (iss.status === "AVAILABLE") {
-        footerBtns += `<button class="btn btn-primary" onclick="handleClaimSocIssue(${jsArg(issueId)})">Claim Issue</button>`;
+        footerBtns += `<button class="btn btn-primary" ${act("handleClaimSocIssue", issueId)}>Claim Issue</button>`;
       } else if (iss.status === "LEASED" || iss.status === "VALIDATING") {
         footerBtns += `
-          <button class="btn btn-danger" onclick="handleDecideSocIssue(${jsArg(issueId)}, 'REJECTED')">Reject</button>
-          <button class="btn btn-success" onclick="handleDecideSocIssue(${jsArg(issueId)}, 'APPROVED')">Approve Decision</button>
+          <button class="btn btn-danger" ${act("handleDecideSocIssue", issueId, "REJECTED")}>Reject</button>
+          <button class="btn btn-success" ${act("handleDecideSocIssue", issueId, "APPROVED")}>Approve Decision</button>
         `;
       }
       footerEl.innerHTML = footerBtns;

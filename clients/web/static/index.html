@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.2">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.3">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -521,7 +521,7 @@
                   </p>
                 </div>
                 <div style="display:flex; gap:8px;">
-                  <select id="socFilterPlane" aria-label="Filter by plane" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                  <select id="socFilterPlane" aria-label="Filter by plane" class="select-sm" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
                     <option value="">All Planes</option>
                     <option value="data">Data</option>
                     <option value="detection">Detection</option>
@@ -531,7 +531,7 @@
                     <option value="improvement">Improvement</option>
                     <option value="external">External</option>
                   </select>
-                  <select id="socFilterStatus" aria-label="Filter by status" class="select-sm" onchange="renderGastownWorkQueue()" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
+                  <select id="socFilterStatus" aria-label="Filter by status" class="select-sm" style="background:var(--bg-secondary); color:var(--text-main); border:1px solid var(--border-subtle); border-radius:4px; padding:4px 8px; font-size:12px;">
                     <option value="">All Statuses</option>
                     <option value="AVAILABLE">Available</option>
                     <option value="LEASED">Leased</option>
@@ -1362,6 +1362,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.6.3"></script>
+  <script src="/static/app.js?v=2.6.4"></script>
 </body>
 </html>

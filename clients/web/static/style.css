@@ -1935,6 +1935,27 @@ body.view-gastown-active .main-content-area {
   font-style: italic;
 }
 
+.table-empty {
+  text-align: center;
+  padding: 24px !important;
+  color: var(--text-muted);
+}
+
+.table-empty .btn {
+  margin-left: 8px;
+}
+
+/* Keep rows visible while a table refreshes; dim + block double actions. */
+.data-table.is-refreshing tbody {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .data-table.is-refreshing tbody { transition: none; }
+}
+
 /* Status Badges */
 .status-badge {
   display: inline-flex;

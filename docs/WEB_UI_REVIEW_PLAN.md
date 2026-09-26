@@ -40,6 +40,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 29 | Empty chat: per-topic suggested prompts instead of trash icon | 3 Resilience | Done |
 | 30 | Quick switcher (Ctrl/Cmd+K): topics, DMs, pages, recent & unread | 3 Resilience | Done |
 | 31 | Narrow screens (≤1024px): off-canvas sidebar + scrim, overlay proposals drawer, compact top bar | 3 Resilience | Done |
+| 32 | Last native confirm()/alert(): tuning deploy + clear topic → openActionDialog + toasts | 8 Follow-up | Done |
+| 33 | Work queue: keep rows while refreshing, drop stale responses, "Clear filters" empty state | 8 Follow-up | Done |
 
 ## #11 fabricated data on approval surfaces
 - `openGastownDiffModal`: preflight box always renders "Invariant/Backtest/Zero-Synthetic: PASS" + "validated against live API" regardless of `p.preflight`.
@@ -67,6 +69,13 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - `openActionDialog` gained `bodyHtml` (trusted, caller-escaped) and `showCancel`.
 - Verified: `.venv/_jscheck/g9check.py` (26 checks) + uxcheck/g7check still green.
 
+## #32 / #33 notes (2026-09-26)
+- No `confirm()`/`alert()` left in app.js. Deploy and clear-topic dialogs use `variant: "danger"`; `openActionDialog` now focuses **Cancel** by default for danger dialogs with no inputs (stray Enter can't deploy/wipe).
+- Deploy: all matching buttons disabled + `aria-busy` "Deploying…" in flight; success leaves "✓ Deployed" (disabled), failure restores. HTTP errors via `describeHttpError`.
+- Clear topic: success toast; only wipes the timeline if the operator is still on that topic.
+- Work queue: `setTableRefreshing()` dims tbody + `aria-busy` instead of replacing rows; `workQueueRenderSeq` discards out-of-order responses (filter spam, lease ticker, post-action reloads). Issues/workers fetched with `allSettled` so one failing doesn't blank the other. Filtered-empty state has "Clear filters". Inline `onchange` removed from filters.
+- Verified: `.venv/_jscheck/g4check.sh` (33 checks) + g3check (34) green.
+
 ## #5 terminology map (screen text only)
 | Current | Suggested |
 |---|---|
@@ -81,9 +90,7 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 
 ## Medium priority (backlog)
 - Backend: `POST /api/mitre/audit` and MITRE ATT&CK coverage assessment engine/endpoints now merged and operational.
-- Remaining native confirm()/alert(): noise-exclusion deploy, clear-topic, send failure — migrate to openActionDialog()/showToast()
 - Diff modal shows raw diff text; chat widget uses coloured formatUnifiedDiff() — unify
-- Work-queue filter change wipes table with "Refreshing…" — keep rows, show inline spinner
 - Hardcoded counts in copy ("5 Active Patrols", "Sweeping all 5 fleet patrol cycles")
 - 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
 - Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live

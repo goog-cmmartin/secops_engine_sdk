@@ -363,6 +363,10 @@ function setupEventListeners() {
 
   if (tabGtKanban) tabGtKanban.addEventListener("click", () => switchGastownSubtab("kanban"));
   if (tabGtWorkQueue) tabGtWorkQueue.addEventListener("click", () => switchGastownSubtab("work_queue"));
+  ["socFilterPlane", "socFilterStatus"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", () => renderGastownWorkQueue());
+  });
   if (tabGtConvoys) tabGtConvoys.addEventListener("click", () => switchGastownSubtab("convoys"));
   if (tabGtRefinery) tabGtRefinery.addEventListener("click", () => switchGastownSubtab("refinery"));
   if (tabGtEscalations) tabGtEscalations.addEventListener("click", () => switchGastownSubtab("escalations"));
@@ -3552,24 +3556,54 @@ window.promptViewSamples = async function(ruleId) {
   input.focus();
 };
 
+function tuningDeployButtons(ruleId) {
+  return Array.from(document.querySelectorAll('[data-act="deployTuningProposal"]')).filter((b) => {
+    try { return JSON.parse(b.dataset.actArgs || "[]")[0] === ruleId; } catch (_) { return false; }
+  });
+}
+
 window.deployTuningProposal = async function(ruleId, ruleName) {
-  if (!confirm(`Deploy noise suppression exclusion to live Chronicle for ${ruleName}?`)) {
-    return;
-  }
+  const ok = await openActionDialog({
+    title: "Deploy noise suppression",
+    message: `This writes the exclusion shown in the diff to the live Chronicle rule "${ruleName}". Matching events will stop generating detections for this rule.`,
+    confirmLabel: "Deploy to Chronicle",
+    variant: "danger",
+  });
+  if (!ok) return;
+
+  const buttons = tuningDeployButtons(ruleId);
+  const labels = buttons.map((b) => b.innerHTML);
+  buttons.forEach((b) => { b.disabled = true; b.setAttribute("aria-busy", "true"); b.textContent = "Deploying…"; });
+  let deployed = false;
   try {
-    const res = await fetch(`/api/tuning/deploy/${ruleId}`, {
+    const res = await fetch(`/api/tuning/deploy/${encodeURIComponent(ruleId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rule_name: ruleName }),
     });
-    const result = await res.json();
+    if (!res.ok) {
+      showToast("error", `Deploy failed for ${ruleName}: ${await describeHttpError(res)}`);
+      return;
+    }
+    const result = await res.json().catch(() => ({}));
     if (result.status === "SUCCESS") {
-      alert(`Success! Noise suppression deployed to Chronicle: ${result.message}`);
+      deployed = true;
+      showToast("success", `Noise suppression deployed for ${ruleName}.${result.message ? " " + result.message : ""}`);
     } else {
-      alert(`Error deploying tuning: ${result.message}`);
+      showToast("error", `Deploy failed for ${ruleName}: ${result.message || "unknown error"}`);
     }
   } catch (err) {
-    alert("Network error deploying tuning: " + err);
+    showToast("error", `Deploy failed for ${ruleName}: ${friendlyErrorText(err)}`);
+  } finally {
+    buttons.forEach((b, i) => {
+      b.removeAttribute("aria-busy");
+      if (deployed) {
+        b.textContent = "✓ Deployed";
+      } else {
+        b.disabled = false;
+        b.innerHTML = labels[i];
+      }
+    });
   }
 };
 
@@ -3716,9 +3750,13 @@ async function handleClearTopic() {
   const topic = state.activeTopic;
   const label = stream === "dm" ? `@${topic}` : `#${stream} > ${topic}`;
 
-  if (!confirm(`Clear all message history in ${label}?\n\nThis will remove previous agent executions and test runs from this topic.`)) {
-    return;
-  }
+  const ok = await openActionDialog({
+    title: "Clear message history",
+    message: `Permanently delete every message in ${label}, including previous agent runs and test output. This can't be undone.`,
+    confirmLabel: "Clear history",
+    variant: "danger",
+  });
+  if (!ok) return;
 
   try {
     const res = await fetch(`/api/messages?stream=${encodeURIComponent(stream)}&topic=${encodeURIComponent(topic)}`, {
@@ -3726,17 +3764,21 @@ async function handleClearTopic() {
     });
 
     if (!res.ok) {
-      alert("Failed to clear topic: " + (await res.text()));
+      showToast("error", `Couldn't clear ${label}: ${await describeHttpError(res)}`);
       return;
     }
 
-    state.messages = [];
-    hideAgentStatusIndicator();
-    renderTimeline();
+    // Only wipe the view if the operator is still looking at the cleared topic.
+    if (state.activeStream === stream && state.activeTopic === topic) {
+      state.messages = [];
+      hideAgentStatusIndicator();
+      renderTimeline();
+    }
     loadStreams();
+    showToast("success", `Cleared message history in ${label}.`);
   } catch (err) {
     console.error("Failed to clear topic:", err);
-    alert("Network error clearing topic: " + err);
+    showToast("error", `Couldn't clear ${label}: ${friendlyErrorText(err)}`);
   }
 }
 
@@ -3858,7 +3900,9 @@ function openActionDialog({ title, message = "", confirmLabel = "Confirm", varia
 
     document.body.appendChild(overlay);
     const firstInput = form.querySelector("input, textarea, select");
-    (firstInput || form.querySelector('button[type="submit"]')).focus();
+    // Destructive confirmations with no inputs start on Cancel so a stray Enter can't fire them.
+    const safeDefault = variant === "danger" && !firstInput ? cancelBtn : null;
+    (firstInput || safeDefault || form.querySelector('button[type="submit"]')).focus();
     if (firstInput && firstInput.select) firstInput.select();
   });
 }
@@ -4497,6 +4541,7 @@ const ACTION_FNS = {
   promptRemediateRule: () => promptRemediateRule,
   auditRuleInChat: () => auditRuleInChat,
   deployTuningProposal: () => window.deployTuningProposal,
+  clearSocQueueFilters: () => window.clearSocQueueFilters,
   promptTuneRule: () => window.promptTuneRule,
   promptViewSamples: () => window.promptViewSamples,
   triggerCrossAgentHandoff: () => triggerCrossAgentHandoff,
@@ -7336,38 +7381,59 @@ window.renderGastownPatrols = renderGastownPatrols;
 // SOC Operating System: Work Queue, Leases & Git Durability Ledger
 // ====================================================================
 
+// Marks a table as refreshing without discarding its rows (no flash-to-empty on
+// filter changes or post-action reloads). First load keeps the HTML placeholder.
+function setTableRefreshing(tbody, on) {
+  const table = tbody && tbody.closest("table");
+  if (!table) return;
+  table.classList.toggle("is-refreshing", on);
+  if (on) table.setAttribute("aria-busy", "true");
+  else table.removeAttribute("aria-busy");
+}
+
+let workQueueRenderSeq = 0;
+
+window.clearSocQueueFilters = function () {
+  const plane = document.getElementById("socFilterPlane");
+  const status = document.getElementById("socFilterStatus");
+  if (plane) plane.value = "";
+  if (status) status.value = "";
+  return renderGastownWorkQueue();
+};
+
 async function renderGastownWorkQueue() {
   const issuesTableBody = document.getElementById("gtSocIssuesTableBody");
   const workersTableBody = document.getElementById("gtSocWorkersTableBody");
   const planeFilter = document.getElementById("socFilterPlane")?.value || "";
   const statusFilter = document.getElementById("socFilterStatus")?.value || "";
+  const seq = ++workQueueRenderSeq;
 
-  if (issuesTableBody) {
-    issuesTableBody.innerHTML = `<tr><td colspan="9" class="table-loading">Refreshing coordination work queue...</td></tr>`;
-  }
-  if (workersTableBody) {
-    workersTableBody.innerHTML = `<tr><td colspan="6" class="table-loading">Refreshing worker capability profiles...</td></tr>`;
-  }
+  setTableRefreshing(issuesTableBody, true);
+  setTableRefreshing(workersTableBody, true);
 
   try {
     let url = "/api/soc/issues?limit=100";
     if (planeFilter) url += `&plane=${encodeURIComponent(planeFilter)}`;
     if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
 
-    const [issuesRes, workersRes] = await Promise.all([
-      fetch(url),
-      fetch("/api/soc/workers?active_only=false")
+    const [issuesResult, workersResult] = await Promise.allSettled([
+      fetchJsonOrThrow(url),
+      fetchJsonOrThrow("/api/soc/workers?active_only=false"),
     ]);
+    // A newer render (filter changed again, or an action reloaded) owns the tables now.
+    if (seq !== workQueueRenderSeq) return;
+    if (issuesResult.status === "rejected") throw issuesResult.reason;
 
-    const issues = issuesRes.ok ? await issuesRes.json() : [];
-    const workers = workersRes.ok ? await workersRes.json() : [];
+    const issues = Array.isArray(issuesResult.value) ? issuesResult.value : [];
     socQueueCache.issues = issues;
-    socQueueCache.workers = workers;
 
     // Render Issues Table
     if (issuesTableBody) {
       if (issues.length === 0) {
-        issuesTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:24px; color:var(--text-muted);">No SOC issues match the active filter.</td></tr>`;
+        const filtered = planeFilter || statusFilter;
+        issuesTableBody.innerHTML = `<tr><td colspan="9" class="table-empty">${filtered
+          ? `No issues match the current filters. <button type="button" class="btn btn-xs btn-secondary" ${act("clearSocQueueFilters")}>Clear filters</button>`
+          : "No SOC issues in the work queue."}</td></tr>`;
       } else {
         const nowSec = Date.now() / 1000;
         issuesTableBody.innerHTML = issues.map((iss) => {
@@ -7442,8 +7508,12 @@ async function renderGastownWorkQueue() {
       }
     }
 
-    // Render Workers Table
-    if (workersTableBody) {
+    // Render Workers Table (independent of the issues request)
+    if (workersResult.status === "rejected") {
+      showLoadError(workersTableBody, { title: "Couldn't load workers", error: workersResult.reason, retry: renderGastownWorkQueue, colspan: 6 });
+    } else if (workersTableBody) {
+      const workers = Array.isArray(workersResult.value) ? workersResult.value : [];
+      socQueueCache.workers = workers;
       if (workers.length === 0) {
         workersTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">No workers registered in coordination plane.</td></tr>`;
       } else {
@@ -7475,9 +7545,14 @@ async function renderGastownWorkQueue() {
       }
     }
   } catch (err) {
+    if (seq !== workQueueRenderSeq) return;
     console.error("Failed to render SOC work queue:", err);
     showLoadError(issuesTableBody, { title: "Couldn't load the work queue", error: err, retry: renderGastownWorkQueue, colspan: 9 });
-    showLoadError(workersTableBody, { title: "Couldn't load workers", error: err, colspan: 6 });
+  } finally {
+    if (seq === workQueueRenderSeq) {
+      setTableRefreshing(issuesTableBody, false);
+      setTableRefreshing(workersTableBody, false);
+    }
   }
 }
 window.renderGastownWorkQueue = renderGastownWorkQueue;

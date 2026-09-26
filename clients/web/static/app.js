@@ -98,6 +98,16 @@ function unreadForStream(stream) {
   return Object.keys(unreadCounts).reduce((n, k) => (k.startsWith(prefix) ? n + unreadCounts[k] : n), 0);
 }
 
+// #36: a patrol report that says "all clear" isn't worth a badge. Matches the
+// fleet_scheduler._format_patrol_message layout; anything with a warning,
+// anomaly or dispatched beads still counts.
+function isRoutinePatrolPost(msg) {
+  if (!msg || msg.sender_type !== "agent") return false;
+  const c = String(msg.content || "");
+  return /\*\*Patrol Status\*\*: `✓ COMPLETED`/.test(c)
+    && !/⚠️|Anomaly|Beads Dispatched/i.test(c);
+}
+
 function bumpUnread(stream, topic) {
   const key = channelKey(stream, topic);
   unreadCounts[key] = (unreadCounts[key] || 0) + 1;
@@ -803,7 +813,8 @@ function initSSE() {
         const msg = data.message;
         const isActiveChannel = msg.stream === state.activeStream && msg.topic === state.activeTopic;
         // Count messages from others that the operator isn't currently looking at.
-        if (msg.sender_handle !== "@operator" && !(isActiveChannel && state.currentView === "chat")) {
+        if (msg.sender_handle !== "@operator" && !isRoutinePatrolPost(msg)
+            && !(isActiveChannel && state.currentView === "chat")) {
           bumpUnread(msg.stream, msg.topic);
         }
         // If message belongs to current stream and topic, handle timeline update

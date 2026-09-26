@@ -144,7 +144,7 @@ Root cause of the chat noise found in the audit (133 unread, repeated "Agent Con
 ### Queued UX items
 | # | Item | Status |
 |---|------|--------|
-| 36 | Unread: exclude routine autonomous patrol posts (e.g. `@feed-agent` ✓ status) from counts; still count warnings/failures | Todo |
+| 36 | Unread: exclude routine autonomous patrol posts (e.g. `@feed-agent` ✓ status) from counts; still count warnings/failures | Done — `isRoutinePatrolPost()` (✓ COMPLETED with no ⚠️/Anomaly/Beads Dispatched); message still shows in the timeline |
 | 37 | Missing credentials: show one persistent chat banner instead of a config-error reply per message | Done — `/api/health.llm_configured` (bool only) + composer notice; creds logic shared via `llm_credentials_status()` |
 | 38 | 390px viewport overflows to 484px — find and fix the wide element | Done — top-bar meta, chat-header actions, Actions/Dashboards tab strips (now scroll), coordinator banner, page padding. `ovfcheck` now flags horizontal-scroll containers and regenerates `ovf.html` from live index.html; 390px via cdp.py |
 | 39 | Kanban Triage: collapse/group empty scheduled-audit tasks | Todo |

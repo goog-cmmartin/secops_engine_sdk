@@ -1185,6 +1185,7 @@ class FleetScheduler:
             try:
                 now = datetime.now(timezone.utc)
                 self._last_heartbeat_at = now.isoformat()
+                self._reclaim_expired_leases()
                 for handle, sched in list(self._schedules.items()):
                     if not sched.get("enabled", False):
                         continue
@@ -1208,6 +1209,17 @@ class FleetScheduler:
                 logger.error("Error in FleetScheduler worker iteration: %s", e)
 
             await asyncio.sleep(self.poll_interval_seconds)
+
+    def _reclaim_expired_leases(self) -> List[str]:
+        """Returns issues held by crashed/stalled workers to the pool."""
+        queue = self.work_queue or getattr(self.lifecycle_manager, "work_queue", None)
+        if queue is None or not hasattr(queue, "reclaim_expired_leases"):
+            return []
+        try:
+            return queue.reclaim_expired_leases()
+        except Exception as e:
+            logger.error("Lease reclamation failed: %s", e)
+            return []
 
     def start(self) -> None:
         """Starts the scheduler background task."""

@@ -4017,25 +4017,83 @@ async function openAboutDialog() {
 window.openAboutDialog = openAboutDialog;
 
 // --- Proposal Approvals & Rejections ---
+const APPROVAL_TIER_LABELS = {
+  TIER_1_AUTONOMOUS: "Autonomous",
+  TIER_2_PEER_REVIEW: "Peer review",
+  TIER_3_HUMAN_APPROVAL: "Human approval required",
+};
+// Mirrors CODE_CHANGE_ACTIONS in agents/core/approval_policy.py (server is authoritative).
+const PREFLIGHT_GATED_ACTIONS = new Set(["PATCH_RULE", "UPDATE_RULE_TEXT", "PATCH_PARSER_CBN"]);
+
+function formatApiError(detail, fallback) {
+  if (!detail) return String(fallback);
+  if (typeof detail === "string") return detail;
+  if (detail.message) return detail.message;
+  return JSON.stringify(detail);
+}
+
 async function handleApproveProposal(proposalId) {
+  let proposal = null;
+  try {
+    const pres = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}`);
+    if (pres.ok) proposal = await pres.json();
+  } catch (_) { /* server re-validates; dialog falls back to the generic form */ }
+
+  const tier = proposal && proposal.required_tier;
+  const preflightFailed = !!proposal
+    && PREFLIGHT_GATED_ACTIONS.has(String(proposal.action_type || "").toUpperCase())
+    && !(proposal.preflight && proposal.preflight.syntax_verified);
+
+  const facts = [];
+  if (tier) facts.push(["Authority", APPROVAL_TIER_LABELS[tier] || tier]);
+  if (proposal && proposal.risk_level) facts.push(["Risk", proposal.risk_level]);
+  if (proposal && proposal.author) facts.push(["Author", proposal.author]);
+  const factsHtml = facts.length
+    ? `<dl class="about-grid">${facts.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>`
+    : "";
+  const warnHtml = preflightFailed
+    ? `<div class="action-dialog-error" role="note">Syntax preflight did not pass. Applying this change may break the target in production. You must give an override reason.</div>`
+    : "";
+
+  const fields = [{ name: "note", label: "Approval note", type: "textarea", placeholder: "Why is this change safe to apply?" }];
+  if (preflightFailed) {
+    fields.push({
+      name: "override_reason",
+      label: "Preflight override reason",
+      type: "textarea",
+      required: true,
+      minLength: 10,
+      placeholder: "e.g. Compiler rejected a valid reference list; verified manually in the rule editor.",
+    });
+  }
+
   const result = await openActionDialog({
-    title: "Approve & apply change",
+    title: preflightFailed ? "Override failed preflight & apply" : "Approve & apply change",
     message: `Approving ${proposalId} executes a live production mutation in SecOps. This is recorded in the audit trail.`,
-    confirmLabel: "Approve & Apply",
-    fields: [{ name: "note", label: "Approval note", type: "textarea", placeholder: "Why is this change safe to apply?" }],
+    confirmLabel: preflightFailed ? "Override & Apply" : "Approve & Apply",
+    variant: preflightFailed ? "danger" : "primary",
+    bodyHtml: factsHtml + warnHtml,
+    fields,
   });
   if (!result) return false;
+
+  const payload = { merged_by: "secops-operator", approval_note: result.note || null };
+  if (preflightFailed) {
+    payload.override_preflight = true;
+    payload.override_reason = result.override_reason;
+  }
 
   try {
     const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ merged_by: "secops-operator", approval_note: result.note || null }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      showToast("error", `Approval failed: ${err.detail || res.status}`);
+      const prefix = res.status === 403 ? "Not permitted" : res.status === 422 ? "Blocked by policy" : "Approval failed";
+      showToast("error", `${prefix}: ${formatApiError(err.detail, res.status)}`);
       return false;
     }
     showToast("success", `Proposal ${proposalId} approved and merged to production!`);

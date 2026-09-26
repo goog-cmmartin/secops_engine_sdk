@@ -14,6 +14,7 @@ import subprocess
 from typing import Any, Dict, List, Optional
 import yaml
 
+from agents.core.approval_policy import check_approval, required_tier
 from agents.core.git_guard import git_commits_enabled
 from agents.core.ledger import resolve_ledger_root
 
@@ -50,6 +51,8 @@ class ChangeProposal:
     merge_commit: Optional[str] = None
     rejection_reason: Optional[str] = None
     approval_note: Optional[str] = None
+    required_tier: str = ""
+    preflight_override_reason: Optional[str] = None
     rationale: str = ""
     proposed_diff: str = ""
     issue_id: Optional[str] = None
@@ -105,6 +108,8 @@ class ProposalManager:
             "merge_commit": proposal.merge_commit,
             "rejection_reason": proposal.rejection_reason,
             "approval_note": proposal.approval_note,
+            "required_tier": proposal.required_tier,
+            "preflight_override_reason": proposal.preflight_override_reason,
             "preflight": asdict(proposal.preflight),
             "mutation_payload": proposal.mutation_payload,
         }
@@ -169,6 +174,10 @@ class ProposalManager:
             merge_commit=frontmatter.get("merge_commit"),
             rejection_reason=frontmatter.get("rejection_reason"),
             approval_note=frontmatter.get("approval_note"),
+            required_tier=frontmatter.get("required_tier") or required_tier(
+                frontmatter.get("action_type", ""), frontmatter.get("risk_level", "MEDIUM")
+            ),
+            preflight_override_reason=frontmatter.get("preflight_override_reason"),
             rationale=rationale,
             proposed_diff=diff,
             preflight=preflight,
@@ -182,6 +191,8 @@ class ProposalManager:
             proposal.id = f"prop-{timestamp}-{proposal.subsystem[:6]}"
 
         proposal.status = "OPEN"
+        # Tier is always derived server-side; agents cannot self-declare a lower one.
+        proposal.required_tier = required_tier(proposal.action_type, proposal.risk_level)
         proposal.created_at = datetime.now(timezone.utc).isoformat()
         proposal.updated_at = proposal.created_at
 
@@ -254,13 +265,45 @@ class ProposalManager:
         inventory_client: Any = None,
         lifecycle_manager: Any = None,
         approval_note: Optional[str] = None,
+        override_preflight: bool = False,
+        override_reason: Optional[str] = None,
     ) -> MergeResult:
-        """Applies mutation via SecOpsEngine, moves proposal to merged/, and records git commit."""
+        """Applies mutation via SecOpsEngine, moves proposal to merged/, and records git commit.
+
+        Raises:
+            ValueError: proposal is not OPEN.
+            ApprovalPolicyError: approver is not permitted to merge this proposal
+                (self-approval, tier requires a human, or failed preflight without override).
+        """
         open_file = self.open_dir / f"{proposal_id}.md"
         if not open_file.is_file():
             raise ValueError(f"Proposal {proposal_id} is not in OPEN status.")
 
         proposal = self._parse_markdown(open_file)
+
+        stored_tier = proposal.required_tier
+        if proposal.issue_id and lifecycle_manager is not None:
+            try:
+                issue = lifecycle_manager.work_queue.get_issue(proposal.issue_id)
+                if issue is not None:
+                    stored_tier = issue.governance.required_authority_tier
+            except Exception as tier_err:
+                logger.warning("Could not read linked issue tier for %s: %s", proposal_id, tier_err)
+
+        # Policy gate: raises before any production mutation.
+        proposal.required_tier = check_approval(
+            author=proposal.author,
+            approver=merged_by,
+            action_type=proposal.action_type,
+            risk_level=proposal.risk_level,
+            stored_tier=stored_tier,
+            syntax_verified=bool(proposal.preflight.syntax_verified),
+            override_preflight=override_preflight,
+            override_reason=override_reason,
+        )
+        if override_preflight and not proposal.preflight.syntax_verified:
+            proposal.preflight_override_reason = (override_reason or "").strip()
+
         execution_res = None
 
         try:
@@ -431,6 +474,12 @@ class ProposalManager:
             )
             if proposal.approval_note:
                 commit_msg += f"Approval-Note: {proposal.approval_note}\n"
+            if proposal.merged_by:
+                commit_msg += f"Approved-By: {proposal.merged_by}\n"
+            if proposal.required_tier:
+                commit_msg += f"Authority-Tier: {proposal.required_tier}\n"
+            if proposal.preflight_override_reason:
+                commit_msg += f"Preflight-Override: {proposal.preflight_override_reason}\n"
 
             res = subprocess.run(
                 ["git", "commit", "-m", commit_msg, "--", ".proposals/"],

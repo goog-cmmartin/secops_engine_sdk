@@ -35,6 +35,49 @@ from agents.core.evidence_store import normalize_doc_id, sanitize_for_firestore
 logger = logging.getLogger(__name__)
 
 
+# Statuses in which a worker holds the issue. If the lease on such an issue has
+# expired, the worker is presumed dead and the issue returns to the pool.
+# VALIDATING and later are post-work states and are never reclaimed.
+RECLAIMABLE_STATUSES = frozenset({
+    IssueLifecycleStatus.LEASED.value,
+    IssueLifecycleStatus.CLAIMED.value,
+    IssueLifecycleStatus.EXECUTING.value,
+})
+
+LEASE_EXPIRED_OUTCOME = "LEASE_EXPIRED"
+
+
+def is_reclaimable(issue: SOCIssue) -> bool:
+    """True when the issue is held by a worker whose lease has lapsed."""
+    return issue.status in RECLAIMABLE_STATUSES and (issue.lease is None or issue.lease.is_expired())
+
+
+def is_claimable(issue: SOCIssue) -> bool:
+    """True when a worker may take the issue now."""
+    if issue.status == IssueLifecycleStatus.AVAILABLE.value:
+        return issue.lease is None or issue.lease.is_expired()
+    return is_reclaimable(issue)
+
+
+def _capabilities_match(issue: SOCIssue, agent_capabilities: Dict[str, int]) -> bool:
+    for cap, min_level in issue.routing.requires_capabilities.items():
+        if agent_capabilities.get(cap, 0) < min_level:
+            return False
+    return True
+
+
+def _expiry_attempt(issue: SOCIssue, now: datetime) -> Dict[str, Any]:
+    owner = issue.lease.owner if issue.lease else (issue.routing.claimed_by or "unknown")
+    gen = issue.lease.generation if issue.lease else 0
+    expires = issue.lease.expires_at if issue.lease else ""
+    return {
+        "actor": owner,
+        "outcome": LEASE_EXPIRED_OUTCOME,
+        "timestamp": now.isoformat(),
+        "notes": f"Lease generation {gen} expired at {expires} without release; returned to pool.",
+    }
+
+
 class BaseWorkQueue(ABC):
     """Abstract interface for the SOC Operating System Work Queue."""
 
@@ -124,6 +167,11 @@ class BaseWorkQueue(ABC):
         notes: str = "",
     ) -> None:
         """Records an execution attempt on an issue."""
+        pass
+
+    @abstractmethod
+    def reclaim_expired_leases(self) -> List[str]:
+        """Returns issues with lapsed leases to AVAILABLE. Returns reclaimed issue IDs."""
         pass
 
     @abstractmethod
@@ -219,22 +267,9 @@ class LocalWorkQueue(BaseWorkQueue):
         plane: Optional[str] = None,
         limit: int = 20,
     ) -> List[SOCIssue]:
-        eligible: List[SOCIssue] = []
         with self._lock:
-            available_issues = self.list_issues(status=IssueLifecycleStatus.AVAILABLE.value, plane=plane, limit=100)
-            for issue in available_issues:
-                # Check if leased and lease expired
-                if issue.lease and not issue.lease.is_expired():
-                    continue
-
-                reqs = issue.routing.requires_capabilities
-                matches = True
-                for cap, min_level in reqs.items():
-                    if agent_capabilities.get(cap, 0) < min_level:
-                        matches = False
-                        break
-                if matches:
-                    eligible.append(issue)
+            candidates = self.list_issues(plane=plane, limit=10_000)
+        eligible = [i for i in candidates if is_claimable(i) and _capabilities_match(i, agent_capabilities)]
         eligible.sort(key=lambda x: x.priority_score, reverse=True)
         return eligible[:limit]
 
@@ -255,6 +290,11 @@ class LocalWorkQueue(BaseWorkQueue):
                 if issue.lease.owner != agent_handle:
                     logger.debug("Issue %s is already leased to %s", issue_id, issue.lease.owner)
                     return None
+            elif not is_claimable(issue):
+                logger.debug("Issue %s is not claimable in status %s", issue_id, issue.status)
+                return None
+            elif is_reclaimable(issue):
+                issue.attempts.append(_expiry_attempt(issue, now))
 
             # Issue is unleased, expired, or already owned by same agent
             expires_at = (now + timedelta(seconds=duration_seconds)).isoformat()
@@ -397,6 +437,30 @@ class LocalWorkQueue(BaseWorkQueue):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(issue.to_dict(), f, indent=2)
 
+    def reclaim_expired_leases(self) -> List[str]:
+        reclaimed: List[str] = []
+        with self._lock:
+            for issue in self.list_issues(limit=10_000):
+                if not is_reclaimable(issue):
+                    continue
+                now = datetime.now(timezone.utc)
+                issue.attempts.append(_expiry_attempt(issue, now))
+                if not isinstance(issue.references, dict):
+                    issue.references = {}
+                if issue.lease:
+                    issue.references["lease_generation"] = issue.lease.generation
+                issue.lease = None
+                issue.status = IssueLifecycleStatus.AVAILABLE.value
+                issue.routing.claimed_by = None
+                issue.routing.claim_timestamp = None
+                issue.updated_at = now.isoformat()
+                with open(self._issue_file(issue.id), "w", encoding="utf-8") as f:
+                    json.dump(issue.to_dict(), f, indent=2)
+                reclaimed.append(issue.id)
+        if reclaimed:
+            logger.warning("Reclaimed %d issue(s) with expired leases: %s", len(reclaimed), ", ".join(reclaimed))
+        return reclaimed
+
     def register_worker(self, profile: AgentCapabilityProfile) -> bool:
         with self._lock:
             profile.heartbeat_at = datetime.now(timezone.utc).isoformat()
@@ -510,19 +574,10 @@ class FirestoreWorkQueue(BaseWorkQueue):
         plane: Optional[str] = None,
         limit: int = 20,
     ) -> List[SOCIssue]:
-        available = self.list_issues(status=IssueLifecycleStatus.AVAILABLE.value, plane=plane, limit=100)
-        eligible: List[SOCIssue] = []
-        for issue in available:
-            if issue.lease and not issue.lease.is_expired():
-                continue
-            reqs = issue.routing.requires_capabilities
-            matches = True
-            for cap, min_level in reqs.items():
-                if agent_capabilities.get(cap, 0) < min_level:
-                    matches = False
-                    break
-            if matches:
-                eligible.append(issue)
+        candidates: List[SOCIssue] = []
+        for status in (IssueLifecycleStatus.AVAILABLE.value, *sorted(RECLAIMABLE_STATUSES)):
+            candidates.extend(self.list_issues(status=status, plane=plane, limit=100))
+        eligible = [i for i in candidates if is_claimable(i) and _capabilities_match(i, agent_capabilities)]
         eligible.sort(key=lambda x: x.priority_score, reverse=True)
         return eligible[:limit]
 
@@ -546,9 +601,14 @@ class FirestoreWorkQueue(BaseWorkQueue):
             issue = SOCIssue.from_dict(data)
 
             now = datetime.now(timezone.utc)
+            expiry_attempt = None
             if issue.lease and not issue.lease.is_expired():
                 if issue.lease.owner != agent_handle:
                     return None
+            elif not is_claimable(issue):
+                return None
+            elif is_reclaimable(issue):
+                expiry_attempt = _expiry_attempt(issue, now)
 
             expires_at = (now + timedelta(seconds=duration_seconds)).isoformat()
             last_gen = issue.references.get("lease_generation", 0) if isinstance(issue.references, dict) else 0
@@ -561,17 +621,17 @@ class FirestoreWorkQueue(BaseWorkQueue):
                 generation=gen,
             )
 
-            transaction.update(
-                doc_ref,
-                {
-                    "lease": new_lease.to_dict(),
-                    "references.lease_generation": gen,
-                    "status": IssueLifecycleStatus.LEASED.value,
-                    "routing.claimed_by": agent_handle,
-                    "routing.claim_timestamp": now.isoformat(),
-                    "updated_at": now.isoformat(),
-                },
-            )
+            updates: Dict[str, Any] = {
+                "lease": new_lease.to_dict(),
+                "references.lease_generation": gen,
+                "status": IssueLifecycleStatus.LEASED.value,
+                "routing.claimed_by": agent_handle,
+                "routing.claim_timestamp": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+            if expiry_attempt:
+                updates["attempts"] = list(issue.attempts) + [expiry_attempt]
+            transaction.update(doc_ref, updates)
             return new_lease
 
         transaction = self.db.transaction()
@@ -683,6 +743,51 @@ class FirestoreWorkQueue(BaseWorkQueue):
                 "updated_at": now.isoformat(),
             }
         )
+
+    def reclaim_expired_leases(self) -> List[str]:
+        from google.cloud import firestore
+
+        candidates: List[SOCIssue] = []
+        for status in sorted(RECLAIMABLE_STATUSES):
+            candidates.extend(self.list_issues(status=status, limit=500))
+
+        reclaimed: List[str] = []
+        for candidate in candidates:
+            if not is_reclaimable(candidate):
+                continue
+            doc_ref = self.issues_col.document(normalize_doc_id(candidate.id))
+
+            @firestore.transactional
+            def _txn_reclaim(transaction: Any) -> bool:
+                snapshot = doc_ref.get(transaction=transaction)
+                if not snapshot.exists:
+                    return False
+                issue = SOCIssue.from_dict(snapshot.to_dict() or {})
+                # Re-check inside the transaction: the owner may have renewed meanwhile.
+                if not is_reclaimable(issue):
+                    return False
+                now = datetime.now(timezone.utc)
+                updates: Dict[str, Any] = {
+                    "lease": None,
+                    "status": IssueLifecycleStatus.AVAILABLE.value,
+                    "routing.claimed_by": None,
+                    "routing.claim_timestamp": None,
+                    "updated_at": now.isoformat(),
+                    "attempts": list(issue.attempts) + [_expiry_attempt(issue, now)],
+                }
+                if issue.lease:
+                    updates["references.lease_generation"] = issue.lease.generation
+                transaction.update(doc_ref, updates)
+                return True
+
+            try:
+                if _txn_reclaim(self.db.transaction()):
+                    reclaimed.append(candidate.id)
+            except Exception as e:
+                logger.error("Transaction failed reclaiming lease on %s: %s", candidate.id, e)
+        if reclaimed:
+            logger.warning("Reclaimed %d issue(s) with expired leases: %s", len(reclaimed), ", ".join(reclaimed))
+        return reclaimed
 
     def register_worker(self, profile: AgentCapabilityProfile) -> bool:
         clean_handle = normalize_doc_id(profile.agent_handle)

@@ -150,6 +150,7 @@ class ProposalManagerTest(unittest.TestCase):
     def test_approve_and_merge_proposal(self):
         proposal = ChangeProposal(
             id="prop-merge-me",
+            preflight=PreflightProof(syntax_verified=True),
             title="Fix Throttling",
             author="@yaral-optimizer",
             subsystem="detection_rules",
@@ -186,6 +187,7 @@ class ProposalManagerTest(unittest.TestCase):
     def test_approve_and_merge_update_rule_text(self):
         proposal = ChangeProposal(
             id="prop-update-text-me",
+            preflight=PreflightProof(syntax_verified=True),
             title="Update Rule Text",
             author="@yaral-optimizer",
             subsystem="detection_rules",

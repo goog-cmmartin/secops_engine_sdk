@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agents.core.base_adk_agent import llm_credentials_status
+from agents.core.approval_policy import ApprovalPolicyError
 from agents.core.proposal_manager import ProposalManager
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
@@ -196,6 +197,8 @@ class PostMessageRequest(BaseModel):
 class ApproveProposalRequest(BaseModel):
     merged_by: str = Field(default="secops-operator", description="Identifier of human approving mutation")
     approval_note: Optional[str] = Field(default=None, description="Operator justification recorded with the merge")
+    override_preflight: bool = Field(default=False, description="Explicitly approve despite a failed syntax preflight")
+    override_reason: Optional[str] = Field(default=None, description="Required justification when override_preflight is set")
 
 
 class RejectProposalRequest(BaseModel):
@@ -504,6 +507,8 @@ async def list_proposals(
             "merge_commit": p.merge_commit,
             "rejection_reason": p.rejection_reason,
             "approval_note": p.approval_note,
+            "required_tier": p.required_tier,
+            "preflight_override_reason": p.preflight_override_reason,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -533,6 +538,8 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
             "merge_commit": p.merge_commit,
             "rejection_reason": p.rejection_reason,
             "approval_note": p.approval_note,
+            "required_tier": p.required_tier,
+            "preflight_override_reason": p.preflight_override_reason,
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -553,13 +560,24 @@ async def approve_proposal(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
 
-    res = proposal_manager.approve_and_merge(
-        proposal_id=proposal_id,
-        engine=engine,
-        merged_by=body.merged_by,
-        lifecycle_manager=lifecycle_manager,
-        approval_note=body.approval_note,
-    )
+    try:
+        res = proposal_manager.approve_and_merge(
+            proposal_id=proposal_id,
+            engine=engine,
+            merged_by=body.merged_by,
+            lifecycle_manager=lifecycle_manager,
+            approval_note=body.approval_note,
+            override_preflight=body.override_preflight,
+            override_reason=body.override_reason,
+        )
+    except ApprovalPolicyError as policy_err:
+        status = 422 if policy_err.code in (
+            ApprovalPolicyError.PREFLIGHT_FAILED,
+            ApprovalPolicyError.OVERRIDE_REASON_REQUIRED,
+        ) else 403
+        raise HTTPException(status_code=status, detail=policy_err.to_dict())
+    except ValueError as state_err:
+        raise HTTPException(status_code=409, detail=str(state_err))
 
     if not res.success:
         raise HTTPException(status_code=500, detail=f"Mutation failed: {res.error_message}")

@@ -42,6 +42,8 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 31 | Narrow screens (≤1024px): off-canvas sidebar + scrim, overlay proposals drawer, compact top bar | 3 Resilience | Done |
 | 32 | Last native confirm()/alert(): tuning deploy + clear topic → openActionDialog + toasts | 8 Follow-up | Done |
 | 33 | Work queue: keep rows while refreshing, drop stale responses, "Clear filters" empty state | 8 Follow-up | Done |
+| 34 | Kanban review column: oldest-first, per-card wait age, "oldest Nh" header, pending/overdue highlight | 8 Follow-up | Done |
+| 35 | Per-view URLs: Actions sub-tabs + briefing tabs in the hash; Back/Forward walks sub-tabs | 8 Follow-up | Done |
 
 ## #11 fabricated data on approval surfaces
 - `openGastownDiffModal`: preflight box always renders "Invariant/Backtest/Zero-Synthetic: PASS" + "validated against live API" regardless of `p.preflight`.
@@ -76,6 +78,12 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Work queue: `setTableRefreshing()` dims tbody + `aria-busy` instead of replacing rows; `workQueueRenderSeq` discards out-of-order responses (filter spam, lease ticker, post-action reloads). Issues/workers fetched with `allSettled` so one failing doesn't blank the other. Filtered-empty state has "Clear filters". Inline `onchange` removed from filters.
 - Verified: `.venv/_jscheck/g4check.sh` (33 checks) + g3check (34) green.
 
+## #34 / #35 notes (2026-09-26)
+- #34: review column merges OPEN proposals (`created_at`) + VALIDATING SOC issues (`updated_at || created_at`), sorted oldest-first; untimestamped last. Age chip per card (neutral <4h, amber ≥4h, red ≥24h; tooltip = absolute time). Header `#oldestColReview` shows "oldest Nh"; column gets `.has-pending` (amber tint) / `.is-overdue` (red border). Also fixed HIGH risk rendering with the *low* badge. Helpers: `ageMsFrom`, `formatAgeShort` (mirrors server `_humanize_age`), `renderReviewAgeChip`.
+- #35: `#actions/{board|queue|packages|changes|escalations|audits}`, `#briefings/{shift|posture|dossier}` (legacy `#actions`, `#posture`, internal sub-tab names still accepted). Sub-tab clicks push history (Back walks tabs); dashboards sub-tabs changed from replace → push for consistency. `switchBriefingTab()` replaces the per-button closure in `setupBriefingTabs()`.
+- Harness: `harness.js` gained `El.prototype.closest` — g7's 4 "failures" since #33 were the stub lacking it, not an app bug.
+- Verified: `.venv/_jscheck/g5check.sh` (26 headless-Chrome checks) + g3 (34), g4 (33), g7 (31), g9 (25), uxcheck (31) green; pytest unchanged (3 known cred failures).
+
 ## #5 terminology map (screen text only)
 | Current | Suggested |
 |---|---|
@@ -90,12 +98,10 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 
 ## Medium priority (backlog)
 - Backend: `POST /api/mitre/audit` and MITRE ATT&CK coverage assessment engine/endpoints now merged and operational.
-- Diff modal shows raw diff text; chat widget uses coloured formatUnifiedDiff() — unify
-- Hardcoded counts in copy ("5 Active Patrols", "Sweeping all 5 fleet patrol cycles")
+- ~~Diff modal raw diff~~ — already uses formatUnifiedDiff() (verified 2026-09-26)
+- ~~Hardcoded counts in copy~~ — none left; patrol pill is data-driven (verified 2026-09-26)
 - 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
 - Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live
-- Per-view URLs (hash routing for Actions sub-tabs / briefing tabs)
-- Kanban review column: highlight + "oldest: Nh"
 
 ## #7 / #8 notes (2026-09-26)
 - #8: every `font-size` < 11px (CSS, inline HTML, JS templates; 169 sites) raised to 11px.

@@ -2556,6 +2556,24 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   border-radius: 10px;
 }
 
+/* #34: review column wait-time indicators */
+.kanban-col-meta { display: flex; align-items: center; gap: 6px; }
+.kanban-col-oldest,
+.kanban-card-age {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.kanban-card-age { padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border-color); }
+.kanban-col-oldest.is-warn, .kanban-card-age.is-warn { color: var(--c-warn); border-color: var(--c-warn-bd); background: var(--c-warn-bg); }
+.kanban-col-oldest.is-crit, .kanban-card-age.is-crit { color: var(--c-danger); border-color: var(--c-danger-bd); background: var(--c-danger-bg); }
+.kanban-col-oldest.is-warn, .kanban-col-oldest.is-crit { padding: 1px 7px; border-radius: 10px; border-width: 1px; border-style: solid; }
+.kanban-column.has-pending { border-color: var(--c-warn-bd); }
+.kanban-column.has-pending .kanban-column-header { background: var(--c-warn-faint); }
+.kanban-column.is-overdue { border-color: var(--c-danger-bd); }
+
 .kanban-cards-list {
   padding: 10px;
   display: flex;

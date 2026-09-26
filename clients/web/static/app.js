@@ -25,6 +25,19 @@ function setRoute(hash, { replace = false } = {}) {
   else history.pushState(null, "", hash);
 }
 
+// Actions sub-tabs / briefing tabs use operator-facing slugs in the URL; internal names still accepted.
+const ACTIONS_SUBTAB_SLUGS = {
+  kanban: "board", work_queue: "queue", convoys: "packages",
+  refinery: "changes", escalations: "escalations", patrols: "audits",
+};
+const BRIEFING_TAB_SLUGS = ["shift", "posture", "dossier"];
+
+function actionsSubtabFromSlug(slug) {
+  if (!slug) return null;
+  if (ACTIONS_SUBTAB_SLUGS[slug]) return slug;
+  return Object.keys(ACTIONS_SUBTAB_SLUGS).find((k) => ACTIONS_SUBTAB_SLUGS[k] === slug) || null;
+}
+
 function isViewHash(h) {
   return /^(dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture)(\/|$)/.test(h);
 }
@@ -38,12 +51,17 @@ function routeFromHash() {
     if (sub && ["feeds", "parsers", "diagnostics", "finops", "namespacelabels"].includes(sub)) {
       switchIngestionSubtab(sub);
     }
-  } else if (/^(gastown|board|actions|issues|todos?)$/.test(hash)) {
-    switchView("gastown");
+  } else if (/^(gastown|board|actions|issues|todos?)(\/|$)/.test(hash)) {
+    const sub = actionsSubtabFromSlug(hash.split("/")[1]);
+    if (sub && sub !== gastownState.activeSubtab) switchGastownSubtab(sub, { skipRoute: true });
+    if (state.currentView !== "gastown") switchView("gastown");
   } else if (hash.startsWith("library")) {
     switchView("library");
   } else if (hash.startsWith("briefings") || hash === "posture") {
-    switchView("briefings");
+    const sub = hash === "posture" ? "posture" : hash.split("/")[1];
+    activeBriefingTab = BRIEFING_TAB_SLUGS.includes(sub) ? sub : "shift";
+    if (state.currentView !== "briefings") switchView("briefings");
+    switchBriefingTab(activeBriefingTab, { skipRoute: true });
   } else if (hash.includes("/")) {
     const parts = hash.split("/");
     const stream = decodeURIComponent(parts[0]);
@@ -511,6 +529,35 @@ function setupEventListeners() {
 let agentStatusTimeout = null;
 let agentStatusTicker = null;
 const AGENT_STALE_MS = 120000; // no progress update for 2 min -> show "no recent updates"
+
+// Compact age ("42m", "3h", "2d") for an ISO timestamp; null when missing/unparseable. Mirrors server _humanize_age.
+function ageMsFrom(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? Math.max(0, Date.now() - t) : null;
+}
+
+function formatAgeShort(ms) {
+  if (ms == null) return null;
+  const secs = Math.floor(ms / 1000);
+  if (secs < 3600) return `${Math.max(1, Math.floor(secs / 60))}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  return `${Math.floor(secs / 86400)}d`;
+}
+
+const REVIEW_AGE_WARN_MS = 4 * 3600 * 1000;
+const REVIEW_AGE_CRIT_MS = 24 * 3600 * 1000;
+
+function reviewAgeClass(ms) {
+  if (ms == null) return "";
+  return ms >= REVIEW_AGE_CRIT_MS ? "is-crit" : (ms >= REVIEW_AGE_WARN_MS ? "is-warn" : "");
+}
+
+function renderReviewAgeChip(iso, verb) {
+  const ms = ageMsFrom(iso);
+  if (ms == null) return "";
+  const when = new Date(Date.parse(iso)).toLocaleString();
+  return `<span class="kanban-card-age ${reviewAgeClass(ms)}" title="${escapeHtml(`${verb} ${when}`)}"><span aria-hidden="true">⏱</span> ${formatAgeShort(ms)}<span class="sr-only"> waiting</span></span>`;
+}
 
 function formatElapsed(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -5612,8 +5659,8 @@ function switchView(viewName, opts = {}) {
     document.body.classList.remove("view-briefings-active");
     document.body.classList.add("view-gastown-active");
 
-    if (window.location.hash !== "#gastown" && window.location.hash !== "#board" && window.location.hash !== "#actions") {
-      setRoute("#actions");
+    if (!/^#(gastown|board|actions)(\/|$)/.test(window.location.hash)) {
+      setRoute(`#actions/${ACTIONS_SUBTAB_SLUGS[gastownState.activeSubtab] || "board"}`);
     }
     loadGastownOverview();
   } else if (viewName === "dashboards" || viewName === "ingestion") {
@@ -5690,7 +5737,7 @@ function switchView(viewName, opts = {}) {
     document.body.classList.add("view-briefings-active");
 
     if (!window.location.hash.startsWith("#briefings")) {
-      setRoute("#briefings");
+      setRoute(`#briefings/${activeBriefingTab}`);
     }
     loadBriefingsView();
   } else {
@@ -5826,7 +5873,7 @@ function switchIngestionSubtab(subtab) {
   if (secNsLabels) secNsLabels.style.display = subtab === "namespacelabels" ? "flex" : "none";
 
   if (window.location.hash.startsWith("#dashboards") || window.location.hash.startsWith("#ingestion")) {
-    setRoute(`#dashboards/${subtab}`, { replace: true });
+    setRoute(`#dashboards/${subtab}`);
   }
 
   if (subtab === "finops" && !ingestionData.finopsReport) {
@@ -6641,8 +6688,11 @@ function focusReviewColumn() {
   }
 }
 
-function switchGastownSubtab(subtabName) {
+function switchGastownSubtab(subtabName, opts = {}) {
   gastownState.activeSubtab = subtabName;
+  if (!opts.skipRoute && state.currentView === "gastown") {
+    setRoute(`#actions/${ACTIONS_SUBTAB_SLUGS[subtabName] || "board"}`);
+  }
 
   const tabs = [
     { id: "tabGtKanban", sec: "secGtKanban", name: "kanban" },
@@ -6701,7 +6751,7 @@ function renderGastownCurrentSubtab() {
   }
 }
 
-function renderSocKanbanCard(iss) {
+function renderSocKanbanCard(iss, opts = {}) {
   const id = escapeHtml(iss.issue_id);
   const title = escapeHtml(iss.problem?.title || iss.title || "Operational Issue");
   const target = escapeHtml(iss.problem?.target_resource_id || "Resource");
@@ -6715,6 +6765,7 @@ function renderSocKanbanCard(iss) {
       <div class="kanban-card-head">
         <span class="kanban-card-id" style="color:var(--c-indigo);">${id}</span>
         <div style="display:flex; align-items:center; gap:4px;">
+          ${opts.showAge ? renderReviewAgeChip(iss.updated_at || iss.created_at, "Last updated") : ""}
           <span class="kanban-card-badge" style="background:var(--c-indigo-bg); color:var(--c-indigo); font-size:11px;">${plane}</span>
           <span class="kanban-card-badge ${sevClass}">${sev}</span>
         </div>
@@ -6839,33 +6890,58 @@ function renderGastownKanban() {
   const socReview = socIssues.filter(i => i.status === "VALIDATING");
   const totalReview = openProposals.length + socReview.length;
   if (countColReview) countColReview.textContent = totalReview;
+  // #34: oldest-first, so the item that has waited longest is on top; header shows the oldest wait.
+  const reviewItems = [
+    ...socReview.map((i) => ({ kind: "soc", item: i, ts: i.updated_at || i.created_at })),
+    ...openProposals.map((p) => ({ kind: "proposal", item: p, ts: p.created_at })),
+  ].map((r) => ({ ...r, ms: ageMsFrom(r.ts) }))
+    .sort((a, b) => (b.ms ?? -1) - (a.ms ?? -1));
+  const oldestMs = reviewItems.length ? reviewItems[0].ms : null;
+  const oldestEl = document.getElementById("oldestColReview");
+  if (oldestEl) {
+    const known = oldestMs != null;
+    oldestEl.hidden = !known;
+    oldestEl.className = `kanban-col-oldest ${reviewAgeClass(oldestMs)}`;
+    oldestEl.textContent = known ? `oldest ${formatAgeShort(oldestMs)}` : "";
+    oldestEl.title = known ? `Longest-waiting item has been in review for ${formatAgeShort(oldestMs)}` : "";
+  }
+  const reviewColEl = document.getElementById("kanbanColReview");
+  if (reviewColEl) {
+    reviewColEl.classList.toggle("has-pending", totalReview > 0);
+    reviewColEl.classList.toggle("is-overdue", oldestMs != null && oldestMs >= REVIEW_AGE_CRIT_MS);
+  }
   if (colReview) {
     if (totalReview === 0) {
       colReview.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No pending proposals awaiting review.</div>`;
     } else {
-      const socCards = socReview.map(renderSocKanbanCard).join("");
-      const propCards = openProposals.map((p) => {
-        const riskClass = p.risk_level === "CRITICAL" ? "badge-risk-high" : (p.risk_level === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
-        const author = p.author || p.author_agent || "@secops-dispatcher";
-        const target = p.target_resource_id || p.target_resource || "SecOps Resource";
-        return `
-          <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)}>
-            <div class="kanban-card-head">
-              <span class="kanban-card-id">${escapeHtml(p.id)}</span>
-              <span class="kanban-card-badge ${riskClass}">${p.risk_level || "PROPOSAL"}</span>
-            </div>
-            <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Rule update proposal")}</div>
-            <div class="kanban-card-target">${escapeHtml(target)}</div>
-            <div class="kanban-card-footer">
-              <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
-              <button class="kanban-card-action-btn" ${act("openGastownDiffModal", p.id)}>Review Diff ↗</button>
-              <button class="kanban-card-action-btn" style="margin-left:4px;" ${act("switchTopicAndChat", "detections", "rule-proposals", `${author} review proposal ${p.id}`)}>Discuss 💬</button>
-            </div>
-          </div>
-        `;
-      }).join("");
-      colReview.innerHTML = socCards + propCards;
+      colReview.innerHTML = reviewItems.map((r) => (r.kind === "soc"
+        ? renderSocKanbanCard(r.item, { showAge: true })
+        : renderReviewProposalCard(r.item))).join("");
     }
+  }
+
+  function renderReviewProposalCard(p) {
+    const riskClass = (p.risk_level === "CRITICAL" || p.risk_level === "HIGH") ? "badge-risk-high" : (p.risk_level === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
+    const author = p.author || p.author_agent || "@secops-dispatcher";
+    const target = p.target_resource_id || p.target_resource || "SecOps Resource";
+    return `
+      <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)}>
+        <div class="kanban-card-head">
+          <span class="kanban-card-id">${escapeHtml(p.id)}</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            ${renderReviewAgeChip(p.created_at, "Opened")}
+            <span class="kanban-card-badge ${riskClass}">${escapeHtml(p.risk_level || "PROPOSAL")}</span>
+          </div>
+        </div>
+        <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Rule update proposal")}</div>
+        <div class="kanban-card-target">${escapeHtml(target)}</div>
+        <div class="kanban-card-footer">
+          <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
+          <button class="kanban-card-action-btn" ${act("openGastownDiffModal", p.id)}>Review Diff ↗</button>
+          <button class="kanban-card-action-btn" style="margin-left:4px;" ${act("switchTopicAndChat", "detections", "rule-proposals", `${author} review proposal ${p.id}`)}>Discuss 💬</button>
+        </div>
+      </div>
+    `;
   }
 
   // Col 4: Merged / Resolved
@@ -8434,33 +8510,33 @@ function loadBriefingsView() {
   loadPostureSnapshot();
 }
 
-function setupBriefingTabs() {
-  const tabs = [
-    { btn: "tabBtnShiftBrief", pane: "tabContentShiftBrief" },
-    { btn: "tabBtnPostureGaps", pane: "tabContentPostureGaps" },
-    { btn: "tabBtnEntityDossier", pane: "tabContentEntityDossier" }
-  ];
+const BRIEFING_TABS = [
+  { name: "shift", btn: "tabBtnShiftBrief", pane: "tabContentShiftBrief" },
+  { name: "posture", btn: "tabBtnPostureGaps", pane: "tabContentPostureGaps" },
+  { name: "dossier", btn: "tabBtnEntityDossier", pane: "tabContentEntityDossier" },
+];
+let activeBriefingTab = "shift";
 
-  tabs.forEach(t => {
+function switchBriefingTab(name, opts = {}) {
+  if (!BRIEFING_TABS.some((t) => t.name === name)) name = "shift";
+  activeBriefingTab = name;
+  BRIEFING_TABS.forEach((t) => {
+    const on = t.name === name;
+    const b = document.getElementById(t.btn);
+    const p = document.getElementById(t.pane);
+    if (b) b.classList.toggle("active", on);
+    if (p) {
+      p.classList.toggle("active", on);
+      p.style.display = on ? "block" : "none";
+    }
+  });
+  if (!opts.skipRoute && state.currentView === "briefings") setRoute(`#briefings/${name}`);
+}
+
+function setupBriefingTabs() {
+  BRIEFING_TABS.forEach((t) => {
     const btnEl = document.getElementById(t.btn);
-    if (!btnEl) return;
-    btnEl.addEventListener("click", () => {
-      tabs.forEach(other => {
-        const ob = document.getElementById(other.btn);
-        const op = document.getElementById(other.pane);
-        if (ob) ob.classList.remove("active");
-        if (op) {
-          op.classList.remove("active");
-          op.style.display = "none";
-        }
-      });
-      btnEl.classList.add("active");
-      const targetPane = document.getElementById(t.pane);
-      if (targetPane) {
-        targetPane.classList.add("active");
-        targetPane.style.display = "block";
-      }
-    });
+    if (btnEl) btnEl.addEventListener("click", () => switchBriefingTab(t.name));
   });
 }
 

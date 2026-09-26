@@ -36,6 +36,10 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 25 | Claim dialog free-text handle → select from capable workers (already fetched) | 7 Actions | Done |
 | 26 | Toasts: aria-live, close button, errors persist until dismissed | 7 Actions | Done |
 | 27 | Audit Rules / MITRE header buttons: check res.ok, toast on failure (currently console-only) | 7 Actions | Done |
+| 28 | On-screen load errors with Retry (replaces console-only catch blocks) | 3 Resilience | Done |
+| 29 | Empty chat: per-topic suggested prompts instead of trash icon | 3 Resilience | Done |
+| 30 | Quick switcher (Ctrl/Cmd+K): topics, DMs, pages, recent & unread | 3 Resilience | Done |
+| 31 | Narrow screens (≤1024px): off-canvas sidebar + scrim, overlay proposals drawer, compact top bar | 3 Resilience | Done |
 
 ## #11 fabricated data on approval surfaces
 - `openGastownDiffModal`: preflight box always renders "Invariant/Backtest/Zero-Synthetic: PASS" + "validated against live API" regardless of `p.preflight`.
@@ -81,14 +85,10 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - Diff modal shows raw diff text; chat widget uses coloured formatUnifiedDiff() — unify
 - Work-queue filter change wipes table with "Refreshing…" — keep rows, show inline spinner
 - Hardcoded counts in copy ("5 Active Patrols", "Sweeping all 5 fleet patrol cycles")
-- Empty chat state uses trash icon; offer per-topic suggested prompts instead
-- Quick switcher (Ctrl/Cmd+K) for streams/topics/DMs
 - 3 pre-existing failures in tests/test_chat_server.py (dispatcher/yaral-optimizer/agent library) — need LLM creds; same stub-vs-live split as test_mitre_agent.py
 - Done: /api/mitre/* engine calls offloaded via asyncio.to_thread (add_message stays on loop); test_mitre_agent.py split offline (_InertAdapter + LocalFileEvidenceStore) vs live
 - Per-view URLs (hash routing for Actions sub-tabs / briefing tabs)
-- On-screen errors with Retry instead of console-only catch blocks
 - Kanban review column: highlight + "oldest: Nh"
-- Narrow-screen breakpoints (<1200px)
 
 ## #7 / #8 notes (2026-09-26)
 - #8: every `font-size` < 11px (CSS, inline HTML, JS templates; 169 sites) raised to 11px.
@@ -107,3 +107,9 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - style.css: badge-open/merged/rejected, badge-green/yellow/red/blue, badge-tag, dps-badge, decay-flag-tag, lease-expiry, btn-approve, preflight-box now use tokens (previously dark-only literals, unreadable in light theme). `.diff-container` stays dark in both themes but now sets its own base text colour.
 - Verified: headless-Chrome WCAG contrast scan of all 21 chat-widget renderers (empty + populated fixtures), 0 AA failures in both themes; full index.html load has 0 JS errors; uxcheck/g7check/g9check green.
 - About 200 literal colours remain in non-status style.css rules (layout chrome); migrate with 4b-2.
+
+## Group 3 notes (done 2026-09-26: #28–#31)
+- `fetchJsonOrThrow()` + `showLoadError(target, {title, error, retry, colspan})`: inline ⚠ + Retry, "Server unreachable" for network errors. Applied to 15 loaders (sidebar, messages, drawer, dashboards, work queue, audits, briefings, library). `keepLoadError()` stops sidebar re-renders from wiping the error while the list is empty.
+- `TOPIC_PROMPTS` / `renderEmptyTimeline()`: chips prefill the composer with an @mention of the owning agent (editable before send); hidden if the agent isn't registered.
+- Quick switcher: combobox/listbox ARIA, ↑↓/Enter/Esc, focus restore, recent channels in localStorage (`secops_recent_channels_v1`). `anyModalOpen()` checks rendered visibility. The old `:not([hidden])` guard counted the `display:none` diff/SOC modals as open, which blocked Ctrl+K everywhere.
+- Verified: `.venv/_jscheck/g3check.sh` (34 headless-Chrome checks: main / fetch-failure / 800px), ovfcheck at 1440/1024/760 with no overflow, uxcheck/g7check/g9check green.

@@ -24,31 +24,31 @@
       <span class="topbar-title">Google SecOps Multi-Agent Fleet</span>
     </div>
     <nav class="topbar-nav" aria-label="Primary">
-      <button id="navBtnChat" class="nav-tab active">
+      <button id="navBtnChat" type="button" title="Fleet Chat" class="nav-tab active">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        <span>Fleet Chat</span>
+        <span class="nav-label">Fleet Chat</span>
         <span id="navChatBadge" class="nav-pill-badge nav-unread-badge" hidden>0</span>
       </button>
-      <button id="navBtnGastown" class="nav-tab">
+      <button id="navBtnGastown" type="button" title="Actions" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
-        <span>Actions</span>
+        <span class="nav-label">Actions</span>
         <span id="navBoardBadge" class="nav-pill-badge" hidden>0</span>
       </button>
-      <button id="navBtnBriefings" class="nav-tab">
+      <button id="navBtnBriefings" type="button" title="Briefings & Posture" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        <span>Briefings &amp; Posture</span>
+        <span class="nav-label">Briefings &amp; Posture</span>
       </button>
-      <button id="navBtnDashboards" class="nav-tab">
+      <button id="navBtnDashboards" type="button" title="Dashboards" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-        <span>Dashboards</span>
+        <span class="nav-label">Dashboards</span>
       </button>
-      <button id="navBtnLibrary" class="nav-tab">
+      <button id="navBtnLibrary" type="button" title="Agent Library" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        <span>Agent Library</span>
+        <span class="nav-label">Agent Library</span>
       </button>
-      <a id="navBtnKnowledge" class="nav-tab" href="/knowledge/viz.html" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">
+      <a id="navBtnKnowledge" title="Knowledge Graph (opens in new tab)" class="nav-tab" href="/knowledge/viz.html" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-        <span>Knowledge Graph</span>
+        <span class="nav-label">Knowledge Graph</span>
         <span class="ext-link-icon" aria-hidden="true">↗</span>
         <span class="sr-only">(opens in new tab)</span>
       </a>
@@ -64,6 +64,9 @@
         <span class="live-indicator is-connecting" aria-hidden="true"></span>
         <span id="connChipLabel">Connecting…</span>
       </span>
+      <button id="quickSwitcherTopBtn" class="theme-toggle-btn" type="button" title="Jump to a topic, agent or page (Ctrl+K)" aria-label="Jump to a topic, agent or page" aria-keyshortcuts="Control+K Meta+K" aria-haspopup="dialog">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
       <button id="aboutBtn" class="theme-toggle-btn" type="button" title="About this console" aria-label="About this console" aria-haspopup="dialog">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
@@ -81,10 +84,11 @@
     <!-- Left Navigation Sidebar: Slack-Style Streams & Collapsible DMs -->
     <aside id="sidebarLeft" class="sidebar-left" aria-label="Streams and direct messages">
       <div class="workspace-header">
-        <div class="workspace-title">
-          <span class="live-indicator is-connecting" role="status" aria-label="Connecting to event stream…" title="Connecting to event stream…"></span>
-          <span>SecOps Agent Fleet</span>
-        </div>
+        <button id="quickSwitcherBtn" type="button" class="qs-trigger" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
+          <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="qs-trigger-label">Jump to…</span>
+          <kbd class="qs-kbd" data-shortcut-hint>Ctrl K</kbd>
+        </button>
       </div>
 
       <div class="nav-scrollable">
@@ -122,35 +126,40 @@
       </div>
     </aside>
 
+    <div id="sidebarScrim" class="sidebar-scrim" hidden></div>
+
     <!-- Center Content Area -->
     <main id="mainContent" class="main-content-area" tabindex="-1">
       <!-- View 1: Fleet Chat View -->
       <div id="chatView" class="view-panel active">
         <!-- Chat Header -->
         <header class="chat-header">
+          <button id="toggleSidebarBtn" type="button" class="sidebar-toggle-btn" aria-controls="sidebarLeft" aria-expanded="false" aria-label="Show streams and direct messages" title="Streams &amp; direct messages">
+            <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
           <div class="breadcrumb-container">
             <span id="currentStreamLabel" class="breadcrumb-stream">#detections</span>
             <span class="breadcrumb-sep">&gt;</span>
             <span id="currentTopicLabel" class="breadcrumb-topic">rule-proposals</span>
           </div>
           <div class="chat-actions">
-            <span style="font-size: 11.5px; color: var(--text-dim); margin-right: 8px;">Google ADK 2 &bull; GEAP Ready</span>
+            <span class="chat-header-meta">Google ADK 2 &bull; GEAP Ready</span>
             <button id="btnTriggerRuleAudit" class="btn-drawer-action" style="display:none; background:var(--c-ok-solid); color:var(--on-solid); border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run unified detection repository audit across custom and curated rules">
               <span>🛡️ Audit Rules</span>
             </button>
             <button id="btnTriggerMitreAudit" class="btn-drawer-action" style="display:none; background:var(--c-violet-solid); color:var(--on-solid); border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run strategic MITRE ATT&CK coverage assessment across 5,800+ rules and live telemetry">
               <span>🎯 MITRE Coverage</span>
             </button>
-            <button id="clearTopicBtn" class="btn-clear-topic" title="Clear message history for this topic">
+            <button id="clearTopicBtn" type="button" class="btn-clear-topic" title="Clear message history for this topic" aria-label="Clear topic">
               <svg class="ui-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
-              <span>Clear Topic</span>
+              <span class="btn-label">Clear Topic</span>
             </button>
             <button id="toggleRightDrawerBtn" type="button" class="btn-drawer-toggle" title="Toggle Proposals Drawer" aria-controls="sidebarRight" aria-expanded="false">
               <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-              <span>Proposals</span>
+              <span class="btn-label">Proposals</span>
               <span id="drawerToggleBadge" class="drawer-badge">0</span>
             </button>
           </div>
@@ -181,6 +190,7 @@
       <!-- View 2: Dedicated Gas Town Tabbed Control Center Page View -->
       <div id="gastownView" class="view-panel" style="display:none;">
         <div class="page-container gastown-container">
+          <div id="gtLoadError" class="gt-load-error" hidden></div>
           <!-- Gas Town Control Center Header Banner (Honoring Gastown Mayor/Coordinator Banner) -->
           <div class="gt-mayor-banner">
             <div class="gt-mayor-info">

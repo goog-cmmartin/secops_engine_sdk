@@ -177,6 +177,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupEventListeners();
   setupA11y();
   setupActions();
+  setupQuickSwitcher();
+  setupResponsiveLayout();
   await Promise.all([loadStreams(), loadAgents(), loadProposals()]);
   routeRestoring = true;
   try {
@@ -776,21 +778,26 @@ function initSSE() {
 // --- API Calls ---
 async function loadStreams() {
   try {
-    const res = await fetch("/api/streams");
-    state.streams = await res.json();
+    state.streams = await fetchJsonOrThrow("/api/streams");
     renderStreams();
   } catch (err) {
     console.error("Failed loading streams:", err);
+    // Background refreshes keep the last good list; only an empty sidebar shows the error.
+    if (!state.streams.length) {
+      showLoadError(document.getElementById("streamsList"), { title: "Couldn't load streams", error: err, retry: loadStreams });
+    }
   }
 }
 
 async function loadAgents() {
   try {
-    const res = await fetch("/api/agents");
-    state.agents = await res.json();
+    state.agents = await fetchJsonOrThrow("/api/agents");
     renderAgents();
   } catch (err) {
     console.error("Failed loading agents:", err);
+    if (!state.agents.length) {
+      showLoadError(document.getElementById("dmList"), { title: "Couldn't load agents", error: err, retry: loadAgents });
+    }
   }
 }
 
@@ -832,8 +839,7 @@ window.openActionsSubtab = openActionsSubtab;
 
 async function loadProposals() {
   try {
-    const res = await fetch("/api/proposals");
-    state.proposals = await res.json();
+    state.proposals = await fetchJsonOrThrow("/api/proposals");
     renderProposalsDrawer();
     const openCount = state.proposals.filter(p => p.status === "OPEN").length;
     const openPropCount = document.getElementById("openPropCount");
@@ -841,13 +847,18 @@ async function loadProposals() {
     setOpenProposalBadges(openCount);
   } catch (err) {
     console.error("Failed loading proposals:", err);
+    if (state.activeDrawerTab === "proposals") {
+      showLoadError(document.getElementById("drawerContent"), { title: "Couldn't load proposals", error: err, retry: loadProposals });
+    }
   }
 }
 
 async function loadMessages(stream, topic) {
   try {
-    const res = await fetch(`/api/messages?stream=${encodeURIComponent(stream)}&topic=${encodeURIComponent(topic)}`);
-    state.messages = await res.json();
+    const messages = await fetchJsonOrThrow(`/api/messages?stream=${encodeURIComponent(stream)}&topic=${encodeURIComponent(topic)}`);
+    // The operator may have moved on while this was in flight.
+    if (stream !== state.activeStream || topic !== state.activeTopic) return;
+    state.messages = messages;
     renderTimeline();
 
     // Hydrate active in-flight jobs for this channel (persists across page reloads & multi-user sync)
@@ -867,6 +878,13 @@ async function loadMessages(stream, topic) {
     }
   } catch (err) {
     console.error("Failed loading messages:", err);
+    if (stream !== state.activeStream || topic !== state.activeTopic) return;
+    const label = stream === "dm" ? topic : `#${stream} › ${topic}`;
+    showLoadError(document.getElementById("messageTimeline"), {
+      title: `Couldn't load messages for ${label}`,
+      error: err,
+      retry: () => loadMessages(stream, topic),
+    });
   }
 }
 
@@ -875,6 +893,8 @@ async function switchTopic(stream, topic) {
   hideAgentStatusIndicator();
   state.activeStream = stream;
   state.activeTopic = topic;
+  recordRecentChannel(stream, topic);
+  setSidebarOpen(false);
   // Only the visible chat view owns the URL (background loads must not clobber #actions etc.).
   if (state.currentView === "chat") {
     setRoute(`#${stream}/${topic}`);
@@ -908,9 +928,16 @@ async function switchTopic(stream, topic) {
   scrollToBottom();
 }
 
+// While a list has nothing to show, keep its load error (and Retry) on screen.
+// Other code re-renders the sidebar on every topic switch / unread change.
+function keepLoadError(container, items) {
+  return (!Array.isArray(items) || items.length === 0) && !!container.querySelector(".load-error");
+}
+
 function renderStreams() {
   const container = document.getElementById("streamsList");
   if (!container) return;
+  if (keepLoadError(container, state.streams)) return;
   const focusKey = focusedKeyWithin(container);
   container.innerHTML = "";
 
@@ -990,6 +1017,7 @@ let dmSearchQuery = "";
 function renderDirectMessages() {
   const container = document.getElementById("dmList");
   if (!container) return;
+  if (keepLoadError(container, state.agents)) return;
   const focusKey = focusedKeyWithin(container);
   container.innerHTML = "";
 
@@ -1101,21 +1129,7 @@ function renderTimeline() {
   resetNewMessagesPill();
 
   if (state.messages.length === 0) {
-    const topicLabel = state.activeStream === "dm"
-      ? `Direct Message with <strong>@${escapeHtml(state.activeTopic)}</strong>`
-      : `<strong>#${escapeHtml(state.activeStream)} &gt; ${escapeHtml(state.activeTopic)}</strong>`;
-    container.innerHTML = `
-      <div style="text-align:center; padding: 48px 20px; color: var(--text-dim); font-size: 13.5px;">
-        <div style="margin-bottom: 8px; opacity: 0.6;">
-          <svg class="ui-icon" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-        </div>
-        No messages yet in ${topicLabel}.<br>
-        <span style="font-size: 12px; color: var(--text-muted);">Send a message or mention an agent to get started!</span>
-      </div>
-    `;
+    container.innerHTML = renderEmptyTimeline(state.activeStream, state.activeTopic);
     return;
   }
 
@@ -4036,10 +4050,12 @@ async function renderIngestionDrawer() {
     btn.innerHTML = "<span>⏳ Auditing...</span>";
     btn.disabled = true;
     try {
-      await fetch("/api/feeds/audit?lookback_days=7", { method: "POST" });
+      const res = await fetch("/api/feeds/audit?lookback_days=7", { method: "POST" });
+      if (!res.ok) throw new Error(await describeHttpError(res));
       await switchTopic("ingestion", "feed-health");
     } catch (e) {
       console.error(e);
+      showToast("error", `Feed audit failed: ${e.message}`);
     } finally {
       btn.innerHTML = "<span>📡 Audit Feeds</span>";
       btn.disabled = false;
@@ -4051,10 +4067,12 @@ async function renderIngestionDrawer() {
     btn.innerHTML = "<span>⏳ Auditing...</span>";
     btn.disabled = true;
     try {
-      await fetch("/api/parsers/audit?lookback_days=7", { method: "POST" });
+      const res = await fetch("/api/parsers/audit?lookback_days=7", { method: "POST" });
+      if (!res.ok) throw new Error(await describeHttpError(res));
       await switchTopic("ingestion", "parser-drops");
     } catch (e) {
       console.error(e);
+      showToast("error", `Parser audit failed: ${e.message}`);
     } finally {
       btn.innerHTML = "<span>🩺 Audit Parsers</span>";
       btn.disabled = false;
@@ -4068,10 +4086,12 @@ async function renderIngestionDrawer() {
     btn.innerHTML = "⏳";
     btn.disabled = true;
     try {
-      await fetch(`/api/parsers/${encodeURIComponent(logType)}/diagnose?lookback_hours=168&limit=5`, { method: "POST" });
+      const res = await fetch(`/api/parsers/${encodeURIComponent(logType)}/diagnose?lookback_hours=168&limit=5`, { method: "POST" });
+      if (!res.ok) throw new Error(await describeHttpError(res));
       await switchTopic("ingestion", "parser-drops");
     } catch (e) {
       console.error(e);
+      showToast("error", `Parser diagnosis for ${logType} failed: ${e.message}`);
     } finally {
       btn.innerHTML = "Diagnose";
       btn.disabled = false;
@@ -4462,6 +4482,13 @@ const ACTIONS = {
   runTelemetrySync() {
     document.getElementById("btnRunSyncNow")?.click();
   },
+  useSuggestedPrompt(text) {
+    const input = document.getElementById("composerInput");
+    if (!input) return;
+    input.value = text;
+    input.focus();
+    if (typeof input.setSelectionRange === "function") input.setSelectionRange(text.length, text.length);
+  },
 };
 
 // Anything not in ACTIONS resolves to the (existing) named function, so
@@ -4842,6 +4869,498 @@ async function describeHttpError(res) {
   } catch (_) { /* non-JSON body */ }
   if (res.status === 404 && !detail) return "endpoint not available on this server (404)";
   return detail ? `${detail} (HTTP ${res.status})` : `HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}`;
+}
+
+// ====================================================================
+// Load errors with Retry (replaces console-only catch blocks)
+// ====================================================================
+async function fetchJsonOrThrow(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(await describeHttpError(res));
+  return res.json();
+}
+
+function friendlyErrorText(err) {
+  const msg = (err && err.message) || String(err || "");
+  // fetch() rejects with a bare TypeError when the server is down or the network drops.
+  if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(msg)) {
+    return "Server unreachable. Check the fleet server is running, then retry.";
+  }
+  return msg || "Unknown error";
+}
+
+/**
+ * Replaces `target`'s content with an inline error + Retry button.
+ * Pass `colspan` when `target` is a <tbody>. `retry` may return a promise.
+ */
+function showLoadError(target, { title, error, retry, colspan } = {}) {
+  if (!target) return;
+  const inner = `
+    <div class="load-error" role="alert">
+      <span class="load-error-icon" aria-hidden="true">⚠</span>
+      <div class="load-error-text">
+        <strong>${escapeHtml(title || "Couldn't load this section")}</strong>
+        <span class="load-error-detail">${escapeHtml(friendlyErrorText(error))}</span>
+      </div>
+      ${typeof retry === "function" ? '<button type="button" class="btn btn-sm btn-secondary load-error-retry">Retry</button>' : ""}
+    </div>`;
+  target.innerHTML = colspan ? `<tr><td colspan="${colspan}" class="load-error-cell">${inner}</td></tr>` : inner;
+  const btn = target.querySelector(".load-error-retry");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Retrying…";
+    try {
+      await retry();
+    } finally {
+      // Still in the DOM means the retry failed again without re-rendering.
+      if (btn.isConnected) {
+        btn.disabled = false;
+        btn.textContent = "Retry";
+      }
+    }
+  });
+}
+
+// ====================================================================
+// Empty chat state: suggested prompts per topic
+// ====================================================================
+// Keyed by "stream/topic". Each prompt mentions the agent that owns that work,
+// so sending it routes straight there instead of via the dispatcher.
+const TOPIC_PROMPTS = {
+  "general/dispatcher": [
+    ["@secops-dispatcher", "What needs my attention this shift?"],
+    ["@secops-dispatcher", "Which agent should investigate a sudden drop in ingested events?"],
+    ["@secops-dispatcher", "Summarize open proposals awaiting my review"],
+  ],
+  "general/announcements": [
+    ["@secops-dispatcher", "Summarize fleet activity from the last 24 hours"],
+  ],
+  "detections/rule-proposals": [
+    ["@yaral-optimizer", "Find rules with Cartesian joins or unbounded match windows and propose fixes"],
+    ["@yaral-optimizer", "Review the slowest rules and suggest optimizations"],
+  ],
+  "detections/decay-review": [
+    ["@detection-decay-agent", "Audit rules that haven't produced a detection in 30 days"],
+    ["@detection-decay-agent", "Which rules are broken or failing to compile?"],
+  ],
+  "detections/rule-conflicts": [
+    ["@rule-conflict-agent", "Find duplicate or overlapping detection rules"],
+    ["@rule-conflict-agent", "Which rules contradict each other's exclusions?"],
+  ],
+  "detections/performance-alerts": [
+    ["@rule-troubleshooter", "Which rules hit execution errors or timeouts this week?"],
+    ["@rule-troubleshooter", "Diagnose rules being throttled by resource limits"],
+  ],
+  "detections/triage": [
+    ["@detection-tuning-agent", "Which rules generate the most alerts, and what can be tuned?"],
+    ["@detection-tuning-agent", "Find benign admin activity that's triggering noisy rules"],
+  ],
+  "ingestion/feed-health": [
+    ["@feed-agent", "Audit all feeds for failures and latency over SLA"],
+    ["@feed-agent", "Which push feeds have gone silent?"],
+    ["@feed-agent", "Are we hitting ingestion quota rejections?"],
+  ],
+  "ingestion/parser-drops": [
+    ["@parser-doctor", "Which log types have the highest parser drop rates?"],
+    ["@parser-doctor", "Check for parser version drift or extension conflicts"],
+  ],
+  "testing/logjammer-replays": [
+    ["@logjammer-agent", "Replay test events for a rule and confirm it fires"],
+  ],
+  "testing/benchmark-runs": [
+    ["@logjammer-agent", "Measure end-to-end ingestion latency with a test replay"],
+  ],
+  "identity/access-audits": [
+    ["@identity-governor", "Who holds Chronicle admin roles?"],
+    ["@identity-governor", "List custom roles that include chronicle.* permissions"],
+  ],
+  "identity/service-accounts": [
+    ["@identity-governor", "Which service accounts have Chronicle access?"],
+  ],
+  "soar/case-escalations": [
+    ["@playbook-decay-agent", "Which playbooks failed on escalated cases this week?"],
+  ],
+  "soar/playbook-runs": [
+    ["@playbook-decay-agent", "Summarize playbook execution failures from the last 30 days"],
+  ],
+  "soar/playbook-health": [
+    ["@playbook-decay-agent", "Audit playbooks for resilience and execution health"],
+  ],
+  "analytics/sql-queries": [
+    ["@sql-analyst", "Top 10 log types by event volume in the last 24 hours"],
+    ["@sql-analyst", "Count failed logins by user over the last 7 days"],
+  ],
+  "analytics/reports": [
+    ["@sql-analyst", "Daily event volume by log type for the last week"],
+  ],
+  "analytics/udm-aggregations": [
+    ["@sql-analyst", "Top source IPs by event count in the last 24 hours"],
+  ],
+  "threat_intel/mitre-coverage": [
+    ["@mitre-attack-agent", "Assess our ATT&CK coverage against the global baseline"],
+    ["@mitre-attack-agent", "Which tactics have no enabled detections?"],
+  ],
+  "threat_intel/threat-profiles": [
+    ["@mitre-attack-agent", "Assess coverage for the financial services threat profile"],
+  ],
+  "threat_intel/blind-spots": [
+    ["@mitre-attack-agent", "Find techniques we have telemetry for but no detections"],
+  ],
+};
+
+function agentKnown(handle) {
+  // Before /api/agents loads, don't hide anything.
+  if (!Array.isArray(state.agents) || state.agents.length === 0) return true;
+  return state.agents.some((a) => a.handle === handle);
+}
+
+// Returns [{ text, agent }] where `text` is what goes into the composer.
+function suggestedPromptsFor(stream, topic) {
+  if (stream === "dm") {
+    const handle = topic.startsWith("@") ? topic : `@${topic}`;
+    const own = Object.values(TOPIC_PROMPTS).flat().filter(([h]) => h === handle).map(([, t]) => t);
+    const texts = own.length ? own.slice(0, 3) : ["What can you help me with?", "What have you found recently?"];
+    return texts.map((text) => ({ text, agent: handle }));
+  }
+  let pairs = TOPIC_PROMPTS[`${stream}/${topic}`];
+  if (!pairs) {
+    // Custom topic: offer the agent that defaults to it, else the dispatcher.
+    const owner = (state.agents || []).find((a) => a.default_stream === stream && a.default_topic === topic);
+    pairs = owner
+      ? [[owner.handle, "What can you help me with in this topic?"]]
+      : [["@secops-dispatcher", `Which agent handles ${topic.replace(/-/g, " ")}?`]];
+  }
+  return pairs.filter(([h]) => agentKnown(h)).map(([agent, t]) => ({ text: `${agent} ${t}`, agent }));
+}
+
+function renderEmptyTimeline(stream, topic) {
+  const isDm = stream === "dm";
+  const where = isDm
+    ? `your direct messages with <strong>${escapeHtml(topic)}</strong>`
+    : `<strong>#${escapeHtml(stream)} › ${escapeHtml(topic)}</strong>`;
+  const prompts = suggestedPromptsFor(stream, topic);
+  const chips = prompts.map((p) => {
+    const label = isDm ? p.text : p.text.slice(p.agent.length + 1);
+    return `<li><button type="button" class="suggested-prompt" ${act("useSuggestedPrompt", p.text)}>
+        ${isDm ? "" : `<span class="suggested-prompt-agent">${escapeHtml(p.agent)}</span>`}
+        <span class="suggested-prompt-text">${escapeHtml(label)}</span>
+      </button></li>`;
+  }).join("");
+  return `
+    <div class="timeline-empty">
+      <div class="timeline-empty-icon" aria-hidden="true">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <p class="timeline-empty-title">No messages yet in ${where}.</p>
+      ${chips ? `
+        <p class="timeline-empty-sub">Try one of these. It goes into the message box so you can edit it before sending.</p>
+        <ul class="suggested-prompts" aria-label="Suggested prompts">${chips}</ul>` : ""}
+      <p class="timeline-empty-hint">${isDm ? "Messages here go straight to this agent." : "Type <kbd>@</kbd> to mention any agent. Messages without a mention go to the dispatcher."}</p>
+    </div>`;
+}
+
+// ====================================================================
+// Quick switcher (Ctrl/Cmd+K): topics, DMs, agents, pages
+// ====================================================================
+const RECENT_CHANNELS_KEY = "secops_recent_channels_v1";
+const RECENT_CHANNELS_MAX = 8;
+
+function loadRecentChannels() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_CHANNELS_KEY));
+    return Array.isArray(v) ? v : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function recordRecentChannel(stream, topic) {
+  const key = channelKey(stream, topic);
+  const list = loadRecentChannels().filter((k) => k !== key);
+  list.unshift(key);
+  try { localStorage.setItem(RECENT_CHANNELS_KEY, JSON.stringify(list.slice(0, RECENT_CHANNELS_MAX))); } catch (_) { /* quota / private mode */ }
+}
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+
+function quickSwitcherItems() {
+  const items = [];
+  const go = (view) => () => switchView(view);
+  const dash = (sub) => () => { switchView("dashboards"); switchIngestionSubtab(sub); };
+  const pages = [
+    ["Fleet Chat", "", go("chat")],
+    ["Actions: Kanban board", "Proposals and tasks by state", () => openActionsSubtab("kanban")],
+    ["Actions: Work queue & leases", "", () => openActionsSubtab("work_queue")],
+    ["Actions: Work packages", "", () => openActionsSubtab("convoys")],
+    ["Actions: Change queue", "Proposals awaiting merge", () => openActionsSubtab("refinery")],
+    ["Actions: Escalations", "", () => openActionsSubtab("escalations")],
+    ["Actions: Scheduled audits", "", () => openActionsSubtab("patrols")],
+    ["Briefings & Posture", "Shift handover, knowledge gaps, entity dossiers", go("briefings")],
+    ["Dashboards: Feed pipelines", "", dash("feeds")],
+    ["Dashboards: Normalizers & CBN", "Parsers", dash("parsers")],
+    ["Dashboards: Unparsed log diagnostics", "", dash("diagnostics")],
+    ["Dashboards: FinOps & log costs", "", dash("finops")],
+    ["Dashboards: Labels & namespaces", "", dash("namespacelabels")],
+    ["Agent Library", "", go("library")],
+  ];
+  pages.forEach(([label, sub, run]) => items.push({ kind: "page", label, sub, run }));
+
+  (state.streams || []).forEach((s) => {
+    (s.topics || []).forEach((t) => {
+      items.push({
+        kind: "topic",
+        key: channelKey(s.id, t.name),
+        label: `#${s.name} › ${t.name}`,
+        sub: s.display_name || "",
+        unread: unreadFor(s.id, t.name),
+        run: () => window.switchTopicAndChat(s.id, t.name),
+      });
+    });
+  });
+
+  (state.agents || []).forEach((a) => {
+    items.push({
+      kind: "dm",
+      key: channelKey("dm", a.handle),
+      label: a.handle,
+      sub: a.role || a.name || "",
+      keywords: `${a.name || ""} ${a.subsystem || ""}`,
+      unread: unreadFor("dm", a.handle),
+      run: () => window.switchTopicAndChat("dm", a.handle),
+    });
+    items.push({
+      kind: "agent",
+      label: `${a.name || a.handle}`,
+      sub: `Agent Library · ${a.handle}`,
+      keywords: `${a.role || ""} ${a.subsystem || ""}`,
+      run: () => {
+        setRoute(`#library/${encodeURIComponent(a.handle)}`);
+        switchView("library");
+      },
+    });
+  });
+  return items;
+}
+
+// Higher is better; 0 = no match. Every query token must match somewhere.
+function scoreQuickSwitcherItem(item, tokens) {
+  const label = item.label.toLowerCase();
+  const hay = `${label} ${(item.sub || "").toLowerCase()} ${(item.keywords || "").toLowerCase()}`;
+  let score = 0;
+  for (const tok of tokens) {
+    const idx = label.indexOf(tok);
+    if (idx === 0) score += 100;
+    else if (idx > 0 && /[\s#@›:\-_/]/.test(label[idx - 1])) score += 70;
+    else if (idx > 0) score += 45;
+    else if (hay.includes(tok)) score += 20;
+    else if (isSubsequence(tok, label)) score += 8;
+    else return 0;
+  }
+  return score;
+}
+
+function isSubsequence(needle, hay) {
+  let i = 0;
+  for (let j = 0; j < hay.length && i < needle.length; j++) if (hay[j] === needle[i]) i++;
+  return i === needle.length;
+}
+
+const QS_KIND_LABEL = { page: "Page", topic: "Topic", dm: "Direct message", agent: "Agent profile" };
+const QS_KIND_ORDER = { topic: 0, dm: 1, page: 2, agent: 3 };
+
+function rankQuickSwitcher(query, items) {
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) {
+    const byKey = new Map(items.filter((i) => i.key).map((i) => [i.key, i]));
+    const current = channelKey(state.activeStream, state.activeTopic);
+    const recent = loadRecentChannels().filter((k) => k !== current).map((k) => byKey.get(k)).filter(Boolean).slice(0, 5);
+    const unread = items.filter((i) => i.unread && !recent.includes(i)).slice(0, 5);
+    return [...recent, ...unread, ...items.filter((i) => i.kind === "page")];
+  }
+  return items
+    .map((item) => ({ item, s: scoreQuickSwitcherItem(item, tokens) }))
+    .filter((r) => r.s > 0)
+    .sort((a, b) => b.s - a.s || QS_KIND_ORDER[a.item.kind] - QS_KIND_ORDER[b.item.kind] || a.item.label.localeCompare(b.item.label))
+    .slice(0, 50)
+    .map((r) => r.item);
+}
+
+const quickSwitcher = { overlay: null, results: [], index: 0, previousFocus: null };
+
+function openQuickSwitcher() {
+  if (quickSwitcher.overlay) return;
+  quickSwitcher.previousFocus = document.activeElement;
+  const overlay = document.createElement("div");
+  overlay.className = "qs-overlay";
+  overlay.innerHTML = `
+    <div class="qs-dialog" role="dialog" aria-modal="true" aria-label="Jump to">
+      <div class="qs-input-row">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="qsInput" class="qs-input" type="text" autocomplete="off" spellcheck="false"
+          placeholder="Jump to a topic, agent or page…"
+          role="combobox" aria-expanded="true" aria-controls="qsList" aria-autocomplete="list" />
+      </div>
+      <ul id="qsList" class="qs-list" role="listbox" aria-label="Results"></ul>
+      <div class="qs-footer" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  quickSwitcher.overlay = overlay;
+
+  const input = overlay.querySelector("#qsInput");
+  const list = overlay.querySelector("#qsList");
+  const items = quickSwitcherItems();
+
+  const render = () => {
+    const results = quickSwitcher.results;
+    if (!results.length) {
+      list.innerHTML = `<li class="qs-empty" role="presentation">No matches for “${escapeHtml(input.value.trim())}”</li>`;
+      input.removeAttribute("aria-activedescendant");
+      return;
+    }
+    const noQuery = !input.value.trim();
+    list.innerHTML = results.map((it, i) => {
+      const heading = noQuery && (i === 0 || (results[i - 1].kind === "page") !== (it.kind === "page"))
+        ? `<li class="qs-group" role="presentation">${it.kind === "page" ? "Pages" : "Recent &amp; unread"}</li>` : "";
+      return `${heading}<li id="qsOpt-${i}" class="qs-item${i === quickSwitcher.index ? " is-active" : ""}" role="option" aria-selected="${i === quickSwitcher.index}" data-qs-index="${i}">
+          <span class="qs-item-main">
+            <span class="qs-item-label">${escapeHtml(it.label)}</span>
+            ${it.sub ? `<span class="qs-item-sub">${escapeHtml(it.sub)}</span>` : ""}
+          </span>
+          ${it.unread ? `<span class="unread-badge" aria-label="${it.unread} unread">${it.unread > 99 ? "99+" : it.unread}</span>` : ""}
+          <span class="qs-item-kind">${QS_KIND_LABEL[it.kind]}</span>
+        </li>`;
+    }).join("");
+    input.setAttribute("aria-activedescendant", `qsOpt-${quickSwitcher.index}`);
+    list.querySelector(".qs-item.is-active")?.scrollIntoView({ block: "nearest" });
+  };
+
+  const update = () => {
+    quickSwitcher.results = rankQuickSwitcher(input.value, items);
+    quickSwitcher.index = 0;
+    render();
+  };
+
+  const choose = (i) => {
+    const item = quickSwitcher.results[i];
+    if (!item) return;
+    closeQuickSwitcher({ restoreFocus: false });
+    item.run();
+    if (item.kind === "topic" || item.kind === "dm") document.getElementById("composerInput")?.focus();
+  };
+
+  input.addEventListener("input", update);
+  input.addEventListener("keydown", (e) => {
+    const n = quickSwitcher.results.length;
+    if (e.key === "ArrowDown" && n) {
+      e.preventDefault();
+      quickSwitcher.index = (quickSwitcher.index + 1) % n;
+      render();
+    } else if (e.key === "ArrowUp" && n) {
+      e.preventDefault();
+      quickSwitcher.index = (quickSwitcher.index - 1 + n) % n;
+      render();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      choose(quickSwitcher.index);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeQuickSwitcher();
+    } else if (e.key === "Tab") {
+      e.preventDefault(); // Only the input is focusable; keep focus in the dialog.
+    }
+  });
+  list.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus in the input
+  list.addEventListener("click", (e) => {
+    const li = e.target instanceof Element ? e.target.closest("[data-qs-index]") : null;
+    if (li) choose(Number(li.dataset.qsIndex));
+  });
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closeQuickSwitcher(); });
+
+  update();
+  input.focus();
+}
+
+function closeQuickSwitcher({ restoreFocus = true } = {}) {
+  if (!quickSwitcher.overlay) return;
+  quickSwitcher.overlay.remove();
+  quickSwitcher.overlay = null;
+  const prev = quickSwitcher.previousFocus;
+  quickSwitcher.previousFocus = null;
+  if (restoreFocus && prev && typeof prev.focus === "function" && prev.isConnected) prev.focus();
+}
+
+// Modals hide in different ways (hidden attr, style.display, removal), so test what's actually rendered.
+function anyModalOpen() {
+  return Array.from(document.querySelectorAll(".action-dialog-overlay, .gt-modal-overlay"))
+    .some((el) => !el.hidden && el.getClientRects().length > 0);
+}
+
+function setupQuickSwitcher() {
+  const hint = IS_MAC ? "⌘K" : "Ctrl K";
+  document.querySelectorAll("[data-shortcut-hint]").forEach((el) => { el.textContent = hint; });
+  ["quickSwitcherBtn", "quickSwitcherTopBtn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener("click", openQuickSwitcher);
+    btn.title = `Jump to a topic, agent or page (${IS_MAC ? "⌘K" : "Ctrl+K"})`;
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+      // Don't stack on top of another modal dialog.
+      if (!quickSwitcher.overlay && anyModalOpen()) return;
+      e.preventDefault();
+      if (quickSwitcher.overlay) closeQuickSwitcher();
+      else openQuickSwitcher();
+    }
+  });
+}
+
+// ====================================================================
+// Narrow screens: off-canvas left sidebar, overlay proposals drawer
+// ====================================================================
+const NARROW_LAYOUT_QUERY = "(max-width: 1024px)";
+
+function isNarrowLayout() {
+  return typeof window.matchMedia === "function" && window.matchMedia(NARROW_LAYOUT_QUERY).matches;
+}
+
+function setSidebarOpen(open) {
+  const sidebar = document.getElementById("sidebarLeft");
+  const scrim = document.getElementById("sidebarScrim");
+  const btn = document.getElementById("toggleSidebarBtn");
+  const effective = !!open && isNarrowLayout();
+  if (sidebar) sidebar.classList.toggle("is-open", effective);
+  if (scrim) scrim.hidden = !effective;
+  if (btn) {
+    btn.setAttribute("aria-expanded", effective ? "true" : "false");
+    btn.setAttribute("aria-label", effective ? "Hide streams and direct messages" : "Show streams and direct messages");
+  }
+}
+
+function setupResponsiveLayout() {
+  const btn = document.getElementById("toggleSidebarBtn");
+  const sidebar = document.getElementById("sidebarLeft");
+  if (btn && sidebar) {
+    btn.addEventListener("click", () => {
+      const opening = !sidebar.classList.contains("is-open");
+      setSidebarOpen(opening);
+      if (opening) document.getElementById("quickSwitcherBtn")?.focus();
+    });
+  }
+  document.getElementById("sidebarScrim")?.addEventListener("click", () => setSidebarOpen(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && sidebar && sidebar.classList.contains("is-open") && !quickSwitcher.overlay) {
+      setSidebarOpen(false);
+      btn?.focus();
+    }
+  });
+  if (typeof window.matchMedia === "function") {
+    const mq = window.matchMedia(NARROW_LAYOUT_QUERY);
+    const onChange = () => { if (!mq.matches) setSidebarOpen(false); };
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+  }
 }
 
 // ====================================================================
@@ -5415,9 +5934,11 @@ async function fetchNamespaceLabelsData() {
       renderNamespaceLabelsSection();
     } else {
       console.warn("Failed to audit labels and namespaces:", data.message);
+      showToast("error", `Labels & namespaces audit failed: ${data.message || "no report returned"}`);
     }
   } catch (err) {
     console.error("Error fetching labels & namespaces report:", err);
+    showToast("error", `Labels & namespaces audit failed: ${err.message}`);
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -5537,8 +6058,8 @@ function renderNamespaceLabelsSection() {
 async function renderIngestionPage(forceRefresh = false) {
   try {
     const [feedsRes, parsersRes] = await Promise.all([
-      fetch(`/api/feeds?lookback_days=7${forceRefresh ? '&refresh=true' : ''}`).then(r => r.json()).catch(() => ({ feeds: [], summary: {} })),
-      fetch(`/api/parsers?lookback_days=7${forceRefresh ? '&refresh=true' : ''}`).then(r => r.json()).catch(() => ({ parsers: [], summary: {} })),
+      fetchJsonOrThrow(`/api/feeds?lookback_days=7${forceRefresh ? '&refresh=true' : ''}`).catch((e) => ({ feeds: [], summary: {}, _error: e })),
+      fetchJsonOrThrow(`/api/parsers?lookback_days=7${forceRefresh ? '&refresh=true' : ''}`).catch((e) => ({ parsers: [], summary: {}, _error: e })),
     ]);
 
     ingestionData.feeds = feedsRes.feeds || [];
@@ -5589,6 +6110,20 @@ async function renderIngestionPage(forceRefresh = false) {
 
     renderFeedsTable();
     renderParsersTable();
+
+    const retryIngestion = () => renderIngestionPage(forceRefresh);
+    if (feedsRes._error) {
+      ["kpiTotalFeeds", "kpiP95Latency"].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = UNKNOWN_METRIC; });
+      const sub = document.getElementById("kpiFeedSub");
+      if (sub) sub.textContent = "Feed telemetry unavailable";
+      showLoadError(document.getElementById("feedsTableBody"), { title: "Couldn't load feed telemetry", error: feedsRes._error, retry: retryIngestion, colspan: 7 });
+    }
+    if (parsersRes._error) {
+      ["kpiTotalParsers", "kpiVersionDrift", "kpiDropCodes"].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = UNKNOWN_METRIC; });
+      const sub = document.getElementById("kpiParserSub");
+      if (sub) sub.textContent = "Parser telemetry unavailable";
+      showLoadError(document.getElementById("parsersTableBody"), { title: "Couldn't load parser health", error: parsersRes._error, retry: retryIngestion, colspan: 7 });
+    }
   } catch (err) {
     console.error("Error loading ingestion page:", err);
     showToast("error", "Failed loading telemetry: " + err.message);
@@ -5920,11 +6455,22 @@ async function loadGastownOverview(force = false) {
     gastownState.overview = await resOverview.json();
     gastownState.proposals = await resProposals.json();
 
+    const banner = document.getElementById("gtLoadError");
+    if (banner) { banner.hidden = true; banner.innerHTML = ""; }
     renderGastownHeader();
     renderGastownCurrentSubtab();
   } catch (err) {
     console.error("Failed loading Gas Town overview:", err);
     markGastownHeaderStale();
+    const banner = document.getElementById("gtLoadError");
+    if (banner) {
+      banner.hidden = false;
+      showLoadError(banner, {
+        title: "Couldn't load the Actions overview — counts below are unavailable",
+        error: err,
+        retry: () => loadGastownOverview(true),
+      });
+    }
   }
 }
 
@@ -6654,10 +7200,7 @@ async function renderGastownPatrols() {
 
   try {
     const res = await fetch("/api/gastown/patrols");
-    if (!res.ok) {
-      grid.innerHTML = `<div class="table-loading" style="color:var(--accent-red);">Failed to load audit schedules.</div>`;
-      return;
-    }
+    if (!res.ok) throw new Error(await describeHttpError(res));
     const data = await res.json();
     const deacon = data.deacon || {};
     const schedules = data.schedules || [];
@@ -6784,6 +7327,7 @@ async function renderGastownPatrols() {
     }
   } catch (err) {
     console.error("Error rendering Deacon patrols:", err);
+    showLoadError(grid, { title: "Couldn't load scheduled audits", error: err, retry: renderGastownPatrols });
   }
 }
 window.renderGastownPatrols = renderGastownPatrols;
@@ -6932,9 +7476,8 @@ async function renderGastownWorkQueue() {
     }
   } catch (err) {
     console.error("Failed to render SOC work queue:", err);
-    if (issuesTableBody) {
-      issuesTableBody.innerHTML = `<tr><td colspan="9" style="color:var(--c-danger); padding:16px;">Failed to load SOC work queue: ${escapeHtml(err.message)}</td></tr>`;
-    }
+    showLoadError(issuesTableBody, { title: "Couldn't load the work queue", error: err, retry: renderGastownWorkQueue, colspan: 9 });
+    showLoadError(workersTableBody, { title: "Couldn't load workers", error: err, colspan: 6 });
   }
 }
 window.renderGastownWorkQueue = renderGastownWorkQueue;
@@ -7314,16 +7857,20 @@ const libraryState = {
 };
 
 async function loadAgentLibrary(preselectedHandle) {
+  setupLibraryListeners();
   try {
-    const res = await fetch("/api/agents");
-    if (res.ok) {
-      libraryState.agents = await res.json();
-    }
+    libraryState.agents = await fetchJsonOrThrow("/api/agents");
   } catch (err) {
     console.error("Failed to fetch agent library:", err);
+    if (!libraryState.agents.length) {
+      showLoadError(document.getElementById("agentLibraryList"), {
+        title: "Couldn't load the agent library",
+        error: err,
+        retry: () => loadAgentLibrary(preselectedHandle),
+      });
+      return;
+    }
   }
-
-  setupLibraryListeners();
 
   // If hash has target agent, or preselectedHandle passed, use it
   let targetHandle = preselectedHandle;
@@ -7879,7 +8426,7 @@ async function loadShiftBriefing(hours = 8) {
   } catch (err) {
     console.error("Failed to load shift briefing:", err);
     if (narrativeBody) {
-      narrativeBody.innerHTML = `<p class="empty-state-muted" style="color:var(--c-danger);">Failed to load shift briefing: ${escapeHtml(err.message)}</p>`;
+      showLoadError(narrativeBody, { title: "Couldn't load the shift briefing", error: err, retry: () => loadShiftBriefing(hours) });
     }
   }
 }
@@ -7972,6 +8519,7 @@ async function loadPostureSnapshot() {
     }
   } catch (err) {
     console.error("Failed to load posture snapshot:", err);
+    showLoadError(document.getElementById("bodyKnowledgeGaps"), { title: "Couldn't load the posture snapshot", error: err, retry: loadPostureSnapshot, colspan: 6 });
   }
 }
 
@@ -8025,7 +8573,7 @@ async function fetchEntityDossier(subjectType, subjectId) {
 
   } catch (err) {
     console.error("Failed to fetch entity dossier:", err);
-    container.innerHTML = `<p style="color:var(--c-danger); font-size:12px;">Failed to synthesize dossier: ${escapeHtml(err.message)}</p>`;
+    showLoadError(container, { title: "Couldn't build the entity dossier", error: err, retry: () => fetchEntityDossier(subjectType, subjectId) });
   }
 }
 

@@ -9,7 +9,7 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | 2 | Fabricated fallback metrics / hardcoded HTML values → "—"/stale | 1 Bugs | Done |
 | 3 | Shift-briefing narrative bypasses DOMPurify → use formatMarkdown() | 1 Bugs | Done |
 | 4 | SSE disconnect invisible → live dot states + banner + resync | 1 Bugs | Done |
-| 5 | Operator-facing terminology (keep internal names in code) | 2 Polish | Todo |
+| 5 | Operator-facing terminology (keep internal names in code) | 2 Polish | Done |
 | 6 | Replace confirm()/prompt() for approve/reject/claim with modal + required reason | 2 Polish | Done |
 | 9 | Tidy top bar: move build tags to About; add open proposals/escalations/connection | 2 Polish | Done |
 | 10 | Actions summary cards clickable → sub-tab; alert strip links to review column | 2 Polish | Done |
@@ -68,6 +68,9 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 | Convoys | Work Packages |
 | Refinery Merge Queue | Change Queue |
 | Telemetry Hooks | Data Sources |
+| The Mayor | Fleet Coordinator |
+| Beads (dispatched) | Tasks (opened) |
+| Patrol / Sweep | Audit / Run |
 
 ## Medium priority (backlog)
 - Backend: `POST /api/mitre/audit` and MITRE ATT&CK coverage assessment engine/endpoints now merged and operational.

@@ -5823,7 +5823,7 @@ function markGastownHeaderStale() {
   });
   const hb = document.getElementById("gtDeaconHeartbeat");
   if (hb) {
-    hb.textContent = "Deacon Heartbeat: unavailable";
+    hb.textContent = "Scheduler: unavailable";
     hb.className = "gt-stat-val unknown";
   }
   const fleet = document.getElementById("gtFleetOnline");
@@ -5853,10 +5853,10 @@ function renderGastownHeader() {
   if (gtDeaconHeartbeat) {
     const hb = ov.health && ov.health.deacon_heartbeat;
     if (hb) {
-      gtDeaconHeartbeat.textContent = `✓ Deacon Heartbeat (${hb})`;
+      gtDeaconHeartbeat.textContent = `✓ Scheduler healthy (${hb})`;
       gtDeaconHeartbeat.className = "gt-stat-val healthy";
     } else {
-      gtDeaconHeartbeat.textContent = "Deacon Heartbeat: unknown";
+      gtDeaconHeartbeat.textContent = "Scheduler: unknown";
       gtDeaconHeartbeat.className = "gt-stat-val unknown";
     }
   }
@@ -6041,7 +6041,7 @@ function renderGastownKanban() {
         const topic = item.topic || "decay-review";
         const prompt = item.action_prompt || `${author} audit rule ${target}`;
         const sightingBadge = (item.sighting_count && item.sighting_count > 1)
-          ? `<span class="kanban-card-badge badge-sighting" title="Corroborated across ${item.sighting_count} patrol audits">👁️ ${item.sighting_count}x</span>`
+          ? `<span class="kanban-card-badge badge-sighting" title="Seen in ${item.sighting_count} audit runs">👁️ ${item.sighting_count}x</span>`
           : "";
         return `
           <div class="kanban-card">
@@ -6090,7 +6090,7 @@ function renderGastownKanban() {
         const topic = item.topic || "tuning-review";
         const prompt = item.action_prompt || `${author} tune rule ${target}`;
         const sightingBadge = (item.sighting_count && item.sighting_count > 1)
-          ? `<span class="kanban-card-badge badge-sighting" title="Corroborated across ${item.sighting_count} patrol audits">👁️ ${item.sighting_count}x</span>`
+          ? `<span class="kanban-card-badge badge-sighting" title="Seen in ${item.sighting_count} audit runs">👁️ ${item.sighting_count}x</span>`
           : "";
         return `
           <div class="kanban-card">
@@ -6194,7 +6194,7 @@ function renderGastownConvoys() {
   if (!tbody) return;
   const convoys = (gastownState.overview && gastownState.overview.convoys) || [];
   if (convoys.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-dim); padding:20px;">No active convoys.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-dim); padding:20px;">No active work packages.</td></tr>`;
     return;
   }
 
@@ -6244,7 +6244,7 @@ function renderGastownRefinery() {
   if (!tbody) return;
   const proposals = gastownState.proposals || [];
   if (proposals.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-dim); padding:20px;">No proposals in refinery queue.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-dim); padding:20px;">No changes awaiting review.</td></tr>`;
     return;
   }
 
@@ -6531,7 +6531,7 @@ async function renderGastownPatrols() {
   try {
     const res = await fetch("/api/gastown/patrols");
     if (!res.ok) {
-      grid.innerHTML = `<div class="table-loading" style="color:var(--accent-red);">Failed to load Deacon patrol schedules.</div>`;
+      grid.innerHTML = `<div class="table-loading" style="color:var(--accent-red);">Failed to load audit schedules.</div>`;
       return;
     }
     const data = await res.json();
@@ -6545,16 +6545,16 @@ async function renderGastownPatrols() {
 
     if (statusBadge) {
       const isHealthy = deacon.status === "healthy";
-      statusBadge.textContent = isHealthy ? "DEACON SUPERVISOR ONLINE" : "DEACON SUPERVISOR STANDBY";
+      statusBadge.textContent = isHealthy ? "SCHEDULER ONLINE" : "SCHEDULER STANDBY";
       statusBadge.className = `gt-badge ${isHealthy ? "gt-badge-green" : "gt-badge-yellow"}`;
     }
     if (heartbeatDetail) {
       heartbeatDetail.textContent = deacon.deacon_heartbeat
-        ? `Heartbeat: ${deacon.deacon_heartbeat}`
-        : "Heartbeat: unknown";
+        ? `Last check-in: ${deacon.deacon_heartbeat}`
+        : "Last check-in: unknown";
     }
     if (activePatrolsPill) {
-      activePatrolsPill.textContent = `${deacon.active_patrols || schedules.length} Active Patrols (${deacon.total_patrols_run || 0} sweeps run)`;
+      activePatrolsPill.textContent = `${deacon.active_patrols || schedules.length} scheduled audits (${deacon.total_patrols_run || 0} runs)`;
     }
 
     // Agent Avatars & Descriptions
@@ -6572,11 +6572,11 @@ async function renderGastownPatrols() {
     };
 
     if (schedules.length === 0) {
-      grid.innerHTML = `<div class="table-loading">No patrol schedules configured.</div>`;
+      grid.innerHTML = `<div class="table-loading">No audit schedules configured.</div>`;
     } else {
       grid.innerHTML = schedules.map((sched) => {
         const handle = sched.agent_handle || "@agent";
-        const meta = agentMeta[handle] || { icon: "🤖", name: handle, desc: "Autonomous background supervisory patrol cycle." };
+        const meta = agentMeta[handle] || { icon: "🤖", name: handle, desc: "Scheduled background audit." };
         const isEnabled = sched.enabled !== false;
         const lastRunStr = sched.last_run_at ? new Date(sched.last_run_at).toLocaleTimeString() : "Pending (Queued)";
         const nextRunStr = sched.next_run_at ? new Date(sched.next_run_at).toLocaleTimeString() : "On Schedule";
@@ -6603,15 +6603,15 @@ async function renderGastownPatrols() {
                   <div class="patrol-meta-val">#${sched.stream || "ops"} &gt; ${sched.topic || "audit"}</div>
                 </div>
                 <div>
-                  <div class="patrol-meta-label">Patrol Action</div>
+                  <div class="patrol-meta-label">Audit</div>
                   <div class="patrol-meta-val"><code>${sched.action}</code></div>
                 </div>
                 <div>
-                  <div class="patrol-meta-label">Last Sweep</div>
+                  <div class="patrol-meta-label">Last Run</div>
                   <div class="patrol-meta-val">${lastRunStr}</div>
                 </div>
                 <div>
-                  <div class="patrol-meta-label">Next Sweep Due</div>
+                  <div class="patrol-meta-label">Next Run</div>
                   <div class="patrol-meta-val">${nextRunStr}</div>
                 </div>
               </div>
@@ -6623,7 +6623,7 @@ async function renderGastownPatrols() {
               </div>
               <button class="btn btn-primary btn-sm" onclick="triggerGastownAgentPatrol(${jsArg(handle)})">
                 <svg class="ui-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span>Run Patrol</span>
+                <span>Run Audit</span>
               </button>
             </div>
           </div>
@@ -6635,7 +6635,7 @@ async function renderGastownPatrols() {
     if (logTbody) {
       const logs = (deacon.recent_patrols || []).slice().reverse();
       if (logs.length === 0) {
-        logTbody.innerHTML = `<tr><td colspan="7" class="table-loading">No patrol sweeps executed yet. Click "Sweep Entire Fleet Now" to trigger a run.</td></tr>`;
+        logTbody.innerHTML = `<tr><td colspan="7" class="table-loading">No audit runs yet. Click "Run All Audits Now" to start one.</td></tr>`;
       } else {
         logTbody.innerHTML = logs.map((log) => {
           const ts = log.executed_at ? new Date(log.executed_at).toLocaleTimeString() : "<1m ago";
@@ -6643,7 +6643,7 @@ async function renderGastownPatrols() {
           const beads = log.created_beads || [];
           const beadMarkup = beads.length > 0
             ? beads.map((b) => `<code style="font-size:10px; color:#c2d94c;">${b}</code>`).join(", ")
-            : `<span style="color:var(--text-dim); font-size:11px;">0 beads (Clean)</span>`;
+            : `<span style="color:var(--text-dim); font-size:11px;">None (clean)</span>`;
           return `
             <tr>
               <td style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim);">${ts}</td>
@@ -7114,19 +7114,19 @@ async function triggerGastownPatrolAll() {
   const headerBtn = document.getElementById("btnHeaderPatrolAll");
   if (btn) btn.disabled = true;
   if (headerBtn) headerBtn.disabled = true;
-  showToast("info", "Deacon: Sweeping all 5 fleet patrol cycles across live endpoints...");
+  showToast("info", "Running all scheduled audits…");
   try {
     const res = await fetch("/api/gastown/patrols/run-all", { method: "POST" });
     const data = await res.json();
     if (res.ok) {
-      showToast("success", `Deacon: Fleet sweep completed (${data.executed_count} agents audited)`);
+      showToast("success", `Audits complete (${data.executed_count} agents audited)`);
       await loadGastownOverview(true);
       await renderGastownPatrols();
     } else {
-      showToast("error", `Patrol sweep failed: ${data.detail || data.error}`);
+      showToast("error", `Audit run failed: ${data.detail || data.error}`);
     }
   } catch (err) {
-    showToast("error", `Sweep error: ${err.message}`);
+    showToast("error", `Audit run error: ${err.message}`);
   } finally {
     if (btn) btn.disabled = false;
     if (headerBtn) headerBtn.disabled = false;
@@ -7135,21 +7135,21 @@ async function triggerGastownPatrolAll() {
 window.triggerGastownPatrolAll = triggerGastownPatrolAll;
 
 async function triggerGastownAgentPatrol(agentHandle) {
-  showToast("info", `Deacon: Running patrol for ${agentHandle}...`);
+  showToast("info", `Running audit for ${agentHandle}…`);
   try {
     const res = await fetch(`/api/gastown/patrols/${encodeURIComponent(agentHandle)}/run`, { method: "POST" });
     const data = await res.json();
     if (res.ok && data.status === "SUCCESS") {
       const beads = data.created_beads || [];
-      const beadMsg = beads.length > 0 ? ` (${beads.length} autonomous beads slung)` : "";
-      showToast("success", `Deacon: Patrol completed for ${agentHandle}${beadMsg}`);
+      const beadMsg = beads.length > 0 ? ` (${beads.length} task${beads.length === 1 ? "" : "s"} opened)` : "";
+      showToast("success", `Audit complete for ${agentHandle}${beadMsg}`);
       await loadGastownOverview(true);
       await renderGastownPatrols();
     } else {
-      showToast("error", `Patrol failed for ${agentHandle}: ${data.error || data.detail}`);
+      showToast("error", `Audit failed for ${agentHandle}: ${data.error || data.detail}`);
     }
   } catch (err) {
-    showToast("error", `Error running patrol: ${err.message}`);
+    showToast("error", `Error running audit: ${err.message}`);
   }
 }
 window.triggerGastownAgentPatrol = triggerGastownAgentPatrol;
@@ -7419,9 +7419,9 @@ function selectAgentInLibrary(handle) {
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span>Chat</span>
         </button>
-        <button id="btnLibRunPatrol" class="btn btn-primary" title="Trigger Deacon Autonomous Patrol">
+        <button id="btnLibRunPatrol" class="btn btn-primary" title="Run this agent's scheduled audit now">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span>Run Patrol</span>
+          <span>Run Audit</span>
         </button>
       </div>
     </div>

@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.1">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -183,7 +183,7 @@
               <span class="gt-mayor-icon">🎩</span>
               <div class="gt-mayor-titles">
                 <div class="gt-mayor-head-row">
-                  <span class="gt-mayor-title">The Mayor</span>
+                  <span class="gt-mayor-title">Fleet Coordinator</span>
                   <span class="gt-badge gt-badge-green">Attached</span>
                 </div>
                 <div class="gt-mayor-sub">
@@ -194,7 +194,7 @@
             <div class="gt-mayor-stats">
               <div class="gt-stat-item">
                 <span class="gt-stat-label">Health</span>
-                <span id="gtDeaconHeartbeat" class="gt-stat-val unknown">Deacon Heartbeat: loading…</span>
+                <span id="gtDeaconHeartbeat" class="gt-stat-val unknown">Scheduler: loading…</span>
               </div>
               <div class="gt-stat-item">
                 <span class="gt-stat-label">Fleet</span>
@@ -208,11 +208,11 @@
             <div class="gt-summary-stats">
               <button type="button" class="gt-summary-card" data-gt-target="library" title="Open Agent Library">
                 <span id="gtStatPolecats" class="gt-stat-num">—</span>
-                <span class="gt-stat-caption">🦨 Polecats (Agents)</span>
+                <span class="gt-stat-caption">🤖 Agents</span>
               </button>
               <button type="button" class="gt-summary-card" data-gt-target="dashboards" title="Open Dashboards (data sources)">
                 <span id="gtStatHooks" class="gt-stat-num">—</span>
-                <span class="gt-stat-caption">🪝 Telemetry Hooks</span>
+                <span class="gt-stat-caption">📡 Data Sources</span>
               </button>
               <button type="button" class="gt-summary-card" data-gt-target="work_queue" title="Open Work Queue">
                 <span id="gtStatWork" class="gt-stat-num">—</span>
@@ -222,9 +222,9 @@
                 <span id="gtStatLeases" class="gt-stat-num">—</span>
                 <span class="gt-stat-caption">🔒 Active Leases</span>
               </button>
-              <button type="button" class="gt-summary-card" data-gt-target="convoys" title="Open Convoys">
+              <button type="button" class="gt-summary-card" data-gt-target="convoys" title="Open Work Packages">
                 <span id="gtStatConvoys" class="gt-stat-num">—</span>
-                <span class="gt-stat-caption">🚚 Convoys</span>
+                <span class="gt-stat-caption">📦 Work Packages</span>
               </button>
               <button type="button" class="gt-summary-card" data-gt-target="escalations" title="Open Escalations">
                 <span id="gtStatEscalations" class="gt-stat-num gt-alert-num">—</span>
@@ -249,11 +249,11 @@
               </button>
               <button id="tabGtConvoys" class="subtab">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                <span>Convoys</span>
+                <span>Work Packages</span>
               </button>
               <button id="tabGtRefinery" class="subtab">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
-                <span>Refinery Merge Queue</span>
+                <span>Change Queue</span>
               </button>
               <button id="tabGtEscalations" class="subtab">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -261,13 +261,13 @@
               </button>
               <button id="tabGtPatrols" class="subtab">
                 <svg class="ui-icon tab-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span>Deacon Patrols</span>
+                <span>Scheduled Audits</span>
               </button>
             </div>
             <div class="gastown-actions">
               <button id="btnTriggerPatrolAll" class="btn btn-primary" onclick="triggerGastownPatrolAll()">
                 <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span>Patrol Fleet</span>
+                <span>Run All Audits</span>
               </button>
               <button id="btnRefreshGastown" class="btn btn-secondary">
                 <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -336,10 +336,10 @@
                 <div>
                   <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
                     <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                    <span>Active Convoys &amp; Fleet Work Packages</span>
+                    <span>Active Work Packages</span>
                   </h3>
                   <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
-                    Bundled agent work packages tracked via Beads Ledger with progress completion metrics.
+                    Related agent tasks grouped into packages, with completion progress.
                   </p>
                 </div>
               </div>
@@ -348,7 +348,7 @@
                   <thead>
                     <tr>
                       <th style="width:100px;">Status</th>
-                      <th>Convoy ID &amp; Title</th>
+                      <th>Package ID &amp; Title</th>
                       <th style="width:180px;">Progress</th>
                       <th>Work Breakdown</th>
                       <th>Assignees</th>
@@ -356,7 +356,7 @@
                     </tr>
                   </thead>
                   <tbody id="gtConvoysTableBody">
-                    <tr><td colspan="6" class="table-loading">Loading active convoys...</td></tr>
+                    <tr><td colspan="6" class="table-loading">Loading work packages…</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -370,10 +370,10 @@
                 <div>
                   <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
                     <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
-                    <span>Bors-Style Refinery Merge Queue</span>
+                    <span>Change Queue</span>
                   </h3>
                   <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
-                    Human-in-the-loop verification gates, CI tests, and atomic mutation commit queue.
+                    Proposed changes awaiting preflight checks and analyst approval before they are applied.
                   </p>
                 </div>
               </div>
@@ -384,14 +384,14 @@
                       <th>Proposal ID</th>
                       <th>Target Resource</th>
                       <th>Author</th>
-                      <th>CI Preflight</th>
-                      <th>Merge Status</th>
+                      <th>Preflight</th>
+                      <th>Status</th>
                       <th>Diff Stats</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="gtRefineryTableBody">
-                    <tr><td colspan="7" class="table-loading">Loading merge queue...</td></tr>
+                    <tr><td colspan="7" class="table-loading">Loading change queue…</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -437,25 +437,25 @@
             <div class="deacon-patrol-header-card">
               <div class="deacon-patrol-title-area">
                 <div class="deacon-badge-row">
-                  <span class="gt-badge gt-badge-green" id="gtDeaconStatusBadge">DEACON SUPERVISOR ONLINE</span>
-                  <span class="deacon-telemetry-pill" id="gtDeaconHeartbeatDetail">Heartbeat: loading…</span>
-                  <span class="deacon-telemetry-pill" id="gtDeaconActivePatrolsPill">5 Active Patrols</span>
+                  <span class="gt-badge gt-badge-green" id="gtDeaconStatusBadge">SCHEDULER: LOADING…</span>
+                  <span class="deacon-telemetry-pill" id="gtDeaconHeartbeatDetail">Last check-in: loading…</span>
+                  <span class="deacon-telemetry-pill" id="gtDeaconActivePatrolsPill">— scheduled audits</span>
                 </div>
-                <h3 class="deacon-section-heading">Autonomous Background Fleet Audits</h3>
+                <h3 class="deacon-section-heading">Scheduled Audits</h3>
                 <p class="deacon-section-desc">
-                  The Deacon daemon evaluates scheduled patrol sweeps, queries live Google SecOps APIs, detects transport and parser anomalies, generates collaborative chat alerts, and autonomously registers atomic tasks in Evidence Fabric.
+                  Agents run these audits on a schedule against live Google SecOps APIs. Audits flag ingestion and parser problems, post alerts to chat, and open follow-up tasks automatically.
                 </p>
               </div>
               <div class="deacon-patrol-header-actions">
                 <button class="btn btn-primary" onclick="triggerGastownPatrolAll()" id="btnHeaderPatrolAll">
                   <svg class="ui-icon btn-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  <span>Sweep Entire Fleet Now</span>
+                  <span>Run All Audits Now</span>
                 </button>
               </div>
             </div>
 
             <div class="deacon-patrols-grid" id="gtDeaconPatrolsGrid">
-              <div class="table-loading">Loading Deacon patrol cycles...</div>
+              <div class="table-loading">Loading audit schedules…</div>
             </div>
 
             <!-- Recent Patrol Audit Log -->
@@ -464,10 +464,10 @@
                 <div>
                   <h3 style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:6px;">
                     <svg class="ui-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span>Recent Deacon Patrol Audit Logs</span>
+                    <span>Recent Audit Runs</span>
                   </h3>
                   <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
-                    Telemetry from live scheduled sweeps, auto-dispatched task beads, and findings.
+                    Results of recent audit runs, including any tasks they opened.
                   </p>
                 </div>
               </div>
@@ -476,16 +476,16 @@
                   <thead>
                     <tr>
                       <th style="width:130px;">Timestamp</th>
-                      <th>Agent Handle</th>
-                      <th>Patrol Action</th>
+                      <th>Agent</th>
+                      <th>Audit</th>
                       <th>Stream &amp; Topic</th>
                       <th>Execution Mode</th>
-                      <th>Beads Dispatched</th>
+                      <th>Tasks Opened</th>
                       <th style="width:100px;">Status</th>
                     </tr>
                   </thead>
                   <tbody id="gtPatrolAuditLogBody">
-                    <tr><td colspan="7" class="table-loading">No patrol audit executions recorded yet.</td></tr>
+                    <tr><td colspan="7" class="table-loading">No audit runs recorded yet.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1348,6 +1348,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.6.0"></script>
+  <script src="/static/app.js?v=2.6.1"></script>
 </body>
 </html>

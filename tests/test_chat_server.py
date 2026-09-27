@@ -175,6 +175,20 @@ class ChatStoreTest(unittest.TestCase):
         self.assertIn("custom-topic", topic_names)
         self.assertIn("rule-proposals", topic_names)
 
+    def test_list_streams_includes_agent_created_streams(self):
+        # Scheduler patrols post to #infrastructure; without this the sidebar can't reach them.
+        self.store.add_message(
+            stream="infrastructure",
+            topic="service-status",
+            sender_handle="@cloud-status-agent",
+            sender_type="agent",
+            content="advisory",
+        )
+        streams = {s["id"]: s for s in self.store.list_streams()}
+        self.assertIn("infrastructure", streams)
+        self.assertEqual([t["name"] for t in streams["infrastructure"]["topics"]], ["service-status"])
+        self.assertNotIn("dm", streams)
+
     def test_active_job_lifecycle_and_ttl_reaping(self):
         # 1. Start job
         job = self.store.start_job(

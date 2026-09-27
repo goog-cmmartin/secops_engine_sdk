@@ -233,6 +233,19 @@ class ChatStore:
             s_dict = dict(s)
             s_dict["topics"] = self.list_topics(s["id"])
             streams_copy.append(s_dict)
+        # Agents may post to streams outside the defaults (e.g. scheduler patrols to
+        # #infrastructure / #governance). Surface them so those posts are reachable.
+        known = {s["id"] for s in DEFAULT_STREAMS} | {"dm"}
+        extra = sorted({m.stream for m in self._messages if m.stream and m.stream not in known})
+        for stream_id in extra:
+            streams_copy.append({
+                "id": stream_id,
+                "name": stream_id,
+                "display_name": stream_id.replace("_", " ").title(),
+                "description": "Agent-created stream",
+                "default_topics": [],
+                "topics": self.list_topics(stream_id),
+            })
         return streams_copy
 
     def list_topics(self, stream: str) -> List[Dict[str, Any]]:

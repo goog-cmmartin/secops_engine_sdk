@@ -39,6 +39,40 @@ logger = logging.getLogger(__name__)
 
 LEGACY_CLOUD_STATUS_ISSUE_ID = "issue_upstream_cloud_status"
 
+# Routing contract for every issue type the scheduler opens: (plane, required capabilities).
+# An issue is only claimable by an agent whose profile covers these capabilities in this
+# plane, so tests/test_issue_routing_contract.py checks each entry against the live fleet.
+ISSUE_ROUTING: Dict[str, Dict[str, Any]] = {
+    "parser_drop_spike": {
+        "plane": OperationalPlane.DATA.value,
+        "requires_capabilities": {
+            "parser.audit_health": 1,
+            "parser.run": 1,
+            "git.proposal.create": 1,
+        },
+    },
+}
+
+
+def unroutable_issue_types(fleet: Dict[str, BaseSecOpsAdkAgent]) -> Dict[str, str]:
+    """Returns {issue_type: reason} for ISSUE_ROUTING entries no agent in ``fleet`` can claim."""
+    profiles = [
+        agent.get_capability_profile()
+        for agent in fleet.values()
+        if callable(getattr(agent, "get_capability_profile", None))
+    ]
+    problems: Dict[str, str] = {}
+    for issue_type, spec in ISSUE_ROUTING.items():
+        plane, required = spec["plane"], spec["requires_capabilities"]
+        in_plane = [p for p in profiles if plane in p.operational_planes]
+        if not in_plane:
+            problems[issue_type] = f"no agent operates in plane '{plane}'"
+        elif not any(p.satisfies(required) for p in in_plane):
+            best = max(in_plane, key=lambda p: sum(1 for c in required if p.capabilities.get(c, 0) >= required[c]))
+            missing = sorted(c for c, lvl in required.items() if best.capabilities.get(c, 0) < lvl)
+            problems[issue_type] = f"no '{plane}' agent has all of {sorted(required)}; closest {best.agent_handle} lacks {missing}"
+    return problems
+
 
 DEFAULT_AGENT_SCHEDULES: Dict[str, Dict[str, Any]] = {
     "@feed-agent": {
@@ -167,6 +201,11 @@ class FleetScheduler:
         if issue_worker is None and queue is not None and autonomous_workers_enabled():
             issue_worker = IssueWorker(fleet=self.fleet, work_queue=queue, chat_store=self.chat_store)
         self.issue_worker = issue_worker
+        try:
+            for issue_type, reason in unroutable_issue_types(self.fleet).items():
+                logger.error("Issue type %s cannot be claimed by any agent: %s", issue_type, reason)
+        except Exception as routing_err:
+            logger.warning("Issue routing check skipped: %s", routing_err)
         self._load_all_schedules()
 
 
@@ -378,7 +417,7 @@ class FleetScheduler:
                                 issue = SOCIssue(
                                     id=issue_id,
                                     type="parser_drop_spike",
-                                    plane=OperationalPlane.DATA.value,
+                                    plane=ISSUE_ROUTING["parser_drop_spike"]["plane"],
                                     severity=IssueSeverity.HIGH.value if status == "FAILED" else IssueSeverity.MEDIUM.value,
                                     problem=IssueProblem(
                                         title=f"Elevated Parser Normalization Drops on {log_type}",
@@ -396,11 +435,7 @@ class FleetScheduler:
                                         affected_objects=[log_type],
                                     ),
                                     routing=IssueRouting(
-                                        requires_capabilities={
-                                            "parser.audit_health": 1,
-                                            "parser.run": 1,
-                                            "git.proposal.create": 1,
-                                        },
+                                        requires_capabilities=dict(ISSUE_ROUTING["parser_drop_spike"]["requires_capabilities"]),
                                     ),
                                     governance=IssueGovernance(
                                         required_authority_tier=AuthorityTier.TIER_2_PEER_REVIEW.value,

@@ -15,7 +15,7 @@ A second agent reviewed this plan and agreed with S1–S5. Checking the code tur
 | A5 | Cloud status becomes information only: remove the `upstream_cloud_disruption` issue, keep the to-do and chat alert, close the existing `issue_upstream_cloud_status` once | `fleet_scheduler` cloud branch | Done |
 | N2 | Parser auto-close only runs when the issue is APPLIED/VALIDATING. If the problem clears while the issue is AVAILABLE or NEEDS_HUMAN, the issue stays open and an agent can still claim it. Close those too, as "resolved without a change" | `fleet_scheduler` parser branch | Done |
 | N3 | Merge does nothing for `PATCH_PARSER_CBN`, `REMEDIATE_FEED`, `CREATE_FINDINGS_REFINEMENT`: they fall through to `APPLIED_CUSTOM` and nothing is written to production, yet the proposal shows MERGED and the issue APPLIED. Fix: connect `CREATE_FINDINGS_REFINEMENT` → `curated_detections.refinements.create`. For action types with no executor, record `MERGED_MANUAL_APPLY_REQUIRED`, leave the issue open, and show "Apply manually" in the UI | `proposal_manager.approve_and_merge` | Done |
-| S5 | Test: every `requires_capabilities` set the scheduler emits must be met by at least one agent profile in that issue's plane | `tests/` | Todo |
+| S5 | Test: every `requires_capabilities` set the scheduler emits must be met by at least one agent profile in that issue's plane | `tests/` | Done |
 
 **Next (after the items above):** A3 decay and A2 tuning. Both use `UPDATE_RULE_TEXT`, which really writes to production and goes through the stale-target check. Feed (A1) waits: there is no feed write capability, so a feed proposal can only recommend.
 
@@ -44,7 +44,7 @@ Patrol findings take one of two paths:
 |---|------|-------|--------|
 | S1 | Fix plane map: `"detection"` key vs manifest `"detections"`/`"detection_rules"` makes detection agents fall back to `platform` | 1 Plumbing | Todo |
 | S2 | Stop the generic `SOC-AUTO-…` / `patrol_<action>` issue when a real issue already exists for the finding | 1 Plumbing | Todo |
-| S5 | Check scheduler `required_capabilities` against the capabilities agents declare; fail loudly on a mismatch | 1 Plumbing | Todo |
+| S5 | Check scheduler `required_capabilities` against the capabilities agents declare; fail loudly on a mismatch | 1 Plumbing | Done |
 | A1 | Feed failing or stale → issue + playbook → `@feed-agent` (`submit_feed_proposal`) | 2 Quick wins | Todo |
 | A2 | Noisy rule → issue + playbook → `@detection-tuning-agent` (`submit_tuning_proposal`); depends on S1 | 2 Quick wins | Todo |
 | A3 | Broken or decayed rule → issue + playbook → `@detection-decay-agent` (`submit_decay_proposal`); depends on S1 | 2 Quick wins | Todo |

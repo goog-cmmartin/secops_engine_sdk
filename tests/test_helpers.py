@@ -6,6 +6,7 @@ import unittest
 from adapters.google_secops import GoogleSecOpsAdapter
 from engine.config import SecOpsConfigurationError
 from engine.facade import SecOpsEngine
+from tests.live_guard import LIVE_TESTS_ENV, live_tests_enabled
 
 
 def get_live_adapter() -> GoogleSecOpsAdapter:
@@ -13,7 +14,10 @@ def get_live_adapter() -> GoogleSecOpsAdapter:
 
     If credentials or tenant parameters are missing, raises unittest.SkipTest
     so live test suites skip gracefully on unconfigured environments without failing CI.
+    Also skips unless SECOPS_LIVE_TESTS=1: credentials alone are not an opt-in.
     """
+    if not live_tests_enabled():
+        raise unittest.SkipTest(f"Live tenant tests disabled; set {LIVE_TESTS_ENV}=1 to run.")
     try:
         return GoogleSecOpsAdapter()
     except SecOpsConfigurationError as e:

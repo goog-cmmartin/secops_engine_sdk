@@ -29,3 +29,15 @@ atexit.register(shutil.rmtree, _LEDGER_TMP, ignore_errors=True)
 _WEB_STATE_TMP = tempfile.mkdtemp(prefix="secops-test-webstate-")
 os.environ["SECOPS_WEB_STATE_ROOT"] = _WEB_STATE_TMP
 atexit.register(shutil.rmtree, _WEB_STATE_TMP, ignore_errors=True)
+
+# Live-tenant guard: a populated .env must never make pytest call (or mutate) a real
+# tenant. Live reads need SECOPS_LIVE_TESTS=1; writes also need
+# SECOPS_ALLOW_LIVE_WRITES=1. See tests/live_guard.py.
+from tests import live_guard  # noqa: E402
+
+live_guard.install()
+
+# Firestore clients use gRPC (not urllib), so keep the evidence store / work queue
+# factories on local backends unless live tests are explicitly enabled.
+if not live_guard.live_tests_enabled():
+    os.environ["SECOPS_DISABLE_FIRESTORE"] = "1"

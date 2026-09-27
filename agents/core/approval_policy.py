@@ -25,11 +25,13 @@ HUMAN_ONLY_ACTIONS = frozenset({
     "GENERIC_CAPABILITY",
 })
 
-# Actions whose payload is code that a compiler preflight can verify.
+# Actions whose payload a preflight can verify (YARA-L/CBN compiler, or
+# :testFindingsRefinement for refinement queries).
 CODE_CHANGE_ACTIONS = frozenset({
     "PATCH_RULE",
     "UPDATE_RULE_TEXT",
     "PATCH_PARSER_CBN",
+    "CREATE_FINDINGS_REFINEMENT",
 })
 
 HIGH_RISK_LEVELS = frozenset({"HIGH", "CRITICAL"})

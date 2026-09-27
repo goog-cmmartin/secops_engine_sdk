@@ -96,7 +96,9 @@ def _map_rule_deployment(raw: Dict[str, Any]) -> RuleDeployment:
         name=raw.get("name", ""),
         run_frequency=raw.get("runFrequency", "LIVE"),
         execution_state=raw.get("executionState", "DEFAULT"),
-        enabled=bool(raw.get("enabled", False) or raw.get("executionState") == "ACTIVE" or raw.get("runFrequency") in ("LIVE", "HOURLY", "DAILY")),
+        # The API omits false booleans (proto3 JSON), and always returns runFrequency
+        # (it is the frequency the rule *would* run at). Only `enabled` means deployed.
+        enabled=bool(raw.get("enabled", False)),
         alerting=bool(raw.get("alerting", False)),
         archived=bool(raw.get("archived", False)),
         archive_time=raw.get("archiveTime", ""),

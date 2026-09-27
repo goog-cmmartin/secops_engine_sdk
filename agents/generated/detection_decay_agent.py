@@ -132,12 +132,8 @@ class DetectionDecayAgentAgent(BaseSecOpsAdkAgent):
             # Accurate is_live status
             is_live = False
             if dep:
-                is_live = bool(
-                    getattr(dep, "enabled", False)
-                    or getattr(dep, "alerting", False)
-                    or getattr(dep, "run_frequency", "") == "LIVE"
-                    or getattr(dep, "execution_state", "") == "ACTIVE"
-                )
+                # Only `enabled` means deployed; runFrequency is always present.
+                is_live = bool(getattr(dep, "enabled", False))
             else:
                 is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
 

@@ -501,15 +501,10 @@ class AuditRuleDecayWorkflow:
             # Determine true live state
             is_live = False
             if dep:
+                # Only `enabled` means deployed. runFrequency is always present and
+                # "ACTIVE" is not an ExecutionState value (DEFAULT/LIMITED/PAUSED).
                 is_live = bool(
-                    getattr(dep, "enabled", False)
-                    or (dep.get("enabled", False) if isinstance(dep, dict) else False)
-                    or getattr(dep, "alerting", False)
-                    or (dep.get("alerting", False) if isinstance(dep, dict) else False)
-                    or getattr(dep, "run_frequency", "") == "LIVE"
-                    or (dep.get("runFrequency", "") == "LIVE" if isinstance(dep, dict) else False)
-                    or getattr(dep, "execution_state", "") == "ACTIVE"
-                    or (dep.get("executionState", "") == "ACTIVE" if isinstance(dep, dict) else False)
+                    dep.get("enabled", False) if isinstance(dep, dict) else getattr(dep, "enabled", False)
                 )
             else:
                 is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))

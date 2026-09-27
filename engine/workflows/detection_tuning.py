@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import difflib
 import os
 import re
+import threading
+import time
 import uuid
 
 if TYPE_CHECKING:
@@ -333,10 +335,33 @@ limit: {limit}
 
 
 class TestFindingsRefinementWorkflow:
-    """Executes a dry-run test of a findings refinement exclusion against historical detections."""
+    """Executes a dry-run test of a findings refinement exclusion against historical detections.
+
+    :testFindingsRefinement has a very low per-minute quota, so successful results are
+    cached per (rules, query, window) for CACHE_TTL_S. Errors are never cached.
+    """
+
+    CACHE_TTL_S = 3600.0
+    _CACHE_MAX = 256
 
     def __init__(self, adapter: GoogleSecOpsAdapter):
         self.adapter = adapter
+        self._cache: Dict[tuple, tuple] = {}
+        self._cache_lock = threading.Lock()
+
+    def _cache_get(self, key: tuple) -> Optional[FindingsRefinementTestResult]:
+        with self._cache_lock:
+            hit = self._cache.get(key)
+            if hit and (time.monotonic() - hit[0]) < self.CACHE_TTL_S:
+                return hit[1]
+            self._cache.pop(key, None)
+            return None
+
+    def _cache_put(self, key: tuple, result: FindingsRefinementTestResult) -> None:
+        with self._cache_lock:
+            if len(self._cache) >= self._CACHE_MAX:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = (time.monotonic(), result)
 
     def execute(
         self,
@@ -351,6 +376,16 @@ class TestFindingsRefinementWorkflow:
             start_dt = now - timedelta(days=max(1, lookback_days))
             start_time = start_dt.strftime("%Y-%m-%dT00:00:00.000Z")
             end_time = now.strftime("%Y-%m-%dT23:59:59.999Z")
+
+        cache_key = (
+            tuple(sorted(r.split("/")[-1] for r in curated_rule_ids)),
+            query.strip(),
+            start_time,
+            end_time,
+        )
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         raw_list = self.adapter.test_findings_refinement(
             curated_rule_ids=curated_rule_ids,
@@ -386,7 +421,7 @@ class TestFindingsRefinementWorkflow:
 
         ratio = (float(excluded_count) / float(total_count)) if total_count > 0 else 0.0
 
-        return FindingsRefinementTestResult(
+        result = FindingsRefinementTestResult(
             curated_rule_id=rule_id_ref,
             query=query,
             total_detections=total_count,
@@ -394,6 +429,8 @@ class TestFindingsRefinementWorkflow:
             suppression_ratio=ratio,
             raw=raw_list,
         )
+        self._cache_put(cache_key, result)
+        return result
 
 
 class ManageFindingsRefinementsWorkflow:

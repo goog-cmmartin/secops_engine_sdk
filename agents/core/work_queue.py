@@ -960,7 +960,7 @@ def get_work_queue(
         except Exception:
             pass
 
-    if resolved_project:
+    if resolved_project and os.getenv("SECOPS_DISABLE_FIRESTORE") != "1":
         try:
             queue = FirestoreWorkQueue(project_id=resolved_project, database_id=resolved_db)
             queue.issues_col.document("connectivity_check").set(

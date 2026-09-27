@@ -42,8 +42,8 @@ Patrol findings take one of two paths:
 ## Status
 | # | Item | Phase | Status |
 |---|------|-------|--------|
-| S1 | Fix plane map: `"detection"` key vs manifest `"detections"`/`"detection_rules"` makes detection agents fall back to `platform` | 1 Plumbing | Todo |
-| S2 | Stop the generic `SOC-AUTO-…` / `patrol_<action>` issue when a real issue already exists for the finding | 1 Plumbing | Todo |
+| S1 | Fix plane map: `"detection"` key vs manifest `"detections"`/`"detection_rules"` makes detection agents fall back to `platform` | 1 Plumbing | Done |
+| S2 | Stop the generic `SOC-AUTO-…` / `patrol_<action>` issue when a real issue already exists for the finding | 1 Plumbing | Done (router creates no issues) |
 | S5 | Check scheduler `required_capabilities` against the capabilities agents declare; fail loudly on a mismatch | 1 Plumbing | Done |
 | A1 | Feed failing or stale → issue + playbook → `@feed-agent` (`submit_feed_proposal`) | 2 Quick wins | Todo |
 | A2 | Noisy rule → issue + playbook → `@detection-tuning-agent` (`submit_tuning_proposal`); depends on S1 | 2 Quick wins | Todo |

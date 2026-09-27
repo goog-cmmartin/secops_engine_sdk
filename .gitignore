@@ -130,3 +130,4 @@ references/
 # Local state & chat history
 .state/
 .chat/
+.chris.json

@@ -4046,7 +4046,7 @@ const APPROVAL_TIER_LABELS = {
   TIER_3_HUMAN_APPROVAL: "Human approval required",
 };
 // Mirrors CODE_CHANGE_ACTIONS in agents/core/approval_policy.py (server is authoritative).
-const PREFLIGHT_GATED_ACTIONS = new Set(["PATCH_RULE", "UPDATE_RULE_TEXT", "PATCH_PARSER_CBN"]);
+const PREFLIGHT_GATED_ACTIONS = new Set(["PATCH_RULE", "UPDATE_RULE_TEXT", "PATCH_PARSER_CBN", "CREATE_FINDINGS_REFINEMENT"]);
 // Mirrors EXECUTABLE_ACTIONS in agents/core/proposal_manager.py. Anything else merges
 // without writing to SecOps; the server's has_executor field is preferred when present.
 const EXECUTABLE_ACTIONS = new Set([

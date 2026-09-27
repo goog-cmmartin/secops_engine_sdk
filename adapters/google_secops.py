@@ -28,8 +28,37 @@ from engine.domain import (
     UDMEvent,
     ValidationResult,
 )
+from engine.parsing import parse_id_list
 
 logger = logging.getLogger(__name__)
+
+
+class SecOpsApiError(RuntimeError):
+    """HTTP error from a Google SecOps API. Subclasses RuntimeError for backward compatibility."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(f"Google SecOps API Error [{status}]: {message}")
+        self.status = status
+        self.api_message = message
+
+
+def _extract_error_message(error_body: str) -> str:
+    """Pulls the human-readable message out of a Google API error body.
+
+    Most endpoints return ``{"error": {...}}``; some (e.g. :testFindingsRefinement)
+    return a JSON array ``[{"error": {...}}]``. Falls back to the raw body.
+    """
+    try:
+        err_json = json.loads(error_body)
+    except (ValueError, TypeError):
+        return error_body
+    if isinstance(err_json, list) and err_json:
+        err_json = err_json[0]
+    if isinstance(err_json, dict):
+        err = err_json.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+    return error_body
 
 
 class GoogleSecOpsAdapter:
@@ -109,12 +138,8 @@ class GoogleSecOpsAdapter:
                     time.sleep(2.5 * attempt)
                     continue
                 error_body = e.read().decode("utf-8")
-                try:
-                    err_json = json.loads(error_body)
-                    err_msg = err_json.get("error", {}).get("message", error_body)
-                except Exception:
-                    err_msg = error_body
-                raise RuntimeError(f"Google SecOps API Error [{e.code}]: {err_msg}") from e
+                err_msg = _extract_error_message(error_body)
+                raise SecOpsApiError(e.code, err_msg) from e
             except (TimeoutError, urllib.error.URLError) as e:
                 if attempt < max_retries:
                     time.sleep(1.0 * attempt)
@@ -1355,6 +1380,7 @@ class GoogleSecOpsAdapter:
             "query": query,
             "type": refinement_type,
         }
+        curated_rule_ids = parse_id_list(curated_rule_ids, "curated_rule_ids")
         if curated_rule_ids:
             formatted_rules = []
             for r in curated_rule_ids:
@@ -1386,7 +1412,7 @@ class GoogleSecOpsAdapter:
         """Simulates and dry-runs an exclusion query against historical detections."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:testFindingsRefinement"
         formatted_rules = []
-        for r in curated_rule_ids:
+        for r in parse_id_list(curated_rule_ids, "curated_rule_ids"):
             clean_r = r.split("/")[-1].strip()
             if r.startswith("projects/"):
                 formatted_rules.append(r)
@@ -1408,6 +1434,8 @@ class GoogleSecOpsAdapter:
         res = self._request("POST", path, body=body, timeout=timeout)
         if isinstance(res, list):
             return res
+        if isinstance(res, dict) and res:
+            return [res]
         return []
 
 

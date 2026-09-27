@@ -24,6 +24,7 @@ from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
 from engine.workflows.identity_governance import PREDEFINED_CHRONICLE_ROLES, classify_member
 from tests.test_helpers import get_live_engine
+from tests.live_guard import require_gemini, require_live
 
 
 class IdentityGovernorLiveTest(unittest.TestCase):
@@ -85,6 +86,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
 
     def test_live_chronicle_iam_bindings(self):
         """Queries live GCP IAM policy and verifies Chronicle role bindings and member extraction."""
+        require_live(self)
         res = self.agent.audit_chronicle_iam_bindings()
         self.assertEqual(res["status"], "SUCCESS")
         self.assertGreater(res["total_chronicle_roles_assigned"], 0)
@@ -95,6 +97,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
 
     def test_live_chronicle_custom_roles(self):
         """Queries live GCP IAM for custom roles granting chronicle.* permissions."""
+        require_live(self)
         res = self.agent.query_chronicle_custom_roles()
         self.assertEqual(res["status"], "SUCCESS")
         self.assertGreater(res["custom_roles_count"], 0)
@@ -162,6 +165,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
 
     def test_run_identity_drift_audit_widget(self):
         """Verifies that run_identity_drift_audit attaches an interactive UI card."""
+        require_live(self)
         res = self.agent.run_identity_drift_audit()
         self.assertEqual(res["status"], "SUCCESS")
         self.assertIsNotNone(self.agent.last_widget)
@@ -170,6 +174,8 @@ class IdentityGovernorLiveTest(unittest.TestCase):
 
     def test_autonomous_chat_turn(self):
         """Verifies that the agent responds autonomously using Gemini 3.8 Flash and executes IAM tools."""
+        require_live(self)
+        require_gemini(self)
         msg = asyncio.run(self.agent.chat("Audit our Chronicle IAM roles and custom roles please."))
         self.assertIn("@identity-governor", msg.sender_handle)
         self.assertTrue(len(msg.content) > 50)

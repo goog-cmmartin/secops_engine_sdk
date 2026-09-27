@@ -313,6 +313,9 @@ class DetectionTuningAgentAgent(BaseSecOpsAdkAgent):
         """
         is_curated = "ur_" in rule_id or rule_id.startswith("ur_")
         action_type = "CREATE_FINDINGS_REFINEMENT" if is_curated else "UPDATE_RULE_TEXT"
+        refinement_query = "\n".join(
+            ln for ln in tuned_rule_text.splitlines() if ln.strip() and not ln.strip().startswith("//")
+        ).strip() if is_curated else ""
 
         preflight = PreflightProof(syntax_verified=False, compiler_diagnostics=[])
         if self.engine:
@@ -330,16 +333,42 @@ class DetectionTuningAgentAgent(BaseSecOpsAdkAgent):
                 except Exception as v_err:
                     preflight.compiler_diagnostics = [f"Compiler preflight check failed: {v_err}"]
             else:
-                preflight.syntax_verified = True
-                preflight.compiler_diagnostics = ["Curated Rule UDM Findings Refinement exclusion syntax verified."]
+                # Refinement queries are UDM search syntax, not YARA-L: dry-run them with
+                # :testFindingsRefinement. 400 = invalid query; 429/other = unverified.
+                try:
+                    test_res = self.engine.test_findings_refinement(
+                        curated_rule_ids=[rule_id], query=refinement_query,
+                    )
+                    preflight.syntax_verified = True
+                    preflight.details["preflight_status"] = "VERIFIED"
+                    preflight.details["refinement_test"] = {
+                        "total_detections": test_res.total_detections,
+                        "excluded_detections": test_res.excluded_detections,
+                        "suppression_ratio": test_res.suppression_ratio,
+                    }
+                    preflight.compiler_diagnostics = [
+                        f"Refinement query accepted by Chronicle testFindingsRefinement: "
+                        f"would exclude {test_res.excluded_detections} of {test_res.total_detections} "
+                        f"detections ({test_res.suppression_ratio:.1%}) over the test window."
+                    ]
+                except Exception as t_err:
+                    status = getattr(t_err, "status", None)
+                    msg = getattr(t_err, "api_message", None) or str(t_err)
+                    if status == 400:
+                        preflight.details["preflight_status"] = "INVALID"
+                        preflight.compiler_diagnostics = [f"Refinement query rejected by Chronicle: {msg}"]
+                    else:
+                        preflight.details["preflight_status"] = "UNVERIFIED"
+                        reason = "quota exhausted (429)" if status == 429 else msg
+                        preflight.compiler_diagnostics = [
+                            f"Refinement query could not be verified ({reason}); re-run preflight before approving."
+                        ]
 
         mutation_payload = {
             "rule_id": rule_id,
             "action_type": action_type,
             "tuned_rule_text": tuned_rule_text,
-            "refinement_query": "\n".join(
-                ln for ln in tuned_rule_text.splitlines() if ln.strip() and not ln.strip().startswith("//")
-            ).strip() if is_curated else "",
+            "refinement_query": refinement_query,
             "rule_text": tuned_rule_text if not is_curated else "",
             "unsuppressed_trigger_count": unsuppressed_trigger_count,
             "projected_suppressed_count": projected_suppressed_count,

@@ -2372,7 +2372,7 @@ def get_evidence_store(
         except Exception:
             pass
 
-    if resolved_project:
+    if resolved_project and os.getenv("SECOPS_DISABLE_FIRESTORE") != "1":
         try:
             store = FirestoreEvidenceStore(project_id=resolved_project, database_id=resolved_db)
             # Verify connectivity with a quick light check

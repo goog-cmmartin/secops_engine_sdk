@@ -1,6 +1,7 @@
 import unittest
 from engine.facade import SecOpsEngine
 from tests.test_helpers import get_live_engine
+from tests.live_guard import require_live_writes
 
 
 class TestMilestone72CaseUpdates(unittest.TestCase):
@@ -34,6 +35,7 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
 
     def test_live_case_assignment_and_stage_updates(self):
         """Tests mutating case assignee and stage against live Google SecOps and restoring original values."""
+        require_live_writes(self)
         # Query a live case to use as test target
         cases_batch = self.engine.search_cases(page_size=1)
         if not cases_batch.results:
@@ -84,6 +86,7 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
 
     def test_live_case_alert_priority_update(self):
         """Tests updating case alert priority on a live case alert and restoring."""
+        require_live_writes(self)
         cases_batch = self.engine.search_cases(page_size=5)
         target_case_id = None
         target_alert_id = None
@@ -132,6 +135,7 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
         self.assertIsInstance(users, list)
     def test_live_case_alert_recommendation_lifecycle(self):
         """Tests triggering and fetching a Gemini AI Case Alert Recommendation against live endpoints."""
+        require_live_writes(self)
         cases_batch = self.engine.search_cases(page_size=5)
         target_case_id = None
         target_alert_id = None
@@ -178,6 +182,7 @@ class TestMilestone72CaseUpdates(unittest.TestCase):
 
     def test_live_case_ai_summary_lifecycle(self):
         """Tests retrieving/generating a Gemini AI Case Summary against live endpoints."""
+        require_live_writes(self)
         target_case_id = "104655"
 
         # 1. Test get_or_create_case_summary

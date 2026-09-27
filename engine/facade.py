@@ -284,6 +284,7 @@ from engine.domain import (
     CloudStatusIncident,
     CloudStatusReport,
 )
+from engine.parsing import parse_id_list, parse_strict_bool
 from engine.registry import WorkflowCapability, WorkflowRegistry, registry
 from engine.workflows.alert_investigation import InvestigateAlertWorkflow
 from engine.workflows.case_actions import (
@@ -4445,7 +4446,7 @@ class SecOpsEngine:
         return self._manage_findings_refinements_wf.create_refinement(
             display_name=display_name,
             query=query,
-            curated_rule_ids=curated_rule_ids,
+            curated_rule_ids=parse_id_list(curated_rule_ids, "curated_rule_ids") or None,
         )
 
     def delete_findings_refinement(
@@ -4465,7 +4466,7 @@ class SecOpsEngine:
     ) -> FindingsRefinementTestResult:
         """Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio."""
         return self._test_findings_refinement_wf.execute(
-            curated_rule_ids=curated_rule_ids,
+            curated_rule_ids=parse_id_list(curated_rule_ids, "curated_rule_ids"),
             query=query,
             lookback_days=lookback_days,
             start_time=start_time,
@@ -5618,8 +5619,8 @@ class SecOpsEngine:
         """Updates deployment properties (enabled, alerting, frequency) of a rule."""
         return self._update_rule_deployment_wf.execute(
             rule_id_or_name=rule_id_or_name,
-            enabled=enabled,
-            alerting=alerting,
+            enabled=parse_strict_bool(enabled, "enabled"),
+            alerting=parse_strict_bool(alerting, "alerting"),
             run_frequency=run_frequency,
             update_mask=update_mask,
         )

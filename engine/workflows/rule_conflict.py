@@ -402,7 +402,8 @@ class AuditRuleConflictWorkflow:
             dep_res = self.adapter.list_rule_deployments()
             for dep in dep_res.deployments:
                 if dep.rule_id == rule_id or dep.name.endswith(f"/rules/{rule_id}/deployment"):
-                    is_live = dep.enabled or dep.alerting or dep.run_frequency == "LIVE"
+                    # Only `enabled` means the rule runs; alerting without enabled produces nothing.
+                    is_live = bool(dep.enabled)
                     break
         except Exception:
             pass

@@ -21,6 +21,7 @@ from agents.core.proposal_manager import ProposalManager, ChangeProposal, Prefli
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
 from tests.test_helpers import get_live_engine
+from tests.live_guard import require_gemini, require_live_writes
 
 
 class LogjammerAgentLiveTest(unittest.TestCase):
@@ -68,6 +69,7 @@ class LogjammerAgentLiveTest(unittest.TestCase):
 
     def test_generate_scenario_logs(self):
         """Verifies scenario generation produces authentic structured logs."""
+        require_gemini(self)
         result = self.agent.generate_scenario_logs(
             scenario="SSH brute force attack followed by privilege escalation to root via /bin/su",
             log_types=["AUDITD"],
@@ -80,6 +82,8 @@ class LogjammerAgentLiveTest(unittest.TestCase):
 
     def test_verify_proposal_with_replay_stamps_preflight_proof(self):
         """Verifies that verify_proposal_with_replay updates PreflightProof on an open proposal."""
+        require_gemini(self)
+        require_live_writes(self)
         # 1. Create candidate proposal
         initial_proposal = ChangeProposal(
             id="prop-audit-su-001",

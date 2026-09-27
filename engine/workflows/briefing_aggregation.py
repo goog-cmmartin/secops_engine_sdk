@@ -221,7 +221,7 @@ def compute_shift_delta(
         no_action_required.append("MITRE ATT&CK coverage aligned with target threat profile")
 
     if not no_action_required:
-        no_action_required.append("All scheduled Deacons completed patrols without critical regressions")
+        no_action_required.append("All scheduled audits completed without critical regressions")
 
 
     # Generate narrative

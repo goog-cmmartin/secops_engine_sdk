@@ -191,3 +191,5 @@ Live walk-through of every view on the running server (CDP text/DOM scans).
 - Internal ids/field names (`merged_by`, `MERGED`, `dossier` hash slug, `gtStatConvoys`) intentionally unchanged.
 - Still open from the critique: the convoy/work-package list itself is static sample data in `server.py` (titles, progress %, "2m ago"). Needs real derivation or a "sample" label.
 - Verified: test_chat_server + test_gas_town_coherence 35/35; g3/g4/g5/g7/g9/uxcheck all green.
+
+- ~~Knowledge Graph nav opens new tab~~ — Done: in-app `#knowledge` view (knowledge_graph.js) with agent layer, built on demand from knowledge/

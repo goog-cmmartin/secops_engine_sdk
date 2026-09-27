@@ -40,6 +40,14 @@ def _canonical_type(raw: Any) -> str:
     return _TYPE_ALIASES.get(t.lower(), t.lower())
 
 
+def _as_str_list(val: Any) -> List[str]:
+    if isinstance(val, str):
+        return [val]
+    if isinstance(val, list):
+        return [str(v) for v in val]
+    return []
+
+
 def _skip(md_path: Path) -> bool:
     return md_path.name in ("index.md", "README.md") or "templates" in md_path.parts
 
@@ -77,6 +85,7 @@ class KnowledgeNode:
     sources: List[Dict[str, Any]] = field(default_factory=list)
     trust_tier: str = "unverified"
     stale: bool = False
+    capabilities: List[str] = field(default_factory=list)
     links_to: List[str] = field(default_factory=list)
 
     def to_cytoscape_node(self) -> Dict[str, Any]:
@@ -96,6 +105,7 @@ class KnowledgeNode:
                 "sources": self.sources,
                 "trust_tier": self.trust_tier,
                 "stale": self.stale,
+                "capabilities": self.capabilities,
                 "color": color,
                 "size": 32 + min(50, len(self.body) // 250),
             }
@@ -169,6 +179,7 @@ def load_knowledge_nodes(knowledge_root: Path) -> Tuple[List[KnowledgeNode], Dic
             sources=fm.get("sources") if isinstance(fm.get("sources"), list) else [],
             trust_tier=trust_tier(fm),
             stale=is_stale(fm),
+            capabilities=_as_str_list(fm.get("capabilities_used") or fm.get("sdk_capabilities")),
             links_to=_extract_body_links(doc.body or "", md_path.parent, knowledge_root),
         )
         nodes.append(node)
@@ -211,6 +222,7 @@ def build_graph_data(nodes: List[KnowledgeNode]) -> Dict[str, Any]:
                     "id": f"{n.id}__{target}",
                     "source": n.id,
                     "target": target,
+                    "kind": "links",
                 }
             })
 
@@ -594,6 +606,65 @@ window.GRAPH_DATA = {_script_safe_json(graph_data)};
 </body>
 </html>
 """
+
+
+def overlay_agents(graph: Dict[str, Any], agents: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a copy of ``graph`` with an agent layer added.
+
+    Each agent dict needs ``handle`` and ``capabilities``; ``name``, ``role``,
+    ``subsystem``, ``description`` are passed through for display. An agent
+    ``uses`` a knowledge doc when they share at least one capability (the same
+    rule SkillCatalog grounding uses). The input graph is not mutated.
+    """
+    doc_caps = {
+        n["data"]["id"]: set(n["data"].get("capabilities") or [])
+        for n in graph["nodes"]
+    }
+    agent_nodes: List[Dict[str, Any]] = []
+    agent_edges: List[Dict[str, Any]] = []
+    for a in sorted(agents, key=lambda x: x.get("handle", "")):
+        handle = str(a.get("handle") or "")
+        if not handle:
+            continue
+        caps = set(a.get("capabilities") or [])
+        node_id = f"agent:{handle}"
+        uses = []
+        for doc_id, dcaps in doc_caps.items():
+            shared = sorted(caps & dcaps)
+            if shared:
+                uses.append(doc_id)
+                agent_edges.append({
+                    "data": {
+                        "id": f"{node_id}__{doc_id}",
+                        "source": node_id,
+                        "target": doc_id,
+                        "kind": "uses",
+                        "via": shared,
+                    }
+                })
+        agent_nodes.append({
+            "data": {
+                "id": node_id,
+                "label": handle,
+                "type": "agent",
+                "handle": handle,
+                "name": str(a.get("name") or handle),
+                "role": str(a.get("role") or ""),
+                "subsystem": str(a.get("subsystem") or ""),
+                "description": str(a.get("description") or ""),
+                "capabilities": sorted(caps),
+                "uses": uses,
+                "tags": [str(a.get("subsystem") or "")] if a.get("subsystem") else [],
+            }
+        })
+    out = dict(graph)
+    out["nodes"] = list(graph["nodes"]) + agent_nodes
+    out["edges"] = list(graph["edges"]) + agent_edges
+    types = set(graph.get("types") or [])
+    if agent_nodes:
+        types.add("agent")
+    out["types"] = sorted(types)
+    return out
 
 
 def build_graph(knowledge_root: Path = DEFAULT_KNOWLEDGE_ROOT) -> Dict[str, Any]:

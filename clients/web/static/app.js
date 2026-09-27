@@ -39,7 +39,7 @@ function actionsSubtabFromSlug(slug) {
 }
 
 function isViewHash(h) {
-  return /^(inbox|dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture)(\/|$)/.test(h);
+  return /^(inbox|dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture|knowledge)(\/|$)/.test(h);
 }
 
 // Applies the current URL hash to the UI. Callers set routeRestoring.
@@ -60,6 +60,9 @@ function routeFromHash() {
     if (state.currentView !== "gastown") switchView("gastown");
   } else if (hash.startsWith("library")) {
     switchView("library");
+  } else if (hash === "knowledge" || hash.startsWith("knowledge/")) {
+    if (state.currentView !== "knowledge") switchView("knowledge");
+    else loadKnowledgeGraphView();
   } else if (hash.startsWith("briefings") || hash === "posture") {
     const sub = hash === "posture" ? "posture" : hash.split("/")[1];
     activeBriefingTab = BRIEFING_TAB_SLUGS.includes(sub) ? sub : "shift";
@@ -274,6 +277,8 @@ function setupEventListeners() {
   if (navBtnDashboards) navBtnDashboards.addEventListener("click", () => switchView("dashboards"));
   if (navBtnLibrary) navBtnLibrary.addEventListener("click", () => switchView("library"));
   if (navBtnBriefings) navBtnBriefings.addEventListener("click", () => switchView("briefings"));
+  const navBtnKnowledge = document.getElementById("navBtnKnowledge");
+  if (navBtnKnowledge) navBtnKnowledge.addEventListener("click", () => switchView("knowledge"));
 
 
   // Right Drawer Toggles
@@ -5503,6 +5508,7 @@ function quickSwitcherItems() {
     ["Dashboards: FinOps & log costs", "", dash("finops")],
     ["Dashboards: Labels & namespaces", "", dash("namespacelabels")],
     ["Agent Library", "", go("library")],
+    ["Knowledge Graph", "Knowledge docs and the agents grounded on them", go("knowledge")],
   ];
   pages.forEach(([label, sub, run]) => items.push({ kind: "page", label, sub, run }));
 
@@ -5937,6 +5943,7 @@ const VIEW_DEFS = {
   dashboards: { panel: "ingestionView", nav: "navBtnDashboards", bodyClass: "view-ingestion-active" },
   library: { panel: "libraryView", nav: "navBtnLibrary", bodyClass: "view-library-active" },
   briefings: { panel: "briefingsView", nav: "navBtnBriefings", bodyClass: "view-briefings-active" },
+  knowledge: { panel: "knowledgeView", nav: "navBtnKnowledge", bodyClass: "view-knowledge-active" },
 };
 
 function switchView(viewName, opts = {}) {
@@ -5988,6 +5995,10 @@ function switchView(viewName, opts = {}) {
   } else if (name === "briefings") {
     if (!hash.startsWith("#briefings")) setRoute(`#briefings/${activeBriefingTab}`);
     loadBriefingsView();
+  } else if (name === "knowledge") {
+    // Coming back via the nav tab keeps the previously selected node in the URL.
+    if (!hash.startsWith("#knowledge")) setRoute(kgNodeHash(kgState.selectedId));
+    loadKnowledgeGraphView();
   } else {
     const curHash = hash.replace(/^#/, "");
     if (!opts.skipRoute && (curHash === "" || isViewHash(curHash))) {
@@ -8800,7 +8811,10 @@ function selectAgentInLibrary(handle) {
                 ${skill.triggers.map(t => `<span class="trigger-pill">${escapeHtml(t)}</span>`).join("")}
               </div>
             ` : ""}
-            <div class="lib-skill-path"><code>${escapeHtml(skill.source_path)}</code></div>
+            <div class="lib-skill-path">
+              <code>${escapeHtml(skill.source_path)}</code>
+              <a class="lib-skill-graph-link" href="#knowledge/${encodeURIComponent(kgNodeIdFromSourcePath(skill.source_path))}">View in graph</a>
+            </div>
           </div>
         `).join("")}
       </div>

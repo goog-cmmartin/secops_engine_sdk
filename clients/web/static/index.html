@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css?v=1.0.1">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.7.2">
+  <link rel="stylesheet" href="/static/style.css?v=2.8.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -51,12 +51,10 @@
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span class="nav-label">Agent Library</span>
       </button>
-      <a id="navBtnKnowledge" title="Knowledge Graph (opens in new tab)" class="nav-tab" href="/knowledge/viz.html" target="_blank" style="text-decoration:none; display:inline-flex; align-items:center;">
-        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      <button id="navBtnKnowledge" type="button" title="Knowledge Graph" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         <span class="nav-label">Knowledge Graph</span>
-        <span class="ext-link-icon" aria-hidden="true">↗</span>
-        <span class="sr-only">(opens in new tab)</span>
-      </a>
+      </button>
     </nav>
     <div class="topbar-meta">
       <button id="fleetStatusTag" class="topbar-chip" type="button" title="Registered agents — open Agent Library">— agents</button>
@@ -1037,6 +1035,51 @@
       </div>
 
       <!-- View 4: Dedicated Agent Library & Capabilities Directory -->
+      <!-- Knowledge Graph View -->
+      <div id="knowledgeView" class="view-panel" style="display:none;">
+        <div class="page-container kg-page-container">
+          <div class="page-header">
+            <div class="page-title-group">
+              <h1 class="page-title">
+                <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                <span>Knowledge Graph</span>
+              </h1>
+              <p class="page-subtitle">Runbooks, platform reference and concepts in <code>knowledge/</code>, and the agents grounded on each one. Updates when the docs change.</p>
+            </div>
+            <div class="page-actions">
+              <span id="kgCountBadge" class="meta-tag">— docs</span>
+              <a class="btn btn-sm btn-secondary" href="/knowledge/viz.html" target="_blank" rel="noopener" title="Standalone page, docs only">Standalone view <span aria-hidden="true">↗</span><span class="sr-only">(opens in new tab)</span></a>
+            </div>
+          </div>
+
+          <div class="kg-toolbar" role="toolbar" aria-label="Knowledge graph controls">
+            <div class="kg-search-wrap">
+              <input type="search" id="kgSearchInput" class="search-input" aria-label="Search knowledge graph" aria-controls="kgSearchResults" placeholder="Search title, tag, capability or @agent…" autocomplete="off">
+              <div id="kgSearchResults" class="kg-search-results" aria-live="polite" hidden></div>
+            </div>
+            <div id="kgTypeChips" class="kg-type-chips" role="group" aria-label="Show node types"></div>
+            <div class="kg-toolbar-right">
+              <label class="kg-layout-label" for="kgLayoutSelect">Layout</label>
+              <select id="kgLayoutSelect" class="kg-select">
+                <option value="cose">Clustered</option>
+                <option value="concentric">Rings (agents outside)</option>
+                <option value="breadthfirst">Hierarchy</option>
+                <option value="circle">Circle</option>
+              </select>
+              <button type="button" id="kgFitBtn" class="btn btn-sm btn-secondary">Fit to screen</button>
+            </div>
+          </div>
+
+          <div class="kg-split-pane">
+            <section class="kg-canvas-pane" aria-label="Knowledge graph canvas">
+              <div id="kgCanvas" class="kg-canvas" role="img" aria-label="Graph of knowledge documents and agents. Use search or the details panel for a keyboard-accessible list."></div>
+              <div id="kgCanvasStatus" class="kg-canvas-status" hidden></div>
+            </section>
+            <aside id="kgDetail" class="kg-detail-pane" aria-live="polite" aria-label="Selected node details"></aside>
+          </div>
+        </div>
+      </div>
+
       <div id="libraryView" class="view-panel" style="display:none;">
         <div class="page-container library-page-container">
           <!-- Page Header -->
@@ -1399,6 +1442,8 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.8.0"></script>
+  <script src="/static/vendor/cytoscape.min.js"></script>
+  <script src="/static/app.js?v=2.9.0"></script>
+  <script src="/static/knowledge_graph.js?v=1.0.0"></script>
 </body>
 </html>

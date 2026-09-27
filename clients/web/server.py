@@ -37,7 +37,7 @@ from agents.core.work_queue import get_work_queue, BaseWorkQueue, ATTENTION_STAT
 from agents.core.materializer import IssueMaterializer
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.knowledge_store import get_knowledge_store
-from engine.knowledge_graph import KnowledgeGraphCache
+from engine.knowledge_graph import KnowledgeGraphCache, overlay_agents
 from agents.core.communication_router import get_communication_router
 from agents.generated import create_agent_fleet
 from clients.web.chat_engine import ChatMessage, ChatStore, AgentDispatcher
@@ -2202,6 +2202,30 @@ async def get_posture_snapshot() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error generating posture snapshot: {e}", exc_info=True)
         return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/api/knowledge/graph")
+async def knowledge_graph_api(include_agents: bool = Query(True)) -> Dict[str, Any]:
+    """OKF knowledge graph (docs, links, markdown bodies) plus an optional agent layer.
+
+    Rebuilt whenever knowledge/**/*.md changes; agents link to the docs whose
+    ``capabilities_used`` overlap the agent's bound SDK capabilities.
+    """
+    graph = await asyncio.to_thread(knowledge_graph_cache.graph)
+    if not include_agents:
+        return graph
+    agents = [
+        {
+            "handle": a.handle,
+            "name": a.name,
+            "role": a.role,
+            "subsystem": a.subsystem,
+            "description": a.description,
+            "capabilities": list(getattr(a, "_capabilities", {}).keys()),
+        }
+        for a in fleet.values()
+    ]
+    return overlay_agents(graph, agents)
 
 
 @app.get("/api/knowledge/entity/{subject_type}/{subject_id}")

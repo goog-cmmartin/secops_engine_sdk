@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.6">
+  <link rel="stylesheet" href="/static/style.css?v=2.7.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -24,7 +24,12 @@
       <span class="topbar-title">Google SecOps Multi-Agent Fleet</span>
     </div>
     <nav class="topbar-nav" aria-label="Primary">
-      <button id="navBtnChat" type="button" title="Fleet Chat" class="nav-tab active">
+      <button id="navBtnInbox" type="button" title="Inbox: everything waiting on you" class="nav-tab">
+        <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <span class="nav-label">Inbox</span>
+        <span id="navInboxBadge" class="nav-pill-badge nav-inbox-badge" hidden>0</span>
+      </button>
+      <button id="navBtnChat" type="button" title="Fleet Chat" class="nav-tab">
         <svg class="ui-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span class="nav-label">Fleet Chat</span>
         <span id="navChatBadge" class="nav-pill-badge nav-unread-badge" hidden>0</span>
@@ -54,11 +59,6 @@
       </a>
     </nav>
     <div class="topbar-meta">
-      <button id="topbarEscalations" class="topbar-chip" type="button" title="Unacknowledged escalations — open Escalations">
-        <span aria-hidden="true">⚠</span>
-        <span id="topbarEscCount">—</span>
-        <span id="topbarEscLabel">escalations</span>
-      </button>
       <button id="fleetStatusTag" class="topbar-chip" type="button" title="Registered agents — open Agent Library">— agents</button>
       <span id="connChip" class="topbar-chip conn-chip is-connecting" role="status" aria-live="polite">
         <span class="live-indicator is-connecting" aria-hidden="true"></span>
@@ -130,6 +130,31 @@
 
     <!-- Center Content Area -->
     <main id="mainContent" class="main-content-area" tabindex="-1">
+      <!-- View 0: Operator Inbox (default landing view) -->
+      <div id="inboxView" class="view-panel inbox-view" style="display:none;">
+        <header class="inbox-header">
+          <div class="inbox-heading">
+            <h1 class="inbox-title">Inbox</h1>
+            <p id="inboxSubtitle" class="inbox-subtitle">Loading…</p>
+          </div>
+          <div class="inbox-header-actions">
+            <span id="inboxUpdated" class="inbox-updated" aria-live="off"></span>
+            <button id="inboxShortcutsBtn" type="button" class="btn btn-secondary btn-sm" aria-haspopup="dialog" title="Keyboard shortcuts (?)">Shortcuts</button>
+            <button id="inboxRefreshBtn" type="button" class="btn btn-secondary btn-sm" title="Refresh the inbox">Refresh</button>
+          </div>
+        </header>
+        <div id="inboxBatchBar" class="inbox-batch-bar" role="region" aria-label="Batch actions" hidden>
+          <span id="inboxBatchCount" class="inbox-batch-count"></span>
+          <button id="inboxBatchReject" type="button" class="btn btn-danger btn-sm">Reject…</button>
+          <button id="inboxBatchSnooze" type="button" class="btn btn-secondary btn-sm">Snooze</button>
+          <button id="inboxBatchClear" type="button" class="btn btn-secondary btn-sm">Clear selection</button>
+        </div>
+        <div class="inbox-body">
+          <nav id="inboxList" class="inbox-list" aria-label="Items waiting on you"></nav>
+          <section id="inboxDetail" class="inbox-detail" aria-label="Selected item" tabindex="-1"></section>
+        </div>
+      </div>
+
       <!-- View 1: Fleet Chat View -->
       <div id="chatView" class="view-panel active">
         <!-- Chat Header -->
@@ -198,11 +223,9 @@
           <!-- Gas Town Control Center Header Banner (Honoring Gastown Mayor/Coordinator Banner) -->
           <div class="gt-mayor-banner">
             <div class="gt-mayor-info">
-              <span class="gt-mayor-icon">🎩</span>
               <div class="gt-mayor-titles">
                 <div class="gt-mayor-head-row">
                   <span class="gt-mayor-title">Fleet Coordinator</span>
-                  <span class="gt-badge gt-badge-green">Attached</span>
                 </div>
                 <div class="gt-mayor-sub">
                   Coordinator: <code id="gtMayorHandle">@secops-dispatcher</code>
@@ -216,7 +239,7 @@
               </div>
               <div class="gt-stat-item">
                 <span class="gt-stat-label">Fleet</span>
-                <span id="gtFleetOnline" class="gt-stat-val">Agents Online: loading…</span>
+                <span id="gtFleetOnline" class="gt-stat-val">Agents: loading…</span>
               </div>
             </div>
           </div>
@@ -246,7 +269,7 @@
               </button>
               <button type="button" class="gt-summary-card" data-gt-target="escalations" title="Open Escalations">
                 <span id="gtStatEscalations" class="gt-stat-num gt-alert-num">—</span>
-                <span class="gt-stat-caption">⚠️ Unacked Escalations</span>
+                <span class="gt-stat-caption">⚠️ Open Escalations</span>
               </button>
             </div>
             <div class="gt-alerts-strip">
@@ -348,12 +371,12 @@
                 <div class="kanban-cards-list" id="cardsColReview"></div>
               </div>
 
-              <!-- Col 4: Merged / Resolved -->
+              <!-- Col 4: Done -->
               <div class="kanban-column" id="kanbanColMerged">
                 <div class="kanban-column-header">
                   <div class="kanban-col-title">
                     <span class="kanban-dot dot-merged"></span>
-                    <span>Merged / Resolved</span>
+                    <span>Done</span>
                   </div>
                   <span class="kanban-col-count" id="countColMerged">0</span>
                 </div>
@@ -470,7 +493,7 @@
             <div class="deacon-patrol-header-card">
               <div class="deacon-patrol-title-area">
                 <div class="deacon-badge-row">
-                  <span class="gt-badge gt-badge-green" id="gtDeaconStatusBadge">SCHEDULER: LOADING…</span>
+                  <span class="gt-badge gt-badge-yellow" id="gtDeaconStatusBadge">Scheduler: loading…</span>
                   <span class="deacon-telemetry-pill" id="gtDeaconHeartbeatDetail">Last check-in: loading…</span>
                   <span class="deacon-telemetry-pill" id="gtDeaconActivePatrolsPill">— scheduled audits</span>
                 </div>
@@ -800,7 +823,7 @@
                     <span>Live Raw Log Diagnostic Sandbox</span>
                   </h3>
                   <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
-                    Empirically queries Chronicle raw log search for <code>raw = /.*/ parsed = false</code> and replays against active Logstash CBN code.
+                    Queries Chronicle raw log search for <code>raw = /.*/ parsed = false</code> and replays against active Logstash CBN code.
                   </p>
                 </div>
               </div>
@@ -1079,7 +1102,7 @@
                 <svg class="ui-icon icon-title" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                 <span>SOC Operational Picture &amp; Briefings</span>
               </h1>
-              <p class="page-subtitle">Deterministic shift handovers, institutional posture, cross-agent entity dossiers, and surfaced knowledge gaps</p>
+              <p class="page-subtitle">Shift handovers, detection posture, knowledge gaps, and what the agents know about a log source, rule or playbook</p>
             </div>
             <div class="page-actions briefing-header-actions">
               <div class="shift-selector-group">
@@ -1095,18 +1118,18 @@
                 <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 <span>Trigger Shift Brief</span>
               </button>
-              <button id="btnRefreshPosture" class="btn btn-secondary" title="Recompute institutional knowledge and posture snapshot">
+              <button id="btnRefreshPosture" class="btn btn-secondary" title="Recompute the posture snapshot">
                 <svg class="ui-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 <span>Refresh Posture</span>
               </button>
             </div>
           </div>
 
-          <!-- Sub-Navigation Tabs: Shift Briefing | Posture & Gaps | Entity Dossiers -->
+          <!-- Sub-Navigation Tabs: Shift Briefing | Posture & Gaps | Entity Lookup -->
           <div class="subnav-tabs-bar" role="tablist" aria-label="Briefing sections">
             <button id="tabBtnShiftBrief" type="button" class="subnav-tab active" role="tab" aria-controls="tabContentShiftBrief">Shift Handover Briefing</button>
-            <button id="tabBtnPostureGaps" type="button" class="subnav-tab" role="tab" aria-controls="tabContentPostureGaps">Institutional Posture &amp; Gaps</button>
-            <button id="tabBtnEntityDossier" type="button" class="subnav-tab" role="tab" aria-controls="tabContentEntityDossier">Cross-Agent Entity Dossier</button>
+            <button id="tabBtnPostureGaps" type="button" class="subnav-tab" role="tab" aria-controls="tabContentPostureGaps">Posture &amp; Gaps</button>
+            <button id="tabBtnEntityDossier" type="button" class="subnav-tab" role="tab" aria-controls="tabContentEntityDossier">Entity Lookup</button>
           </div>
 
           <!-- Tab Content 1: Shift Handover Briefing -->
@@ -1145,7 +1168,7 @@
                   <span id="countChangedSincePrevious" class="delta-badge">0</span>
                 </div>
                 <div class="delta-card-body" id="listChangedSincePrevious">
-                  <p class="empty-state-muted">No mutations this shift.</p>
+                  <p class="empty-state-muted">No changes this shift.</p>
                 </div>
               </div>
 
@@ -1198,7 +1221,7 @@
             </div>
           </div>
 
-          <!-- Tab Content 2: Institutional Posture & Knowledge Gaps -->
+          <!-- Tab Content 2: Posture & Knowledge Gaps -->
           <div id="tabContentPostureGaps" role="tabpanel" aria-labelledby="tabBtnPostureGaps" tabindex="-1" class="briefing-tab-pane" style="display:none;">
             <!-- Posture Gauges Grid -->
             <div class="posture-metrics-grid">
@@ -1233,14 +1256,14 @@
               <div class="metric-card">
                 <span class="metric-label">Surfaced Unknowns</span>
                 <span id="postureGapsCount" class="metric-val status-red">0</span>
-                <span class="metric-sub">Institutional Knowledge Gaps</span>
+                <span class="metric-sub">Knowledge gaps</span>
               </div>
             </div>
 
-            <!-- Surfaced Institutional Knowledge Gaps Table -->
+            <!-- Knowledge Gaps Table -->
             <div class="card gaps-card">
               <h3 class="card-section-title">
-                <span>Surfaced Institutional Knowledge Gaps &amp; Unknowns</span>
+                <span>Knowledge Gaps &amp; Unknowns</span>
               </h3>
               <div class="table-responsive">
                 <table class="data-table" id="tableKnowledgeGaps">
@@ -1255,18 +1278,18 @@
                     </tr>
                   </thead>
                   <tbody id="bodyKnowledgeGaps">
-                    <tr><td colspan="6" style="padding:12px; color:var(--text-dim); text-align:center;">Loading institutional knowledge gaps...</td></tr>
+                    <tr><td colspan="6" style="padding:12px; color:var(--text-dim); text-align:center;">Loading knowledge gaps…</td></tr>
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
 
-          <!-- Tab Content 3: Cross-Agent Entity Dossier -->
+          <!-- Tab Content 3: Entity Lookup -->
           <div id="tabContentEntityDossier" role="tabpanel" aria-labelledby="tabBtnEntityDossier" tabindex="-1" class="briefing-tab-pane" style="display:none;">
             <div class="card dossier-search-card">
-              <h3 class="card-section-title">Cross-Agent Entity Dossier Explorer</h3>
-              <p class="card-section-desc">Synthesize multi-agent factual assertions, health statuses, and knowledge gaps for any operational entity (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
+              <h3 class="card-section-title">Entity Lookup</h3>
+              <p class="card-section-desc">See what every agent has recorded about one entity: facts, health, open issues and knowledge gaps (e.g. PAN_FIREWALL, OKTA, WINEVTLOG, rul_12345).</p>
               <div class="dossier-search-bar">
                 <select id="dossierSubjectType" aria-label="Entity type" class="form-select">
                   <option value="log_type">Log Source (log_type)</option>
@@ -1275,7 +1298,7 @@
                   <option value="feed_id">Ingestion Feed (feed_id)</option>
                 </select>
                 <input type="text" id="dossierSubjectId" aria-label="Entity identifier" class="form-input" placeholder="e.g. PAN_FIREWALL" />
-                <button id="btnFetchDossier" class="btn btn-primary">Fetch Dossier</button>
+                <button id="btnFetchDossier" class="btn btn-primary">Look up</button>
               </div>
             </div>
 
@@ -1345,8 +1368,8 @@
         </div>
       </div>
       <div class="gt-modal-footer">
-        <button id="modalBtnReject" class="btn btn-danger">Reject Proposal</button>
-        <button id="modalBtnApprove" class="btn btn-primary">Merge Proposal</button>
+        <button id="modalBtnReject" class="btn btn-danger">Reject</button>
+        <button id="modalBtnApprove" class="btn btn-primary">Approve &amp; apply</button>
       </div>
     </div>
   </div>
@@ -1376,6 +1399,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.7.3"></script>
+  <script src="/static/app.js?v=2.8.0"></script>
 </body>
 </html>

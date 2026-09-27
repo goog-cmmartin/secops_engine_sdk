@@ -92,6 +92,17 @@ Source: UI review of `clients/web/static/` (2026-09-25). UX re-review added 2026
 - **Audits cards:** `formatCadence()` in app.js mirrors `_format_cadence()`; the cadence badge no longer hard-codes `Every ${interval_hours || 24}h` (disabled schedules showed "Every 24h", 0.5h showed "Every 0.5h").
 - Result: test_chat_server 23/23; full suite 41 → 38 failures (all tenant-config), 0 new.
 
+## Operator Inbox (2026-09-27) — Done
+Default landing view (`#inbox`, also when no hash). One list of everything that stops moving until a human acts.
+- **Groups** (server-ordered by group → severity → oldest): Decide (OPEN proposals), Apply in SecOps (MERGED + MANUAL_APPLY_REQUIRED), Unstick (issues in ATTENTION_STATUSES).
+- **API**: `GET /api/inbox?since=ISO` → `{counts, items, recent}`; `DELETE /api/gastown/escalations/{id}/ack` (unsnooze). `_proposal_to_dict()` now shared by list/detail/inbox and includes `issue_id`.
+- **Snooze** replaces "Ack": same ack store and key scheme, so snoozing here and in the Escalations tab is one action. Issue keys embed the attempt count, so a re-escalation resurfaces.
+- **Keyboard**: j/k, x (select), a/r, m/b, q/d/o, c (DM the agent, pre-filled), s, ?. Every change still goes through the reason dialog.
+- **Batch**: reject (one shared reason, non-proposals skipped) and snooze.
+- **"Since you last looked"**: per-browser `localStorage` timestamp. TODO: move per-operator + server-side once identities exist.
+- Top-bar escalation chip removed; Inbox badge (red when anything is high/critical) replaces it. `switchView` is now table-driven (`VIEW_DEFS`).
+- Tests: `tests/test_inbox.py`.
+
 ## #5 terminology map (screen text only)
 | Current | Suggested |
 |---|---|
@@ -167,3 +178,16 @@ Live walk-through of every view on the running server (CDP text/DOM scans).
 - `compute_knowledge_snapshot()` returns hard-coded tenant counts (427 rules, 83 log sources, …) and four static knowledge gaps (gap-001…004). The UI renders the gaps accurately, but the data is still fabricated. Needs real derivation, or should be labelled as sample data.
 - Shift brief falls back to "All scheduled Deacons completed patrols…" (legacy term).
 
+
+## Session 2026-09-27 (truthfulness + copy pass, from critique 2026-09-27T18-26-45Z)
+| # | Item | Status |
+|---|------|--------|
+| 47 | Presence: removed always-green DM status dot (no presence data exists); "N Agents Online" → "N agents registered" (banner, roster drawer) | Done |
+| 48 | Coordinator banner: removed hard-coded "Attached" badge and 🎩 | Done |
+| 49 | Scheduler health: header read `deacon_heartbeat`, which is always a non-empty string, so it always said "✓ healthy". Now keys off `health.status` → "Scheduler running/idle (last audit Nh ago / no audits run yet)"; Audits badge "Scheduler running/idle" (was SCHEDULER ONLINE/STANDBY, initial green) | Done |
+| 50 | Server `summary.hook_count` was a literal `92 + 11` → `None` (UI shows "—"); `convoy_count` literal 4 → `len(convoys)` | Done |
+| 51 | Approval copy: "Merge Proposal"/"Reject Proposal" → "Approve & apply"/"Reject"; "Merged" badge → "Applied"; kanban "Merged / Resolved" → "Done"; "Live Mutation Merged (HEAD)" → "Approved and applied to SecOps by …"; "Proposed Mutation Diff" → "Proposed change"; "Empirical Pre-Flight Proof / Syntax Compiler / Empirical Replay" → "Preflight checks / Syntax check / Log replay" | Done |
+| 52 | Briefings jargon: "Deterministic… institutional… cross-agent entity dossiers" subtitle rewritten; tabs "Posture & Gaps" / "Entity Lookup"; "Fetch Dossier" → "Look up"; "mutations" → "changes"; backend fallback "All scheduled Deacons completed patrols…" → "All scheduled audits completed…" | Done |
+- Internal ids/field names (`merged_by`, `MERGED`, `dossier` hash slug, `gtStatConvoys`) intentionally unchanged.
+- Still open from the critique: the convoy/work-package list itself is static sample data in `server.py` (titles, progress %, "2m ago"). Needs real derivation or a "sample" label.
+- Verified: test_chat_server + test_gas_town_coherence 35/35; g3/g4/g5/g7/g9/uxcheck all green.

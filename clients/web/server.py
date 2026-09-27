@@ -26,6 +26,7 @@ from agents.core.target_baseline import StaleTargetError
 from agents.core.proposal_manager import (
     APPLY_STATUS_APPLIED,
     APPLY_STATUS_MANUAL_REQUIRED,
+    APPLY_STATUS_MANUALLY_APPLIED,
     MERGED_MANUAL_APPLY_REQUIRED,
     ProposalManager,
     has_executor,
@@ -508,6 +509,43 @@ async def get_agent(agent_handle: str) -> Dict[str, Any]:
     return _serialize_agent(agent)
 
 
+def _proposal_to_dict(p: Any) -> Dict[str, Any]:
+    """Operator-facing proposal record (list, detail and inbox views)."""
+    return {
+        "id": p.id,
+        "title": p.title,
+        "author": p.author,
+        "subsystem": p.subsystem,
+        "target_resource_id": p.target_resource_id,
+        "action_type": p.action_type,
+        "status": p.status,
+        "risk_level": p.risk_level,
+        "created_at": p.created_at,
+        "updated_at": p.updated_at,
+        "merged_at": p.merged_at,
+        "merged_by": p.merged_by,
+        "merge_commit": p.merge_commit,
+        "rejection_reason": p.rejection_reason,
+        "approval_note": p.approval_note,
+        "required_tier": p.required_tier,
+        "preflight_override_reason": p.preflight_override_reason,
+        "base_revision": p.base_revision,
+        "base_verified_at_merge": p.base_verified_at_merge,
+        "apply_status": p.apply_status,
+        "applied_by": p.applied_by,
+        "applied_at": p.applied_at,
+        "apply_note": p.apply_note,
+        "abandoned_by": p.abandoned_by,
+        "abandoned_at": p.abandoned_at,
+        "abandon_reason": p.abandon_reason,
+        "issue_id": p.issue_id,
+        "has_executor": has_executor(p.action_type),
+        "preflight": asdict(p.preflight),
+        "rationale": p.rationale,
+        "proposed_diff": p.proposed_diff,
+    }
+
+
 @app.get("/api/proposals")
 async def list_proposals(
     status: Optional[str] = Query(None, description="Filter: OPEN, MERGED, REJECTED"),
@@ -515,41 +553,7 @@ async def list_proposals(
 ) -> List[Dict[str, Any]]:
     """Lists change proposals from Gas Town .proposals/ repository."""
     proposals = proposal_manager.list_proposals(status=status, subsystem=subsystem)
-    return [
-        {
-            "id": p.id,
-            "title": p.title,
-            "author": p.author,
-            "subsystem": p.subsystem,
-            "target_resource_id": p.target_resource_id,
-            "action_type": p.action_type,
-            "status": p.status,
-            "risk_level": p.risk_level,
-            "created_at": p.created_at,
-            "updated_at": p.updated_at,
-            "merged_at": p.merged_at,
-            "merged_by": p.merged_by,
-            "merge_commit": p.merge_commit,
-            "rejection_reason": p.rejection_reason,
-            "approval_note": p.approval_note,
-            "required_tier": p.required_tier,
-            "preflight_override_reason": p.preflight_override_reason,
-            "base_revision": p.base_revision,
-            "base_verified_at_merge": p.base_verified_at_merge,
-            "apply_status": p.apply_status,
-            "applied_by": p.applied_by,
-            "applied_at": p.applied_at,
-            "apply_note": p.apply_note,
-            "abandoned_by": p.abandoned_by,
-            "abandoned_at": p.abandoned_at,
-            "abandon_reason": p.abandon_reason,
-            "has_executor": has_executor(p.action_type),
-            "preflight": asdict(p.preflight),
-            "rationale": p.rationale,
-            "proposed_diff": p.proposed_diff,
-        }
-        for p in proposals
-    ]
+    return [_proposal_to_dict(p) for p in proposals]
 
 
 @app.get("/api/proposals/{proposal_id}")
@@ -557,39 +561,7 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
     """Retrieves full details of a single change proposal."""
     try:
         p = proposal_manager.get_proposal(proposal_id)
-        return {
-            "id": p.id,
-            "title": p.title,
-            "author": p.author,
-            "subsystem": p.subsystem,
-            "target_resource_id": p.target_resource_id,
-            "action_type": p.action_type,
-            "status": p.status,
-            "risk_level": p.risk_level,
-            "created_at": p.created_at,
-            "updated_at": p.updated_at,
-            "merged_at": p.merged_at,
-            "merged_by": p.merged_by,
-            "merge_commit": p.merge_commit,
-            "rejection_reason": p.rejection_reason,
-            "approval_note": p.approval_note,
-            "required_tier": p.required_tier,
-            "preflight_override_reason": p.preflight_override_reason,
-            "base_revision": p.base_revision,
-            "base_verified_at_merge": p.base_verified_at_merge,
-            "apply_status": p.apply_status,
-            "applied_by": p.applied_by,
-            "applied_at": p.applied_at,
-            "apply_note": p.apply_note,
-            "abandoned_by": p.abandoned_by,
-            "abandoned_at": p.abandoned_at,
-            "abandon_reason": p.abandon_reason,
-            "has_executor": has_executor(p.action_type),
-            "preflight": asdict(p.preflight),
-            "rationale": p.rationale,
-            "proposed_diff": p.proposed_diff,
-            "mutation_payload": p.mutation_payload,
-        }
+        return {**_proposal_to_dict(p), "mutation_payload": p.mutation_payload}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
 
@@ -1081,9 +1053,9 @@ async def get_gastown_overview() -> Dict[str, Any]:
     # Summary stats
     summary = {
         "polecat_count": len(fleet),
-        "hook_count": 92 + 11,
+        "hook_count": None,  # no live data-source count wired yet; UI shows "—"
         "issue_count": len(open_props) + len(todos_pending),
-        "convoy_count": 4,
+        "convoy_count": None,  # set from the convoy list below
         "escalation_count": 0,  # Updated dynamically below based on actual high-risk items
         "open_proposals": len(open_props),
         "merged_proposals": len(merged_props),
@@ -1155,6 +1127,8 @@ async def get_gastown_overview() -> Dict[str, Any]:
             "last_activity": "10m ago",
         },
     ]
+
+    summary["convoy_count"] = len(convoys)
 
     # Escalations
     escalations = []
@@ -1259,6 +1233,158 @@ async def ack_escalation(escalation_id: str, body: AckEscalationRequest) -> Dict
     acks[escalation_id] = record
     _save_escalation_acks(acks)
     return {"id": escalation_id, "acked": True, **record}
+
+
+# --- Operator Inbox ---
+# Everything that stops moving until a human acts, in one list. Snoozing reuses
+# the escalation ack store: keys embed what would make the item "new again"
+# (issue attempt count, proposal phase), so a snoozed item resurfaces on change.
+
+_INBOX_GROUP_ORDER = {"decide": 0, "apply": 1, "unstick": 2}
+_SEVERITY_RANK = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0}
+
+
+def _parse_ts(ts: Any) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _inbox_item(kind: str, group: str, severity: str, waiting_since: Any, **fields: Any) -> Dict[str, Any]:
+    sev = str(severity or "MEDIUM").upper()
+    if sev not in _SEVERITY_RANK:
+        sev = "MEDIUM"
+    return {
+        "kind": kind,
+        "group": group,
+        "severity": sev,
+        "escalated": sev in ("HIGH", "CRITICAL"),
+        "waiting_since": waiting_since,
+        "age": _humanize_age(waiting_since),
+        **fields,
+    }
+
+
+def _build_inbox_items() -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for p in proposal_manager.list_proposals(status="OPEN"):
+        items.append(_inbox_item(
+            "proposal_review", "decide", p.risk_level, p.created_at,
+            id=f"proposal:{p.id}",
+            # Same key as the Escalations tab, so ack there == snooze here.
+            snooze_key=f"esc_{p.id}",
+            title=p.title or p.id,
+            target=p.target_resource_id or "",
+            agent=p.author or "",
+            proposal=_proposal_to_dict(p),
+        ))
+    for p in proposal_manager.list_proposals(status="MERGED"):
+        if p.apply_status != APPLY_STATUS_MANUAL_REQUIRED:
+            continue
+        items.append(_inbox_item(
+            "manual_apply", "apply", p.risk_level, p.merged_at or p.updated_at,
+            id=f"apply:{p.id}",
+            snooze_key=f"esc_{p.id}-apply",
+            title=p.title or p.id,
+            target=p.target_resource_id or "",
+            agent=p.author or "",
+            proposal=_proposal_to_dict(p),
+        ))
+    for i in work_queue.list_issues(limit=500):
+        if i.status not in ATTENTION_STATUSES:
+            continue
+        attempts = [a for a in i.attempts if isinstance(a, dict)]
+        last = attempts[-1] if attempts else {}
+        items.append(_inbox_item(
+            "issue_attention", "unstick", i.severity, i.updated_at,
+            id=f"issue:{i.id}",
+            snooze_key=f"esc_{i.id}-a{len(i.attempts)}",
+            title=i.problem.title or i.id,
+            target=", ".join(i.problem.affected_objects or []),
+            agent=last.get("actor") or i.routing.claimed_by or "",
+            status_label=_ATTENTION_LABELS.get(i.status, i.status),
+            issue={
+                "id": i.id,
+                "type": i.type,
+                "plane": i.plane,
+                "status": i.status,
+                "description": i.problem.description,
+                "active_proposal_id": i.active_proposal_id,
+                "attempt_count": len(attempts),
+                "attempts": attempts[-5:],
+            },
+        ))
+    acks = _load_escalation_acks()
+    for item in items:
+        ack = acks.get(item["snooze_key"])
+        item["snoozed"] = ack is not None
+        item["snoozed_at"] = ack.get("acked_at") if ack else None
+
+    def sort_key(item: Dict[str, Any]):
+        ts = _parse_ts(item["waiting_since"])
+        return (
+            _INBOX_GROUP_ORDER[item["group"]],
+            -_SEVERITY_RANK[item["severity"]],
+            ts.timestamp() if ts else float("inf"),
+        )
+
+    items.sort(key=sort_key)
+    return items
+
+
+def _inbox_recent(since: datetime, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """What changed since the operator last looked, from recorded timestamps only."""
+    def after(ts: Any) -> bool:
+        dt = _parse_ts(ts)
+        return dt is not None and dt > since
+
+    merged = proposal_manager.list_proposals(status="MERGED")
+    rejected = proposal_manager.list_proposals(status="REJECTED")
+    closed = work_queue.list_issues(status="CLOSED", limit=500)
+    return {
+        "since": since.isoformat(),
+        "auto_applied": sum(1 for p in merged if p.apply_status == APPLY_STATUS_APPLIED and after(p.merged_at)),
+        "manually_applied": sum(1 for p in merged if p.apply_status == APPLY_STATUS_MANUALLY_APPLIED and after(p.applied_at)),
+        "rejected": sum(1 for p in rejected if after(p.updated_at)),
+        "issues_closed": sum(1 for i in closed if after(i.closed_at)),
+        "new_items": sum(1 for it in items if after(it["waiting_since"])),
+    }
+
+
+@app.get("/api/inbox")
+async def get_inbox(
+    since: Optional[str] = Query(None, description="ISO timestamp of the operator's last visit, for the 'since you last looked' summary"),
+) -> Dict[str, Any]:
+    """Everything waiting on a human: changes to decide, changes to apply by hand, issues the fleet gave up on."""
+    items = await asyncio.to_thread(_build_inbox_items)
+    active = [i for i in items if not i["snoozed"]]
+    counts = {g: sum(1 for i in active if i["group"] == g) for g in _INBOX_GROUP_ORDER}
+    counts["total"] = len(active)
+    counts["escalated"] = sum(1 for i in active if i["escalated"])
+    counts["snoozed"] = len(items) - len(active)
+    since_dt = _parse_ts(since)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "counts": counts,
+        "items": items,
+        "recent": await asyncio.to_thread(_inbox_recent, since_dt, items) if since_dt else None,
+    }
+
+
+@app.delete("/api/gastown/escalations/{escalation_id}/ack")
+async def unack_escalation(escalation_id: str) -> Dict[str, Any]:
+    """Clears an acknowledgement (un-snoozes an inbox item)."""
+    if not escalation_id.startswith("esc_"):
+        raise HTTPException(status_code=400, detail="Invalid escalation id.")
+    acks = _load_escalation_acks()
+    removed = acks.pop(escalation_id, None) is not None
+    if removed:
+        _save_escalation_acks(acks)
+    return {"id": escalation_id, "acked": False, "removed": removed}
 
 
 # --- SOC Operating System Work Queue & Durability Endpoints ---

@@ -39,13 +39,16 @@ function actionsSubtabFromSlug(slug) {
 }
 
 function isViewHash(h) {
-  return /^(dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture)(\/|$)/.test(h);
+  return /^(inbox|dashboards|ingestion|gastown|board|actions|issues|todos?|library|briefings|posture)(\/|$)/.test(h);
 }
 
 // Applies the current URL hash to the UI. Callers set routeRestoring.
 function routeFromHash() {
   const hash = window.location.hash.replace(/^#/, "");
-  if (hash.startsWith("dashboards") || hash.startsWith("ingestion")) {
+  if (hash === "" || hash.startsWith("inbox")) {
+    // No hash = default landing view.
+    if (state.currentView !== "inbox") switchView("inbox");
+  } else if (hash.startsWith("dashboards") || hash.startsWith("ingestion")) {
     switchView("dashboards");
     const sub = hash.includes("/") ? hash.split("/")[1] : null;
     if (sub && ["feeds", "parsers", "diagnostics", "finops", "namespacelabels"].includes(sub)) {
@@ -207,6 +210,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupActions();
   setupQuickSwitcher();
   setupResponsiveLayout();
+  setupInbox();
   await Promise.all([loadStreams(), loadAgents(), loadProposals()]);
   routeRestoring = true;
   try {
@@ -219,10 +223,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderUnreadIndicators();
   initSSE();
   checkLlmConfig();
-  // Top-bar escalation count needs the overview even when Actions isn't open.
-  if (state.currentView !== "gastown") loadGastownOverview();
+  // The Inbox badge must stay current whichever view is open.
+  if (state.currentView !== "inbox") loadInbox({ countOnly: true });
   setInterval(() => {
-    if (!document.hidden) loadGastownOverview();
+    if (!document.hidden) loadInbox({ countOnly: state.currentView !== "inbox" });
   }, TOPBAR_REFRESH_MS);
 });
 
@@ -263,6 +267,8 @@ function setupEventListeners() {
   const navBtnDashboards = document.getElementById("navBtnDashboards") || document.getElementById("navBtnIngestion");
   const navBtnLibrary = document.getElementById("navBtnLibrary");
   const navBtnBriefings = document.getElementById("navBtnBriefings");
+  const navBtnInbox = document.getElementById("navBtnInbox");
+  if (navBtnInbox) navBtnInbox.addEventListener("click", () => switchView("inbox"));
   if (navBtnChat) navBtnChat.addEventListener("click", () => switchView("chat"));
   if (navBtnGastown) navBtnGastown.addEventListener("click", () => switchView("gastown"));
   if (navBtnDashboards) navBtnDashboards.addEventListener("click", () => switchView("dashboards"));
@@ -426,8 +432,6 @@ function setupEventListeners() {
   if (gtAlertItem) gtAlertItem.addEventListener("click", focusReviewColumn);
 
   // #9: top-bar status chips + About.
-  const topbarEscalations = document.getElementById("topbarEscalations");
-  if (topbarEscalations) topbarEscalations.addEventListener("click", () => openActionsSubtab("escalations"));
   const fleetStatusTag = document.getElementById("fleetStatusTag");
   if (fleetStatusTag) fleetStatusTag.addEventListener("click", () => switchView("library"));
   const aboutBtn = document.getElementById("aboutBtn");
@@ -756,6 +760,7 @@ function setLiveStatus(status) {
     if (label) label.textContent = { connected: "Live", connecting: "Connecting…", disconnected: "Offline" }[status];
   }
   state.liveStatus = status;
+  document.body.classList.toggle("is-offline", status === "disconnected");
 }
 
 function initSSE() {
@@ -774,6 +779,7 @@ function initSSE() {
     if (wasDisconnected) {
       // Events may have been missed while offline; resync the key views.
       loadProposals();
+      scheduleInboxRefresh();
       if (typeof loadGastownOverview === "function") loadGastownOverview();
     }
   };
@@ -900,22 +906,6 @@ function setOpenProposalBadges(openCount) {
   if (drawerToggleBadge) drawerToggleBadge.textContent = openCount;
 }
 
-// Top-bar escalation chip. `count` is null when the overview is unavailable.
-function setTopbarEscalations(count) {
-  const chip = document.getElementById("topbarEscalations");
-  if (!chip) return;
-  const countEl = document.getElementById("topbarEscCount");
-  const labelEl = document.getElementById("topbarEscLabel");
-  const known = typeof count === "number";
-  if (countEl) countEl.textContent = known ? String(count) : UNKNOWN_METRIC;
-  if (labelEl) labelEl.textContent = known && count === 1 ? "escalation" : "escalations";
-  chip.classList.toggle("is-alert", known && count > 0);
-  chip.classList.toggle("is-unknown", !known);
-  chip.title = known
-    ? `${count} unacknowledged escalation${count === 1 ? "" : "s"} — open Escalations`
-    : "Escalation count unavailable — open Escalations";
-}
-
 // Jump into a specific Actions sub-tab from anywhere (top bar, summary cards).
 function openActionsSubtab(subtab) {
   switchGastownSubtab(subtab);
@@ -926,6 +916,7 @@ window.openActionsSubtab = openActionsSubtab;
 async function loadProposals() {
   try {
     state.proposals = await fetchJsonOrThrow("/api/proposals");
+    scheduleInboxRefresh();
     renderProposalsDrawer();
     const openCount = state.proposals.filter(needsOperator).length;
     const openPropCount = document.getElementById("openPropCount");
@@ -1170,7 +1161,6 @@ function renderDirectMessages() {
     row.innerHTML = `
       <div class="dm-avatar-wrap">
         <div class="dm-avatar">${renderAvatar("agent", a.handle)}</div>
-        <span class="dm-status-dot"></span>
       </div>
       <div class="dm-info-wrap" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
         <div class="dm-handle" title="${escapeHtml(a.role || a.name || a.handle)}">${escapeHtml(a.handle)}</div>
@@ -1196,7 +1186,8 @@ function renderAgents() {
   }
   const gtFleet = document.getElementById("gtFleetOnline");
   if (gtFleet && Array.isArray(state.agents) && state.agents.length > 0) {
-    gtFleet.textContent = `${state.agents.length} Agents Online`;
+    const n = state.agents.length;
+    gtFleet.textContent = `${n} agent${n === 1 ? "" : "s"} registered`;
   }
 }
 
@@ -1413,7 +1404,7 @@ function renderProposalWidget(widget) {
   let diffHtml = "";
   if (widget.proposed_diff) {
     diffHtml = `
-      <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">Proposed Mutation Diff</div>
+      <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px;">Proposed change</div>
       <div class="diff-container">${formatUnifiedDiff(widget.proposed_diff)}</div>
     `;
   }
@@ -1425,16 +1416,16 @@ function renderProposalWidget(widget) {
     preflightHtml = `
       <div class="preflight-box">
         <div style="font-weight:700; font-size:11.5px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
-          <span>Empirical Pre-Flight Proof</span>
-          <span style="font-size:11px; color:${synOk && repOk ? 'var(--c-ok)' : 'var(--c-warn)'};">${synOk && repOk ? 'VERIFIED' : 'PENDING EMPIRICAL'}</span>
+          <span>Preflight checks</span>
+          <span style="font-size:11px; color:${synOk && repOk ? 'var(--c-ok)' : 'var(--c-warn)'};">${synOk && repOk ? 'VERIFIED' : 'REPLAY PENDING'}</span>
         </div>
         <div class="kpi-grid" style="grid-template-columns: 1fr 1fr; margin-bottom:0;">
           <div class="kpi-card" style="padding:4px 6px; text-align:left;">
-            <div class="kpi-lbl">Syntax Compiler</div>
+            <div class="kpi-lbl">Syntax check</div>
             <div style="font-size:11.5px; font-weight:600; color:${synOk ? 'var(--c-ok)' : 'var(--c-danger)'};">${synOk ? '✅ PASSED (0 errors)' : '❌ FAILED'}</div>
           </div>
           <div class="kpi-card" style="padding:4px 6px; text-align:left;">
-            <div class="kpi-lbl">Empirical Replay</div>
+            <div class="kpi-lbl">Log replay</div>
             <div style="font-size:11.5px; font-weight:600; color:${repOk ? 'var(--c-ok)' : 'var(--text-dim)'};">${repOk ? '✅ ' + (widget.preflight.replay_summary || 'Verified') : '⏳ Awaiting Log Replay'}</div>
           </div>
         </div>
@@ -1447,7 +1438,7 @@ function renderProposalWidget(widget) {
     actionsHtml = `
       <div class="prop-action-bar">
         <button class="btn-approve" data-id="${proposalId}">
-          <span>${ICONS.zap}</span> Approve & Apply Mutation
+          <span>${ICONS.zap}</span> Approve &amp; apply
         </button>
         <button class="btn-reject" data-id="${proposalId}">Reject</button>
       </div>
@@ -1477,7 +1468,7 @@ function renderProposalWidget(widget) {
   } else if (status === "MERGED") {
     actionsHtml = `
       <div style="font-size:11.5px; color:var(--accent-green); font-weight:600; margin-top:6px; display:flex; align-items:center; gap:5px;">
-        <span>${ICONS.check}</span> Live Mutation Merged (${widget.commit_hash ? widget.commit_hash.slice(0, 7) : "HEAD"})
+        <span>${ICONS.check}</span> Approved and applied to SecOps${widget.merged_by ? ` by ${escapeHtml(widget.merged_by)}` : ""}
       </div>
     `;
   } else if (status === "REJECTED") {
@@ -1521,7 +1512,7 @@ function renderReplayWidget(widget) {
   return `
     <div class="proposal-card status-open" style="border-left: 3px solid var(--accent-blue); margin-top: 8px;">
       <div class="prop-meta-bar">
-        <span class="badge" style="background:var(--c-info-bg); color:var(--c-info);">EMPIRICAL REPLAY</span>
+        <span class="badge" style="background:var(--c-info-bg); color:var(--c-info);">LOG REPLAY</span>
         <span class="badge" style="background:var(--c-ok-bg); color:var(--c-ok);">${status}</span>
         <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-left:auto;">rule: ${escapeHtml(targetRule)}</span>
       </div>
@@ -4022,7 +4013,7 @@ async function openAboutDialog() {
   const connLabel = { connected: "Live", connecting: "Connecting…", disconnected: "Offline — reconnecting" }[state.liveStatus] || UNKNOWN_METRIC;
   const rows = [
     ["Agent runtime", "Google ADK 2"],
-    ["Change control", "Human-in-the-loop review — every production mutation requires operator approval"],
+    ["Change control", "Human-in-the-loop review — every production change requires operator approval"],
     ["Server version", health ? val(health.version) : UNKNOWN_METRIC],
     ["Server status", health ? val(health.status) : "Unreachable"],
     ["Agents registered", health ? val(health.agents_online) : UNKNOWN_METRIC],
@@ -4077,7 +4068,7 @@ function proposalStatusView(p) {
     if (p.apply_status === "MANUAL_APPLY_REQUIRED") return { label: "Apply manually", cls: "badge-manual", title: "Approved, but nothing was changed in SecOps. Apply it, then mark it applied." };
     if (p.apply_status === "ABANDONED") return { label: "Abandoned", cls: "badge-rejected", title: `Approved, then not applied. Abandoned by ${p.abandoned_by || "an operator"}${p.abandon_reason ? `: ${p.abandon_reason}` : ""}` };
     if (p.apply_status === "MANUALLY_APPLIED") return { label: "Applied (manual)", cls: "badge-merged", title: `Applied by ${p.applied_by || "an operator"}${p.apply_note ? `: ${p.apply_note}` : ""}` };
-    return { label: "Merged", cls: "badge-merged", title: "Written to SecOps on approval" };
+    return { label: "Applied", cls: "badge-merged", title: "Written to SecOps on approval" };
   }
   return { label: status, cls: `badge-${status.toLowerCase()}`, title: "" };
 }
@@ -4700,7 +4691,7 @@ function renderFleetDrawer() {
   header.innerHTML = `
     <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
       <span>Fleet Roster</span>
-      <span style="font-size:11px; background:var(--bg-tertiary); padding:1px 6px; border-radius:8px;">${total} Online</span>
+      <span style="font-size:11px; background:var(--bg-tertiary); padding:1px 6px; border-radius:8px;">${total} registered</span>
     </div>
     <input
       type="text"
@@ -5497,14 +5488,15 @@ function quickSwitcherItems() {
   const go = (view) => () => switchView(view);
   const dash = (sub) => () => { switchView("dashboards"); switchIngestionSubtab(sub); };
   const pages = [
+    ["Inbox", "Everything waiting on you", go("inbox")],
     ["Fleet Chat", "", go("chat")],
     ["Actions: Kanban board", "Proposals and tasks by state", () => openActionsSubtab("kanban")],
     ["Actions: Work queue & leases", "", () => openActionsSubtab("work_queue")],
     ["Actions: Work packages", "", () => openActionsSubtab("convoys")],
-    ["Actions: Change queue", "Proposals awaiting merge", () => openActionsSubtab("refinery")],
+    ["Actions: Change queue", "Changes awaiting approval", () => openActionsSubtab("refinery")],
     ["Actions: Escalations", "", () => openActionsSubtab("escalations")],
     ["Actions: Scheduled audits", "", () => openActionsSubtab("patrols")],
-    ["Briefings & Posture", "Shift handover, knowledge gaps, entity dossiers", go("briefings")],
+    ["Briefings & Posture", "Shift handover, knowledge gaps, entity lookup", go("briefings")],
     ["Dashboards: Feed pipelines", "", dash("feeds")],
     ["Dashboards: Normalizers & CBN", "Parsers", dash("parsers")],
     ["Dashboards: Unparsed log diagnostics", "", dash("diagnostics")],
@@ -5937,164 +5929,73 @@ function closeMentionDropdown() {
 // ====================================================================
 // View Switcher (Chat vs Dedicated Ingestion Page)
 // ====================================================================
+// One entry per top-level view: its panel, nav tab and body class.
+const VIEW_DEFS = {
+  inbox: { panel: "inboxView", nav: "navBtnInbox", bodyClass: "view-inbox-active" },
+  chat: { panel: "chatView", nav: "navBtnChat", bodyClass: null },
+  gastown: { panel: "gastownView", nav: "navBtnGastown", bodyClass: "view-gastown-active" },
+  dashboards: { panel: "ingestionView", nav: "navBtnDashboards", bodyClass: "view-ingestion-active" },
+  library: { panel: "libraryView", nav: "navBtnLibrary", bodyClass: "view-library-active" },
+  briefings: { panel: "briefingsView", nav: "navBtnBriefings", bodyClass: "view-briefings-active" },
+};
+
 function switchView(viewName, opts = {}) {
-  state.currentView = viewName === "ingestion" ? "dashboards"
-    : (["gastown", "dashboards", "library", "briefings"].includes(viewName) ? viewName : "chat");
-  const navChat = document.getElementById("navBtnChat");
-  const navGastown = document.getElementById("navBtnGastown");
-  const navDashboards = document.getElementById("navBtnDashboards") || document.getElementById("navBtnIngestion");
-  const navLibrary = document.getElementById("navBtnLibrary");
-  const navBriefings = document.getElementById("navBtnBriefings");
-  const chatView = document.getElementById("chatView");
-  const gastownView = document.getElementById("gastownView");
-  const ingestionView = document.getElementById("ingestionView");
-  const libraryView = document.getElementById("libraryView");
-  const briefingsView = document.getElementById("briefingsView");
+  const name = viewName === "ingestion" ? "dashboards" : (VIEW_DEFS[viewName] ? viewName : "chat");
+  state.currentView = name;
+  // Leaving the Inbox ends the visit, so the next one gets a fresh "since you last looked".
+  if (name !== "inbox") inboxState.visitActive = false;
+
+  Object.entries(VIEW_DEFS).forEach(([key, def]) => {
+    const on = key === name;
+    const panel = document.getElementById(def.panel);
+    if (panel) panel.style.display = on ? "flex" : "none";
+    const nav = document.getElementById(def.nav) || (key === "dashboards" ? document.getElementById("navBtnIngestion") : null);
+    if (nav) nav.classList.toggle("active", on);
+    if (def.bodyClass) document.body.classList.toggle(def.bodyClass, on);
+  });
+
+  // Streams sidebar and proposals drawer belong to chat only.
   const sidebarLeft = document.getElementById("sidebarLeft");
   const sidebarRight = document.getElementById("sidebarRight");
   const toggleRightDrawerBtn = document.getElementById("toggleRightDrawerBtn");
+  if (sidebarLeft) sidebarLeft.style.display = name === "chat" ? "flex" : "none";
+  if (sidebarRight) {
+    sidebarRight.style.display = name === "chat" ? "flex" : "none";
+    if (name === "chat") {
+      sidebarRight.classList.toggle("sidebar-right-closed", !state.isRightDrawerOpen);
+      if (toggleRightDrawerBtn) toggleRightDrawerBtn.classList.toggle("active", !!state.isRightDrawerOpen);
+    }
+  }
 
-  if (viewName === "gastown") {
-    if (navChat) navChat.classList.remove("active");
-    if (navDashboards) navDashboards.classList.remove("active");
-    if (navLibrary) navLibrary.classList.remove("active");
-    if (navBriefings) navBriefings.classList.remove("active");
-    if (navGastown) navGastown.classList.add("active");
-
-    if (chatView) chatView.style.display = "none";
-    if (ingestionView) ingestionView.style.display = "none";
-    if (libraryView) libraryView.style.display = "none";
-    if (briefingsView) briefingsView.style.display = "none";
-    if (gastownView) gastownView.style.display = "flex";
-
-    if (sidebarLeft) sidebarLeft.style.display = "none";
-    if (sidebarRight) sidebarRight.style.display = "none";
-
-    document.body.classList.remove("view-ingestion-active");
-    document.body.classList.remove("view-library-active");
-    document.body.classList.remove("view-briefings-active");
-    document.body.classList.add("view-gastown-active");
-
-    if (!/^#(gastown|board|actions)(\/|$)/.test(window.location.hash)) {
+  const hash = window.location.hash;
+  if (name === "inbox") {
+    if (!hash.startsWith("#inbox")) setRoute("#inbox");
+    loadInbox();
+  } else if (name === "gastown") {
+    if (!/^#(gastown|board|actions)(\/|$)/.test(hash)) {
       setRoute(`#actions/${ACTIONS_SUBTAB_SLUGS[gastownState.activeSubtab] || "board"}`);
     }
     loadGastownOverview();
-  } else if (viewName === "dashboards" || viewName === "ingestion") {
-    if (navChat) navChat.classList.remove("active");
-    if (navGastown) navGastown.classList.remove("active");
-    if (navLibrary) navLibrary.classList.remove("active");
-    if (navBriefings) navBriefings.classList.remove("active");
-    if (navDashboards) navDashboards.classList.add("active");
-
-    if (chatView) chatView.style.display = "none";
-    if (gastownView) gastownView.style.display = "none";
-    if (libraryView) libraryView.style.display = "none";
-    if (briefingsView) briefingsView.style.display = "none";
-    if (ingestionView) ingestionView.style.display = "flex";
-
-    if (sidebarLeft) sidebarLeft.style.display = "none";
-    if (sidebarRight) sidebarRight.style.display = "none";
-
-    document.body.classList.remove("view-gastown-active");
-    document.body.classList.remove("view-library-active");
-    document.body.classList.remove("view-briefings-active");
-    document.body.classList.add("view-ingestion-active");
-
-    const cur = window.location.hash;
-    if (!cur.startsWith("#dashboards") && !cur.startsWith("#ingestion")) {
+  } else if (name === "dashboards") {
+    if (!hash.startsWith("#dashboards") && !hash.startsWith("#ingestion")) {
       const activeSub = (ingestionData && ingestionData.activeSubtab) || "feeds";
       setRoute(`#dashboards/${activeSub}`);
     }
     renderIngestionPage();
-  } else if (viewName === "library") {
-    if (navChat) navChat.classList.remove("active");
-    if (navGastown) navGastown.classList.remove("active");
-    if (navDashboards) navDashboards.classList.remove("active");
-    if (navBriefings) navBriefings.classList.remove("active");
-    if (navLibrary) navLibrary.classList.add("active");
-
-    if (chatView) chatView.style.display = "none";
-    if (gastownView) gastownView.style.display = "none";
-    if (ingestionView) ingestionView.style.display = "none";
-    if (briefingsView) briefingsView.style.display = "none";
-    if (libraryView) libraryView.style.display = "flex";
-
-    if (sidebarLeft) sidebarLeft.style.display = "none";
-    if (sidebarRight) sidebarRight.style.display = "none";
-
-    document.body.classList.remove("view-gastown-active");
-    document.body.classList.remove("view-ingestion-active");
-    document.body.classList.remove("view-briefings-active");
-    document.body.classList.add("view-library-active");
-
-    if (!window.location.hash.startsWith("#library")) {
-      setRoute("#library");
-    }
+  } else if (name === "library") {
+    if (!hash.startsWith("#library")) setRoute("#library");
     loadAgentLibrary();
-  } else if (viewName === "briefings") {
-    if (navChat) navChat.classList.remove("active");
-    if (navGastown) navGastown.classList.remove("active");
-    if (navDashboards) navDashboards.classList.remove("active");
-    if (navLibrary) navLibrary.classList.remove("active");
-    if (navBriefings) navBriefings.classList.add("active");
-
-    if (chatView) chatView.style.display = "none";
-    if (gastownView) gastownView.style.display = "none";
-    if (ingestionView) ingestionView.style.display = "none";
-    if (libraryView) libraryView.style.display = "none";
-    if (briefingsView) briefingsView.style.display = "flex";
-
-    if (sidebarLeft) sidebarLeft.style.display = "none";
-    if (sidebarRight) sidebarRight.style.display = "none";
-
-    document.body.classList.remove("view-gastown-active");
-    document.body.classList.remove("view-ingestion-active");
-    document.body.classList.remove("view-library-active");
-    document.body.classList.add("view-briefings-active");
-
-    if (!window.location.hash.startsWith("#briefings")) {
-      setRoute(`#briefings/${activeBriefingTab}`);
-    }
+  } else if (name === "briefings") {
+    if (!hash.startsWith("#briefings")) setRoute(`#briefings/${activeBriefingTab}`);
     loadBriefingsView();
   } else {
-    // Default: Fleet Chat
-    if (navGastown) navGastown.classList.remove("active");
-    if (navDashboards) navDashboards.classList.remove("active");
-    if (navLibrary) navLibrary.classList.remove("active");
-    if (navBriefings) navBriefings.classList.remove("active");
-    if (navChat) navChat.classList.add("active");
-
-    if (gastownView) gastownView.style.display = "none";
-    if (ingestionView) ingestionView.style.display = "none";
-    if (libraryView) libraryView.style.display = "none";
-    if (briefingsView) briefingsView.style.display = "none";
-    if (chatView) chatView.style.display = "flex";
-
-    if (sidebarLeft) sidebarLeft.style.display = "flex";
-    if (sidebarRight) {
-      sidebarRight.style.display = "flex";
-      if (!state.isRightDrawerOpen) {
-        sidebarRight.classList.add("sidebar-right-closed");
-        if (toggleRightDrawerBtn) toggleRightDrawerBtn.classList.remove("active");
-      } else {
-        sidebarRight.classList.remove("sidebar-right-closed");
-        if (toggleRightDrawerBtn) toggleRightDrawerBtn.classList.add("active");
-      }
-    }
-
-    document.body.classList.remove("view-gastown-active");
-    document.body.classList.remove("view-ingestion-active");
-    document.body.classList.remove("view-library-active");
-    document.body.classList.remove("view-briefings-active");
-
-    const curHash = window.location.hash.replace(/^#/, "");
+    const curHash = hash.replace(/^#/, "");
     if (!opts.skipRoute && (curHash === "" || isViewHash(curHash))) {
       setRoute(`#${state.activeStream}/${state.activeTopic}`);
     }
     clearUnread(state.activeStream, state.activeTopic);
     scrollToBottom();
   }
-
 }
 
 window.switchTopicAndChat = async function (stream, topic, initialText = "") {
@@ -6913,7 +6814,7 @@ function markGastownHeaderStale() {
     hb.className = "gt-stat-val unknown";
   }
   const fleet = document.getElementById("gtFleetOnline");
-  if (fleet) fleet.textContent = "Agents Online: unavailable";
+  if (fleet) fleet.textContent = "Agents: unavailable";
   const alert = document.getElementById("gtAlertItem");
   if (alert) {
     alert.textContent = "⚠ Overview unavailable — pending review count unknown";
@@ -6921,7 +6822,6 @@ function markGastownHeaderStale() {
     alert.disabled = true;
     alert.removeAttribute("title");
   }
-  setTopbarEscalations(null);
 }
 
 function renderGastownHeader() {
@@ -6937,10 +6837,16 @@ function renderGastownHeader() {
   // Health
   const gtDeaconHeartbeat = document.getElementById("gtDeaconHeartbeat");
   if (gtDeaconHeartbeat) {
-    const hb = ov.health && ov.health.deacon_heartbeat;
-    if (hb) {
-      gtDeaconHeartbeat.textContent = `✓ Scheduler healthy (${hb})`;
+    // Only "healthy" means the scheduler loop is running; the heartbeat string is always present.
+    const health = ov.health || {};
+    const lastRunAge = formatAgeShort(ageMsFrom(health.last_patrol_run_at));
+    const lastRun = lastRunAge ? `last audit ${lastRunAge} ago` : "no audits run yet";
+    if (health.status === "healthy") {
+      gtDeaconHeartbeat.textContent = `✓ Scheduler running (${lastRun})`;
       gtDeaconHeartbeat.className = "gt-stat-val healthy";
+    } else if (health.status) {
+      gtDeaconHeartbeat.textContent = `Scheduler idle (${lastRun})`;
+      gtDeaconHeartbeat.className = "gt-stat-val unknown";
     } else {
       gtDeaconHeartbeat.textContent = "Scheduler: unknown";
       gtDeaconHeartbeat.className = "gt-stat-val unknown";
@@ -6966,14 +6872,13 @@ function renderGastownHeader() {
   if (statPolecats) statPolecats.textContent = polecatCount;
   if (statFleetOnline) {
     statFleetOnline.textContent =
-      polecatCount === UNKNOWN_METRIC ? "Agents Online: unknown" : `${polecatCount} Agents Online`;
+      polecatCount === UNKNOWN_METRIC ? "Agents: unknown" : `${polecatCount} agent${polecatCount === 1 ? "" : "s"} registered`;
   }
   if (statHooks) statHooks.textContent = hookCount;
   if (statWork) statWork.textContent = issueCount;
   if (statLeases) statLeases.textContent = summary.soc_leases_active ?? UNKNOWN_METRIC;
   if (statConvoys) statConvoys.textContent = convoyCount;
   if (statEscalations) statEscalations.textContent = escalationCount;
-  setTopbarEscalations(typeof summary.escalation_count === "number" ? summary.escalation_count : null);
 
   // Alerts Strip
   const gtAlertItem = document.getElementById("gtAlertItem");
@@ -6995,7 +6900,7 @@ function renderGastownHeader() {
     } else if (typeof summary.escalation_count === "number" && summary.escalation_count > 0) {
       const n = summary.escalation_count;
       gtAlertItem.dataset.target = "escalations";
-      gtAlertItem.textContent = `⚠ No reviews pending · ${n} unacknowledged escalation${n > 1 ? "s" : ""} →`;
+      gtAlertItem.textContent = `⚠ No reviews pending · ${n} open escalation${n > 1 ? "s" : ""} →`;
       gtAlertItem.className = "gt-alert-pill gt-alert-amber";
       gtAlertItem.disabled = false;
       gtAlertItem.title = "Show Escalations";
@@ -7392,7 +7297,7 @@ function renderGastownKanban() {
     `;
   }
 
-  // Col 4: Merged / Resolved
+  // Col 4: Done (applied, rejected, closed)
   const colMerged = document.getElementById("cardsColMerged");
   const countColMerged = document.getElementById("countColMerged");
   const closedProposals = proposals.filter((p) => !needsManualApply(p) && (p.status === "MERGED" || p.status === "APPLIED" || p.status === "CLOSED" || p.status === "REJECTED"));
@@ -7401,7 +7306,7 @@ function renderGastownKanban() {
   if (countColMerged) countColMerged.textContent = totalMerged;
   if (colMerged) {
     if (totalMerged === 0) {
-      colMerged.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No applied proposals yet.</div>`;
+      colMerged.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">Nothing closed yet.</div>`;
     } else {
       const socCards = socMerged.map(renderSocKanbanCard).join("");
       const propCards = closedProposals.map((p) => {
@@ -7415,7 +7320,7 @@ function renderGastownKanban() {
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
               <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}" ${view.title ? `title="${escapeHtml(view.title)}"` : ""}>${escapeHtml(view.label)}</span>
             </div>
-            <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Resolved mutation")}</div>
+            <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Resolved change")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
             <div class="kanban-card-footer">
               <span class="kanban-card-author">${renderAvatar("agent", author)} ${escapeHtml(author)}</span>
@@ -7558,8 +7463,8 @@ function renderGastownEscalations() {
     const escPrompt = esc.action_prompt || `${esc.escalated_by} diagnose unparsed logs for ${esc.target || esc.id}`;
     const sev = String(esc.severity || "").toUpperCase();
     const ackCell = esc.acked
-      ? `<span class="badge badge-gray" title="Acknowledged by ${escapeHtml(esc.acked_by || "operator")}${esc.acked_at ? " at " + escapeHtml(new Date(esc.acked_at).toLocaleString()) : ""}">Acked</span>`
-      : `<button class="btn btn-secondary btn-sm" ${act("handleAckEscalation", esc.id)}>Ack</button>`;
+      ? `<span class="badge badge-gray" title="Snoozed by ${escapeHtml(esc.acked_by || "operator")}${esc.acked_at ? " at " + escapeHtml(new Date(esc.acked_at).toLocaleString()) : ""}. It returns if anything about it changes.">Snoozed</span>`
+      : `<button class="btn btn-secondary btn-sm" ${act("handleAckEscalation", esc.id)} title="Hide until something about it changes">Snooze</button>`;
     return `
     <tr class="${esc.acked ? "row-acked" : ""}">
       <td>
@@ -7600,13 +7505,14 @@ async function handleAckEscalation(escalationId) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      showToast("error", `Acknowledge failed: ${err.detail || res.status}`);
+      showToast("error", `Snooze failed: ${err.detail || res.status}`);
       return;
     }
-    showToast("success", `Escalation ${escalationId} acknowledged`);
+    showToast("success", `Escalation ${escalationId} snoozed`);
+    scheduleInboxRefresh();
     await loadGastownOverview(true);
   } catch (err) {
-    showToast("error", `Acknowledge error: ${err.message}`);
+    showToast("error", `Snooze error: ${err.message}`);
   }
 }
 window.handleAckEscalation = handleAckEscalation;
@@ -7615,8 +7521,8 @@ window.handleAckEscalation = handleAckEscalation;
 function getPreflightGates(p) {
   const pf = p.preflight_proof || p.preflight || {};
   return [
-    { label: "Syntax compiler", ok: !!pf.syntax_verified, detail: (pf.compiler_diagnostics || []).join("; ") },
-    { label: "Empirical replay", ok: !!pf.replay_verified, detail: pf.replay_summary || "" },
+    { label: "Syntax check", ok: !!pf.syntax_verified, detail: (pf.compiler_diagnostics || []).join("; ") },
+    { label: "Log replay", ok: !!pf.replay_verified, detail: pf.replay_summary || "" },
   ];
 }
 
@@ -7714,7 +7620,7 @@ function openGastownDiffModal(proposalId) {
             ${g.detail ? `<span class="gt-gate-detail">${escapeHtml(g.detail)}</span>` : ""}
           </div>`).join("")}
       </div>
-      ${allOk ? "" : `<div class="gt-gate-warning">⚠ Not all preflight gates are verified. Review the diff carefully before merging.</div>`}
+      ${allOk ? "" : `<div class="gt-gate-warning">⚠ Not all preflight gates are verified. Review the diff carefully before approving.</div>`}
     `;
   }
 
@@ -7757,7 +7663,7 @@ function openGastownDiffModal(proposalId) {
   };
   if (btnApprove) {
     btnApprove.hidden = !(isOpen || manualPending);
-    btnApprove.textContent = manualPending ? "Mark applied" : (manualType ? "Approve (manual apply)" : "Merge Proposal");
+    btnApprove.textContent = manualPending ? "Mark applied" : (manualType ? "Approve (manual apply)" : "Approve & apply");
     btnApprove.onclick = async () => {
       setBusy(true);
       const done = manualPending ? await handleMarkApplied(p.id) : await handleApproveProposal(p.id);
@@ -7768,7 +7674,7 @@ function openGastownDiffModal(proposalId) {
   if (btnReject) {
     // Reject while open; once approved-but-unapplied, the same slot abandons the change.
     btnReject.hidden = !(isOpen || manualPending);
-    btnReject.textContent = manualPending ? "Abandon change" : "Reject Proposal";
+    btnReject.textContent = manualPending ? "Abandon change" : "Reject";
     btnReject.onclick = async () => {
       setBusy(true);
       const done = manualPending ? await handleAbandonProposal(p.id) : await handleRejectProposal(p.id);
@@ -7809,7 +7715,7 @@ async function renderGastownPatrols() {
 
     if (statusBadge) {
       const isHealthy = deacon.status === "healthy";
-      statusBadge.textContent = isHealthy ? "SCHEDULER ONLINE" : "SCHEDULER STANDBY";
+      statusBadge.textContent = isHealthy ? "Scheduler running" : "Scheduler idle";
       statusBadge.className = `gt-badge ${isHealthy ? "gt-badge-green" : "gt-badge-yellow"}`;
     }
     if (heartbeatDetail) {
@@ -8416,6 +8322,7 @@ window.handleDecideSocIssue = handleDecideSocIssue;
 
 // Refresh everything that shows SOC issue state (board, queue table, header counts).
 async function refreshSocIssueViews() {
+  scheduleInboxRefresh();
   await Promise.allSettled([loadGastownOverview(true), renderGastownWorkQueue()]);
 }
 
@@ -8426,7 +8333,7 @@ async function handleRequeueSocIssue(issueId) {
     confirmLabel: "Requeue",
     fields: [{ name: "guidance", label: "Guidance for the next attempt (optional)", type: "textarea", placeholder: "e.g. The failing samples come from the new EU collector; check the timestamp format." }],
   });
-  if (!result) return;
+  if (!result) return false;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/requeue`, {
       method: "POST",
@@ -8438,11 +8345,14 @@ async function handleRequeueSocIssue(issueId) {
       showToast("success", `${issueId} returned to the worker pool`);
       closeSocIssueModal();
       await refreshSocIssueViews();
+      return true;
     } else {
       showToast("error", `Requeue failed: ${data.detail || res.status}`);
+      return false;
     }
   } catch (err) {
     showToast("error", `Requeue error: ${err.message}`);
+    return false;
   }
 }
 window.handleRequeueSocIssue = handleRequeueSocIssue;
@@ -8455,7 +8365,7 @@ async function handleCloseSocIssue(issueId) {
     variant: "danger",
     fields: [{ name: "reason", label: "Reason", type: "textarea", required: true, minLength: 5 }],
   });
-  if (!result) return;
+  if (!result) return false;
   try {
     const res = await fetch(`/api/soc/issues/${encodeURIComponent(issueId)}/close`, {
       method: "POST",
@@ -8467,11 +8377,14 @@ async function handleCloseSocIssue(issueId) {
       showToast("success", `${issueId} closed`);
       closeSocIssueModal();
       await refreshSocIssueViews();
+      return true;
     } else {
       showToast("error", `Close failed: ${data.detail || res.status}`);
+      return false;
     }
   } catch (err) {
     showToast("error", `Close error: ${err.message}`);
+    return false;
   }
 }
 window.handleCloseSocIssue = handleCloseSocIssue;
@@ -9137,7 +9050,7 @@ async function loadShiftBriefing(hours = 8) {
 
     // Render 5 delta categories
     renderDeltaSection("countRequiresAttention", "listRequiresAttention", briefing.requires_attention, "⚠️ No critical issues requiring operator attention.");
-    renderDeltaSection("countChangedSincePrevious", "listChangedSincePrevious", briefing.changed_since_previous, "🔄 No configuration mutations in this shift window.");
+    renderDeltaSection("countChangedSincePrevious", "listChangedSincePrevious", briefing.changed_since_previous, "🔄 No configuration changes in this shift window.");
     renderDeltaSection("countAgentWip", "listAgentWip", briefing.agent_work_in_progress, "🤖 No active agent leases or pending proposals.");
     renderDeltaSection("countHealthy", "listHealthy", briefing.no_action_required, "🛡️ No baseline assertions recorded.");
     renderDeltaSection("countCarryover", "listCarryover", briefing.carry_over, "⏳ No carry-over issues.");
@@ -9273,7 +9186,7 @@ async function fetchEntityDossier(subjectType, subjectId) {
   const container = document.getElementById("dossierResultContainer");
   if (!container) return;
   container.style.display = "block";
-  container.innerHTML = `<p class="empty-state-muted">Synthesizing multi-agent dossier for ${escapeHtml(subjectType)}: <code>${escapeHtml(subjectId)}</code>...</p>`;
+  container.innerHTML = `<p class="empty-state-muted">Looking up what the agents know about ${escapeHtml(subjectType)}: <code>${escapeHtml(subjectId)}</code>...</p>`;
 
   try {
     const res = await fetch(`/api/knowledge/entity/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}`);
@@ -9319,7 +9232,7 @@ async function fetchEntityDossier(subjectType, subjectId) {
 
   } catch (err) {
     console.error("Failed to fetch entity dossier:", err);
-    showLoadError(container, { title: "Couldn't build the entity dossier", error: err, retry: () => fetchEntityDossier(subjectType, subjectId) });
+    showLoadError(container, { title: "Couldn't look up this entity", error: err, retry: () => fetchEntityDossier(subjectType, subjectId) });
   }
 }
 
@@ -9451,4 +9364,670 @@ function setupA11y() {
     e.preventDefault();
     document.getElementById("mainContent")?.focus();
   });
+}
+
+// ====================================================================
+// Operator Inbox: everything that stops moving until a human acts.
+// Groups come from GET /api/inbox (server is the single source of truth for
+// membership, order and counts). Every action reuses the existing handlers,
+// so reason dialogs, policy checks and drift checks are identical everywhere.
+// ====================================================================
+const INBOX_LAST_SEEN_KEY = "secops_inbox_last_seen_v1"; // per-browser until operators have identities
+const INBOX_GROUPS = [
+  { key: "decide", label: "Decide", hint: "Changes waiting for your approval" },
+  { key: "apply", label: "Apply in SecOps", hint: "Approved, but nothing has been written yet" },
+  { key: "unstick", label: "Unstick", hint: "Issues the fleet gave up on" },
+];
+const INBOX_KIND_LABELS = { proposal_review: "Review", manual_apply: "Apply manually" };
+const INBOX_SEVERITY_LABELS = { CRITICAL: "Critical", HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
+
+const inboxState = {
+  data: null,
+  error: null,
+  loadedAt: null,
+  selectedId: null,
+  checked: new Set(),
+  visitActive: false,
+  visitSince: null,
+  busy: false,
+  refreshTimer: null,
+  inFlight: null,
+};
+
+function inboxItems() {
+  return (inboxState.data && inboxState.data.items) || [];
+}
+
+// Row order on screen: active items by group, then snoozed. j/k and "advance" follow this.
+function inboxOrderedItems() {
+  const items = inboxItems();
+  return [...items.filter((i) => !i.snoozed), ...items.filter((i) => i.snoozed)];
+}
+
+function inboxFind(id) {
+  return inboxItems().find((i) => i.id === id) || null;
+}
+
+function inboxItemAge(item) {
+  return formatAgeShort(ageMsFrom(item.waiting_since)) || item.age || UNKNOWN_METRIC;
+}
+
+function setInboxBadge(counts) {
+  const badge = document.getElementById("navInboxBadge");
+  if (!badge) return;
+  if (!counts) {
+    badge.hidden = false;
+    badge.textContent = UNKNOWN_METRIC;
+    badge.classList.remove("is-escalated");
+    badge.title = "Inbox count unavailable";
+  } else {
+    const n = counts.total || 0;
+    badge.hidden = n === 0;
+    badge.textContent = n > 99 ? "99+" : String(n);
+    badge.classList.toggle("is-escalated", (counts.escalated || 0) > 0);
+    badge.title = `${n} item${n === 1 ? "" : "s"} waiting on you`
+      + (counts.escalated ? `, ${counts.escalated} high or critical` : "");
+  }
+  badge.setAttribute("aria-label", badge.title);
+}
+
+// Many handlers refresh proposals/issues; coalesce into one inbox fetch.
+function scheduleInboxRefresh() {
+  clearTimeout(inboxState.refreshTimer);
+  inboxState.refreshTimer = setTimeout(() => {
+    loadInbox({ countOnly: state.currentView !== "inbox" });
+  }, 250);
+}
+
+async function loadInbox({ countOnly = false } = {}) {
+  // Entering the view starts a "visit": the summary compares against the previous visit.
+  if (!countOnly && !inboxState.visitActive) {
+    inboxState.visitActive = true;
+    try {
+      inboxState.visitSince = localStorage.getItem(INBOX_LAST_SEEN_KEY);
+      localStorage.setItem(INBOX_LAST_SEEN_KEY, new Date().toISOString());
+    } catch (_) { inboxState.visitSince = null; }
+  }
+  const since = inboxState.visitSince;
+  const url = `/api/inbox${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+  const req = fetchJsonOrThrow(url);
+  inboxState.inFlight = req;
+  try {
+    const data = await req;
+    if (inboxState.inFlight !== req) return; // a newer request superseded this one
+    inboxState.data = data;
+    inboxState.error = null;
+    inboxState.loadedAt = new Date();
+    // Drop checks for items that no longer exist.
+    const ids = new Set(inboxItems().map((i) => i.id));
+    inboxState.checked.forEach((id) => { if (!ids.has(id)) inboxState.checked.delete(id); });
+    setInboxBadge(data.counts);
+  } catch (err) {
+    if (inboxState.inFlight !== req) return;
+    console.error("Failed loading inbox:", err);
+    inboxState.error = err;
+    setInboxBadge(null);
+  }
+  if (state.currentView === "inbox") renderInbox();
+}
+
+function renderInbox() {
+  renderInboxHeader();
+  renderInboxList();
+  renderInboxDetail();
+  renderInboxBatchBar();
+}
+
+function renderInboxHeader() {
+  const sub = document.getElementById("inboxSubtitle");
+  const updated = document.getElementById("inboxUpdated");
+  const d = inboxState.data;
+  if (sub) {
+    if (!d) {
+      sub.textContent = inboxState.error ? "Couldn't load your inbox." : "Loading…";
+    } else {
+      const c = d.counts || {};
+      const parts = [];
+      if (c.total) {
+        parts.push(`${c.total} item${c.total === 1 ? "" : "s"} waiting on you`);
+        if (c.escalated) parts.push(`${c.escalated} high or critical`);
+      } else {
+        parts.push("Nothing is waiting on you");
+      }
+      if (c.snoozed) parts.push(`${c.snoozed} snoozed`);
+      sub.textContent = parts.join(" · ");
+    }
+  }
+  if (updated) {
+    if (!inboxState.loadedAt) {
+      updated.textContent = "";
+    } else {
+      const t = inboxState.loadedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      updated.textContent = inboxState.error ? `Refresh failed · showing data from ${t}` : `Updated ${t}`;
+      updated.classList.toggle("is-stale", !!inboxState.error);
+    }
+  }
+}
+
+function inboxGroupStats(items) {
+  let oldest = null;
+  items.forEach((i) => {
+    const ms = ageMsFrom(i.waiting_since);
+    if (ms != null && (oldest == null || ms > oldest)) oldest = ms;
+  });
+  return { count: items.length, oldest: formatAgeShort(oldest) };
+}
+
+function renderInboxRow(item, selectable) {
+  const selected = item.id === inboxState.selectedId;
+  const checked = inboxState.checked.has(item.id);
+  const kind = item.kind === "issue_attention" ? (item.status_label || "Needs attention") : INBOX_KIND_LABELS[item.kind] || item.kind;
+  const sev = INBOX_SEVERITY_LABELS[item.severity] || item.severity;
+  const meta = [item.target, item.agent].filter(Boolean).map(escapeHtml).join(" · ");
+  return `
+    <li class="inbox-row sev-${escapeHtml(item.severity.toLowerCase())}${item.escalated ? " is-escalated" : ""}${selected ? " is-selected" : ""}${item.snoozed ? " is-snoozed" : ""}">
+      ${selectable ? `<input type="checkbox" class="inbox-row-check" data-inbox-check="${escapeHtml(item.id)}" ${checked ? "checked" : ""} aria-label="Select ${escapeHtml(item.title)}" />` : '<span class="inbox-row-check-spacer" aria-hidden="true"></span>'}
+      <button type="button" class="inbox-row-main" data-inbox-select="${escapeHtml(item.id)}" ${selected ? 'aria-current="true"' : ""}>
+        <span class="inbox-row-top">
+          <span class="inbox-sev sev-${escapeHtml(item.severity.toLowerCase())}">${escapeHtml(sev)}</span>
+          <span class="inbox-row-kind">${escapeHtml(kind)}</span>
+          <span class="inbox-row-age" title="Waiting since ${escapeHtml(item.waiting_since ? new Date(item.waiting_since).toLocaleString() : "unknown")}">${escapeHtml(inboxItemAge(item))}</span>
+        </span>
+        <span class="inbox-row-title">${escapeHtml(item.title)}</span>
+        ${meta ? `<span class="inbox-row-meta">${meta}</span>` : ""}
+      </button>
+    </li>`;
+}
+
+function renderInboxList() {
+  const list = document.getElementById("inboxList");
+  if (!list) return;
+  if (!inboxState.data) {
+    if (inboxState.error) {
+      showLoadError(list, { title: "Couldn't load your inbox", error: inboxState.error, retry: () => loadInbox() });
+    } else {
+      list.innerHTML = '<p class="inbox-loading">Loading…</p>';
+    }
+    return;
+  }
+  const items = inboxItems();
+  const active = items.filter((i) => !i.snoozed);
+  const snoozed = items.filter((i) => i.snoozed);
+  const focusedId = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.inboxSelect || null : null;
+
+  let html = "";
+  if (inboxState.error) {
+    html += `<div class="inbox-stale" role="alert">Couldn't refresh. These items may be out of date. <button type="button" class="btn btn-sm btn-secondary" data-inbox-act="refresh">Retry</button></div>`;
+  }
+  INBOX_GROUPS.forEach((g) => {
+    const rows = active.filter((i) => i.group === g.key);
+    if (!rows.length) return;
+    const st = inboxGroupStats(rows);
+    html += `
+      <section class="inbox-group" aria-labelledby="inboxGroup-${g.key}">
+        <h2 class="inbox-group-head" id="inboxGroup-${g.key}" title="${escapeHtml(g.hint)}">
+          <span class="inbox-group-label">${escapeHtml(g.label)}</span>
+          <span class="inbox-group-count">${st.count}</span>
+          ${st.oldest ? `<span class="inbox-group-oldest">oldest ${escapeHtml(st.oldest)}</span>` : ""}
+        </h2>
+        <ul class="inbox-rows">${rows.map((i) => renderInboxRow(i, true)).join("")}</ul>
+      </section>`;
+  });
+  if (!active.length) {
+    html += renderInboxEmpty();
+  }
+  if (snoozed.length) {
+    html += `
+      <details class="inbox-snoozed"${snoozed.some((i) => i.id === inboxState.selectedId) ? " open" : ""}>
+        <summary>Snoozed <span class="inbox-group-count">${snoozed.length}</span></summary>
+        <p class="inbox-snoozed-hint">Hidden from the count. Each one comes back if something about it changes.</p>
+        <ul class="inbox-rows">${snoozed.map((i) => renderInboxRow(i, true)).join("")}</ul>
+      </details>`;
+  }
+  list.innerHTML = html;
+  if (focusedId) list.querySelector(`[data-inbox-select="${CSS.escape(focusedId)}"]`)?.focus();
+}
+
+function renderInboxEmpty() {
+  const r = inboxState.data && inboxState.data.recent;
+  let summary = "";
+  if (r) {
+    const lines = [
+      [r.auto_applied, "change applied automatically", "changes applied automatically"],
+      [r.manually_applied, "change applied by hand", "changes applied by hand"],
+      [r.rejected, "change rejected", "changes rejected"],
+      [r.issues_closed, "issue closed", "issues closed"],
+    ].filter(([n]) => n > 0).map(([n, one, many]) => `<li><strong>${n}</strong> ${n === 1 ? one : many}</li>`);
+    const when = new Date(r.since).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    summary = `
+      <div class="inbox-recent">
+        <h3>Since you last looked <span class="inbox-recent-when">(${escapeHtml(when)})</span></h3>
+        ${lines.length ? `<ul>${lines.join("")}</ul>` : "<p>No changes were applied and no issues were closed.</p>"}
+      </div>`;
+  }
+  return `
+    <div class="inbox-empty">
+      <p class="inbox-empty-title">Nothing is waiting on you.</p>
+      <p class="inbox-empty-sub">New changes to approve and issues the fleet can't finish will appear here.</p>
+      ${summary}
+    </div>`;
+}
+
+function renderInboxBatchBar() {
+  const bar = document.getElementById("inboxBatchBar");
+  if (!bar) return;
+  const checked = [...inboxState.checked].map(inboxFind).filter(Boolean);
+  bar.hidden = checked.length === 0;
+  if (!checked.length) return;
+  const rejectable = checked.filter((i) => i.kind === "proposal_review");
+  const snoozable = checked.filter((i) => !i.snoozed);
+  const countEl = document.getElementById("inboxBatchCount");
+  if (countEl) countEl.textContent = `${checked.length} selected`;
+  const rej = document.getElementById("inboxBatchReject");
+  if (rej) {
+    rej.disabled = rejectable.length === 0;
+    rej.textContent = rejectable.length === checked.length ? `Reject ${rejectable.length}…` : `Reject ${rejectable.length} of ${checked.length}…`;
+    rej.title = rejectable.length === checked.length ? "" : "Only changes waiting for a decision can be rejected; other selected items are skipped.";
+  }
+  const snz = document.getElementById("inboxBatchSnooze");
+  if (snz) {
+    snz.disabled = snoozable.length === 0;
+    snz.textContent = `Snooze ${snoozable.length}`;
+  }
+}
+
+// --- Detail pane ---
+function inboxFacts(rows) {
+  const html = rows.filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("");
+  return html ? `<dl class="about-grid inbox-facts">${html}</dl>` : "";
+}
+
+function inboxActionButton(act, label, { variant = "secondary", key = "", title = "" } = {}) {
+  const kbd = key ? ` <kbd class="inbox-kbd" aria-hidden="true">${escapeHtml(key)}</kbd>` : "";
+  return `<button type="button" class="btn btn-${variant}" data-inbox-act="${act}"${key ? ` aria-keyshortcuts="${escapeHtml(key)}"` : ""}${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}${kbd}</button>`;
+}
+
+function renderInboxProposalBody(item) {
+  const p = item.proposal || {};
+  const manualType = !proposalHasExecutor(p);
+  let banner = "";
+  if (item.kind === "manual_apply") {
+    banner = `<div class="gt-apply-banner"><strong>Approved, apply manually.</strong> Nothing was changed in SecOps. Apply the diff below to <code>${escapeHtml(p.target_resource_id || "the target")}</code>, then mark it applied so the next patrol can verify it. If it shouldn't be applied after all, abandon it.</div>`;
+  } else if (manualType) {
+    banner = `<div class="gt-apply-banner"><strong>Manual apply.</strong> There is no automated write for ${escapeHtml(p.action_type || "this change type")}. Approving records the decision only; you apply the change in SecOps afterwards.</div>`;
+  }
+  const gates = getPreflightGates(p);
+  const gatesHtml = `<div class="gt-gate-list">${gates.map((g) => `
+      <div class="gt-gate ${g.ok ? "is-pass" : "is-missing"}">
+        <span class="gt-gate-status">${g.ok ? "✓ Passed" : "✗ Not verified"}</span>
+        <span class="gt-gate-label">${escapeHtml(g.label)}</span>
+        ${g.detail ? `<span class="gt-gate-detail">${escapeHtml(g.detail)}</span>` : ""}
+      </div>`).join("")}</div>`;
+  const diff = p.proposed_diff || "";
+  const stats = getDiffStats(diff);
+  return `
+    ${banner}
+    ${inboxFacts([
+      ["Target", p.target_resource_id],
+      ["Change type", p.action_type],
+      ["Proposed by", p.author],
+      ["Authority", APPROVAL_TIER_LABELS[p.required_tier] || p.required_tier],
+      ["Target check", describeBaseline(p)],
+      ["Linked issue", p.issue_id],
+      [item.kind === "manual_apply" ? "Approved" : "Proposed", item.waiting_since ? new Date(item.waiting_since).toLocaleString() : ""],
+      ["Approved by", item.kind === "manual_apply" ? p.merged_by : ""],
+    ])}
+    <h3 class="inbox-section-title">Why</h3>
+    <p class="inbox-rationale${p.rationale ? "" : " is-empty"}">${escapeHtml(p.rationale || "The agent didn't give a rationale.")}</p>
+    <h3 class="inbox-section-title">Preflight checks</h3>
+    ${gatesHtml}
+    <h3 class="inbox-section-title">Diff ${diff ? `<span class="inbox-diff-stats"><span class="is-add">+${stats.added}</span> <span class="is-del">−${stats.removed}</span></span>` : ""}</h3>
+    ${diff ? `<div class="diff-block inbox-diff">${formatUnifiedDiff(diff)}</div>` : '<p class="inbox-rationale is-empty">No diff attached to this proposal.</p>'}`;
+}
+
+function renderInboxIssueBody(item) {
+  const iss = item.issue || {};
+  const attempts = (iss.attempts || []).slice().reverse();
+  const attemptsHtml = attempts.length
+    ? `<ol class="inbox-attempts">${attempts.map((a) => `
+        <li>
+          <div class="inbox-attempt-head">
+            <span class="inbox-attempt-outcome">${escapeHtml(a.outcome || "Attempt")}</span>
+            <span class="inbox-attempt-actor">${escapeHtml(a.actor || "")}</span>
+            <span class="inbox-attempt-time">${a.timestamp ? escapeHtml(new Date(a.timestamp).toLocaleString()) : ""}</span>
+          </div>
+          ${a.notes ? `<p class="inbox-attempt-notes">${escapeHtml(a.notes)}</p>` : ""}
+        </li>`).join("")}</ol>`
+    : '<p class="inbox-rationale is-empty">No attempts recorded.</p>';
+  return `
+    ${inboxFacts([
+      ["Status", item.status_label],
+      ["Affected", item.target],
+      ["Issue type", iss.type],
+      ["Plane", iss.plane],
+      ["Last worked by", item.agent],
+      ["Attempts", iss.attempt_count],
+      ["Open change", iss.active_proposal_id],
+      ["Waiting since", item.waiting_since ? new Date(item.waiting_since).toLocaleString() : ""],
+    ])}
+    ${iss.description ? `<h3 class="inbox-section-title">Problem</h3><p class="inbox-rationale">${escapeHtml(iss.description)}</p>` : ""}
+    <h3 class="inbox-section-title">Recent attempts <span class="inbox-section-note">(newest first)</span></h3>
+    ${attemptsHtml}`;
+}
+
+function renderInboxDetail() {
+  const pane = document.getElementById("inboxDetail");
+  if (!pane) return;
+  const item = inboxFind(inboxState.selectedId);
+  if (!item) {
+    const hasItems = inboxOrderedItems().length > 0;
+    pane.innerHTML = hasItems
+      ? `<div class="inbox-detail-empty"><p>Select an item to see the evidence and act on it.</p><p class="inbox-detail-hint">Press <kbd class="inbox-kbd">j</kbd> / <kbd class="inbox-kbd">k</kbd> to move through the list, <kbd class="inbox-kbd">?</kbd> for all shortcuts.</p></div>`
+      : "";
+    return;
+  }
+  const sev = INBOX_SEVERITY_LABELS[item.severity] || item.severity;
+  const kind = item.kind === "issue_attention" ? (item.status_label || "Needs attention") : INBOX_KIND_LABELS[item.kind];
+  let actions = "";
+  if (item.kind === "proposal_review") {
+    const manual = !proposalHasExecutor(item.proposal);
+    actions = inboxActionButton("approve", manual ? "Approve (manual apply)…" : "Approve & apply…", { variant: "primary", key: "a" })
+      + inboxActionButton("reject", "Reject…", { variant: "danger", key: "r" });
+  } else if (item.kind === "manual_apply") {
+    actions = inboxActionButton("markApplied", "Mark applied…", { variant: "primary", key: "m" })
+      + inboxActionButton("abandon", "Abandon…", { variant: "danger", key: "b" });
+  } else {
+    actions = inboxActionButton("requeue", "Requeue for agents…", { variant: "primary", key: "q" })
+      + inboxActionButton("closeIssue", "Close issue…", { variant: "danger", key: "d", title: "Close without an agent fix" })
+      + inboxActionButton("history", "Full history", { key: "o" });
+  }
+  actions += inboxActionButton("chat", item.agent ? `Ask ${item.agent}` : "Ask the dispatcher", { key: "c" });
+  actions += item.snoozed
+    ? inboxActionButton("unsnooze", "Unsnooze", { key: "s" })
+    : inboxActionButton("snooze", "Snooze", { key: "s", title: "Hide from the count until something about it changes" });
+
+  const escalatedNote = item.escalated
+    ? `<p class="inbox-escalated-note">${escapeHtml(sev)} ${item.kind === "issue_attention" ? "severity" : "risk"}: review before anything else.</p>` : "";
+  const snoozedNote = item.snoozed
+    ? `<p class="inbox-snoozed-note">Snoozed${item.snoozed_at ? ` ${escapeHtml(new Date(item.snoozed_at).toLocaleString())}` : ""}. It returns to the list if something about it changes.</p>` : "";
+
+  pane.innerHTML = `
+    <article class="inbox-detail-card">
+      <header class="inbox-detail-head">
+        <div class="inbox-detail-tags">
+          <span class="inbox-sev sev-${escapeHtml(item.severity.toLowerCase())}">${escapeHtml(sev)}</span>
+          <span class="inbox-row-kind">${escapeHtml(kind)}</span>
+          <span class="inbox-detail-age">waiting ${escapeHtml(inboxItemAge(item))}</span>
+        </div>
+        <h2 class="inbox-detail-title">${escapeHtml(item.title)}</h2>
+        ${escalatedNote}${snoozedNote}
+      </header>
+      <div class="inbox-detail-body">
+        ${item.kind === "issue_attention" ? renderInboxIssueBody(item) : renderInboxProposalBody(item)}
+      </div>
+      <footer class="inbox-action-bar">${actions}</footer>
+    </article>`;
+}
+
+// --- Selection & navigation ---
+function inboxSelect(id, { focus = false, announceIt = false } = {}) {
+  inboxState.selectedId = id;
+  document.querySelectorAll("#inboxList .inbox-row").forEach((row) => {
+    const btn = row.querySelector("[data-inbox-select]");
+    const on = btn && btn.dataset.inboxSelect === id;
+    row.classList.toggle("is-selected", !!on);
+    if (btn) {
+      if (on) btn.setAttribute("aria-current", "true");
+      else btn.removeAttribute("aria-current");
+    }
+  });
+  const btn = document.querySelector(`#inboxList [data-inbox-select="${CSS.escape(id || "")}"]`);
+  if (btn) {
+    const details = btn.closest("details");
+    if (details && !details.open) details.open = true;
+    if (focus) btn.focus();
+    btn.scrollIntoView({ block: "nearest" });
+  }
+  renderInboxDetail();
+  const pane = document.getElementById("inboxDetail");
+  if (pane) pane.scrollTop = 0;
+  if (announceIt) {
+    const order = inboxOrderedItems();
+    const item = inboxFind(id);
+    if (item) announce(`${item.title}. ${order.indexOf(item) + 1} of ${order.length}.`);
+  }
+}
+
+function inboxMove(delta) {
+  const order = inboxOrderedItems();
+  if (!order.length) return;
+  const idx = order.findIndex((i) => i.id === inboxState.selectedId);
+  const next = idx === -1 ? (delta > 0 ? 0 : order.length - 1) : Math.min(order.length - 1, Math.max(0, idx + delta));
+  inboxSelect(order[next].id, { focus: true, announceIt: true });
+}
+
+// After acting, select whatever now sits in the acted-on item's slot. Snoozing
+// counts as leaving: the item drops to the Snoozed section, so move on.
+async function inboxAfterAction(prevId, { leaves = false } = {}) {
+  const before = inboxOrderedItems();
+  const prevIdx = before.findIndex((i) => i.id === prevId);
+  await loadInbox();
+  let after = inboxOrderedItems();
+  if (!leaves && after.some((i) => i.id === prevId)) {
+    inboxSelect(prevId, { focus: true });
+    return;
+  }
+  if (leaves) {
+    const activeLeft = after.filter((i) => !i.snoozed && i.id !== prevId);
+    if (activeLeft.length) after = activeLeft;
+  }
+  if (!after.length) {
+    inboxState.selectedId = null;
+    renderInbox();
+    announce("Inbox clear. Nothing is waiting on you.");
+    return;
+  }
+  const next = after[Math.min(Math.max(prevIdx, 0), after.length - 1)];
+  inboxSelect(next.id, { focus: true, announceIt: true });
+}
+
+async function inboxSetSnoozed(item, snoozed) {
+  const res = await fetch(`/api/gastown/escalations/${encodeURIComponent(item.snooze_key)}/ack`, snoozed
+    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acked_by: "secops-operator" }) }
+    : { method: "DELETE" });
+  if (!res.ok) throw new Error(await describeHttpError(res));
+}
+
+async function inboxRunAction(act, item) {
+  if (!item || inboxState.busy) return;
+  const p = item.proposal || {};
+  const iss = item.issue || {};
+  const allowed = {
+    proposal_review: ["approve", "reject"],
+    manual_apply: ["markApplied", "abandon"],
+    issue_attention: ["requeue", "closeIssue", "history"],
+  }[item.kind] || [];
+  const common = ["chat", "snooze", "unsnooze"];
+  if (!allowed.includes(act) && !common.includes(act)) return;
+
+  if (act === "chat") {
+    const handle = item.agent && item.agent.startsWith("@") ? item.agent : "@secops-dispatcher";
+    const ref = item.kind === "issue_attention" ? `issue ${iss.id}` : `proposal ${p.id}`;
+    await window.switchTopicAndChat("dm", handle, `Re ${ref} (${item.title}): `);
+    return;
+  }
+  if (act === "history") {
+    viewSocIssueDetail(iss.id);
+    return;
+  }
+
+  inboxState.busy = true;
+  let done = false;
+  try {
+    switch (act) {
+      case "approve": done = await handleApproveProposal(p.id); break;
+      case "reject": done = await handleRejectProposal(p.id); break;
+      case "markApplied": done = await handleMarkApplied(p.id); break;
+      case "abandon": done = await handleAbandonProposal(p.id); break;
+      case "requeue": done = await handleRequeueSocIssue(iss.id); break;
+      case "closeIssue": done = await handleCloseSocIssue(iss.id); break;
+      case "snooze":
+      case "unsnooze":
+        try {
+          await inboxSetSnoozed(item, act === "snooze");
+          showToast("info", act === "snooze" ? `Snoozed. It comes back if anything about it changes.` : "Back in your inbox.");
+          done = true;
+        } catch (err) {
+          showToast("error", `${act === "snooze" ? "Snooze" : "Unsnooze"} failed: ${friendlyErrorText(err)}`);
+        }
+        break;
+      default: break;
+    }
+  } finally {
+    inboxState.busy = false;
+  }
+  if (done) await inboxAfterAction(item.id, { leaves: act === "snooze" });
+  else document.querySelector(`#inboxList [data-inbox-select="${CSS.escape(item.id)}"]`)?.focus();
+}
+
+// --- Batch ---
+async function inboxBatchReject() {
+  const items = [...inboxState.checked].map(inboxFind).filter((i) => i && i.kind === "proposal_review");
+  if (!items.length) return;
+  const skipped = inboxState.checked.size - items.length;
+  const list = items.slice(0, 8).map((i) => `<li><code>${escapeHtml(i.proposal.id)}</code> ${escapeHtml(i.title)}</li>`).join("")
+    + (items.length > 8 ? `<li>…and ${items.length - 8} more</li>` : "");
+  const result = await openActionDialog({
+    title: `Reject ${items.length} change${items.length === 1 ? "" : "s"}`,
+    message: `Each one closes without applying anything. The same reason is sent to each authoring agent.${skipped ? ` ${skipped} selected item${skipped === 1 ? " isn't a change" : "s aren't changes"} waiting for a decision and will be skipped.` : ""}`,
+    confirmLabel: `Reject ${items.length}`,
+    variant: "danger",
+    bodyHtml: `<ul class="inbox-batch-list">${list}</ul>`,
+    fields: [{ name: "reason", label: "Rejection reason", type: "textarea", required: true, minLength: 5, placeholder: "e.g. Duplicate of an already-applied change." }],
+  });
+  if (!result) return;
+  const failed = [];
+  for (const i of items) {
+    try {
+      const res = await fetch(`/api/proposals/${encodeURIComponent(i.proposal.id)}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: result.reason, rejected_by: "secops-operator" }),
+      });
+      if (!res.ok) failed.push(`${i.proposal.id}: ${await describeHttpError(res)}`);
+      else inboxState.checked.delete(i.id);
+    } catch (err) {
+      failed.push(`${i.proposal.id}: ${friendlyErrorText(err)}`);
+    }
+  }
+  const ok = items.length - failed.length;
+  if (ok) showToast("info", `Rejected ${ok} change${ok === 1 ? "" : "s"}.`);
+  if (failed.length) showToast("error", `${failed.length} not rejected. ${failed.join("; ")}`);
+  await Promise.all([loadProposals(), loadGastownOverview()]);
+  await inboxAfterAction(inboxState.selectedId);
+}
+
+async function inboxBatchSnooze() {
+  const items = [...inboxState.checked].map(inboxFind).filter((i) => i && !i.snoozed);
+  if (!items.length) return;
+  let failed = 0;
+  for (const i of items) {
+    try {
+      await inboxSetSnoozed(i, true);
+      inboxState.checked.delete(i.id);
+    } catch (_) { failed += 1; }
+  }
+  const ok = items.length - failed;
+  if (ok) showToast("info", `Snoozed ${ok} item${ok === 1 ? "" : "s"}.`);
+  if (failed) showToast("error", `${failed} item${failed === 1 ? "" : "s"} couldn't be snoozed.`);
+  await inboxAfterAction(inboxState.selectedId, { leaves: items.some((i) => i.id === inboxState.selectedId) });
+}
+
+// --- Shortcuts ---
+const INBOX_SHORTCUTS = [
+  ["j / ↓", "Next item"],
+  ["k / ↑", "Previous item"],
+  ["x", "Select or deselect for a batch action"],
+  ["a", "Approve (changes waiting for a decision)"],
+  ["r", "Reject (changes waiting for a decision)"],
+  ["m", "Mark applied (approved changes)"],
+  ["b", "Abandon (approved changes)"],
+  ["q", "Requeue for agents (stuck issues)"],
+  ["d", "Close issue (stuck issues)"],
+  ["o", "Full issue history"],
+  ["c", "Ask the agent in a direct message"],
+  ["s", "Snooze or unsnooze"],
+  ["?", "Show these shortcuts"],
+];
+const INBOX_KEY_ACTIONS = { a: "approve", r: "reject", m: "markApplied", b: "abandon", q: "requeue", d: "closeIssue", o: "history", c: "chat" };
+
+function openInboxShortcuts() {
+  const rows = INBOX_SHORTCUTS.map(([k, v]) => `<dt><kbd class="inbox-kbd">${escapeHtml(k)}</kbd></dt><dd>${escapeHtml(v)}</dd>`).join("");
+  openActionDialog({
+    title: "Inbox keyboard shortcuts",
+    message: "Every change still opens a dialog asking for a reason. A single key press never applies anything.",
+    bodyHtml: `<dl class="about-grid">${rows}</dl>`,
+    confirmLabel: "Close",
+    showCancel: false,
+  });
+}
+
+function setupInbox() {
+  const view = document.getElementById("inboxView");
+  if (!view) return;
+  view.addEventListener("click", (e) => {
+    const t = e.target instanceof Element ? e.target : null;
+    if (!t) return;
+    const sel = t.closest("[data-inbox-select]");
+    if (sel) { inboxSelect(sel.dataset.inboxSelect); return; }
+    const actEl = t.closest("[data-inbox-act]");
+    if (actEl) {
+      if (actEl.dataset.inboxAct === "refresh") loadInbox();
+      else inboxRunAction(actEl.dataset.inboxAct, inboxFind(inboxState.selectedId));
+    }
+  });
+  view.addEventListener("change", (e) => {
+    const box = e.target instanceof Element ? e.target.closest("[data-inbox-check]") : null;
+    if (!box) return;
+    if (box.checked) inboxState.checked.add(box.dataset.inboxCheck);
+    else inboxState.checked.delete(box.dataset.inboxCheck);
+    renderInboxBatchBar();
+  });
+  document.getElementById("inboxRefreshBtn")?.addEventListener("click", () => loadInbox());
+  document.getElementById("inboxShortcutsBtn")?.addEventListener("click", openInboxShortcuts);
+  document.getElementById("inboxBatchReject")?.addEventListener("click", inboxBatchReject);
+  document.getElementById("inboxBatchSnooze")?.addEventListener("click", inboxBatchSnooze);
+  document.getElementById("inboxBatchClear")?.addEventListener("click", () => {
+    inboxState.checked.clear();
+    renderInboxList();
+    renderInboxBatchBar();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (state.currentView !== "inbox" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t instanceof Element && t.closest("input:not([type=checkbox]), textarea, select, [contenteditable=true]")) return;
+    if (anyModalOpen() || quickSwitcher.overlay) return;
+    const key = e.key;
+    const item = inboxFind(inboxState.selectedId);
+    // Arrows only move within the list, so they still scroll the detail pane.
+    const inList = t instanceof Element && !!t.closest("#inboxList");
+    if (key === "j" || (key === "ArrowDown" && inList)) { e.preventDefault(); inboxMove(1); }
+    else if (key === "k" || (key === "ArrowUp" && inList)) { e.preventDefault(); inboxMove(-1); }
+    else if (key === "?") { e.preventDefault(); openInboxShortcuts(); }
+    else if (key === "x" && item) {
+      e.preventDefault();
+      if (inboxState.checked.has(item.id)) inboxState.checked.delete(item.id);
+      else inboxState.checked.add(item.id);
+      const box = document.querySelector(`#inboxList [data-inbox-check="${CSS.escape(item.id)}"]`);
+      if (box) box.checked = inboxState.checked.has(item.id);
+      renderInboxBatchBar();
+    } else if (key === "s" && item) { e.preventDefault(); inboxRunAction(item.snoozed ? "unsnooze" : "snooze", item); }
+    else if (INBOX_KEY_ACTIONS[key] && item) { e.preventDefault(); inboxRunAction(INBOX_KEY_ACTIONS[key], item); }
+  });
+
+  // Offline: the list may be stale; the live banner explains, the timestamp greys out.
+  window.addEventListener("online", () => loadInbox({ countOnly: state.currentView !== "inbox" }));
 }

@@ -12,8 +12,8 @@ A second agent reviewed this plan and agreed with S1–S5. Checking the code tur
 | N1 | Running `open_issue` again on an existing issue overwrites it: status goes back to AVAILABLE and `attempts` and the lease are wiped. Every parser patrol resets `NEEDS_HUMAN` and the retry budget, so escalation never sticks. Fix: update in place (refresh observed state and evidence; keep status, attempts, lease; reopen only if CLOSED) | `lifecycle.open_issue` / `work_queue.publish_issue` | Done |
 | S1 | Plane map: `detections`, `detection_rules` → `detection`; `soar_automation` → `automation`; `identity_governance`, `configuration_governance` → `governance`; `infrastructure` → `external` | `base_adk_agent.get_capability_profile` | Done |
 | S2 | Router no longer creates `SOC-AUTO-*` issues. OPERATIONAL without a linked issue = record the observation only (the to-do already exists). URGENT = alert only. Update `test_knowledge_layer` (asserts at 189 and 214) | `communication_router.dispatch` | Done |
-| A5 | Cloud status becomes information only: remove the `upstream_cloud_disruption` issue, keep the to-do and chat alert, close the existing `issue_upstream_cloud_status` once | `fleet_scheduler` cloud branch | Todo |
-| N2 | Parser auto-close only runs when the issue is APPLIED/VALIDATING. If the problem clears while the issue is AVAILABLE or NEEDS_HUMAN, the issue stays open and an agent can still claim it. Close those too, as "resolved without a change" | `fleet_scheduler` parser branch | Todo |
+| A5 | Cloud status becomes information only: remove the `upstream_cloud_disruption` issue, keep the to-do and chat alert, close the existing `issue_upstream_cloud_status` once | `fleet_scheduler` cloud branch | Done |
+| N2 | Parser auto-close only runs when the issue is APPLIED/VALIDATING. If the problem clears while the issue is AVAILABLE or NEEDS_HUMAN, the issue stays open and an agent can still claim it. Close those too, as "resolved without a change" | `fleet_scheduler` parser branch | Done |
 | N3 | Merge does nothing for `PATCH_PARSER_CBN`, `REMEDIATE_FEED`, `CREATE_FINDINGS_REFINEMENT`: they fall through to `APPLIED_CUSTOM` and nothing is written to production, yet the proposal shows MERGED and the issue APPLIED. Fix: connect `CREATE_FINDINGS_REFINEMENT` → `curated_detections.refinements.create`. For action types with no executor, record `MERGED_MANUAL_APPLY_REQUIRED`, leave the issue open, and show "Apply manually" in the UI | `proposal_manager.approve_and_merge` | Todo |
 | S5 | Test: every `requires_capabilities` set the scheduler emits must be met by at least one agent profile in that issue's plane | `tests/` | Todo |
 
@@ -25,6 +25,8 @@ A second agent reviewed this plan and agreed with S1–S5. Checking the code tur
 - S2 fix: don't let the router create issues at all, rather than gating on "requests tracking + has playbook". Scheduler branches own issue creation.
 - `infrastructure` → `external` (the enum value exists), not `platform`. This mostly stops mattering once A5 lands.
 - The ~125 orphaned `SOC-AUTO` issues were cleaned up earlier; 1 remains in `.state/work_queue`.
+
+**Found during N2 (fixed):** the parser patrol's APPLIED/VALIDATING close path built `VerificationProof` with fields that don't exist (`telemetry_proof_query`, `metric_before`, `success`). The exception was caught and logged, so applied parser fixes were **never** verified and closed by the patrol. Now uses the real fields (`verification_id`, `change_id`, `metrics_before/after`, `summary`).
 
 ## How work gets picked up today
 Patrol findings take one of two paths:
@@ -45,7 +47,7 @@ Patrol findings take one of two paths:
 | A2 | Noisy rule → issue + playbook → `@detection-tuning-agent` (`submit_tuning_proposal`); depends on S1 | 2 Quick wins | Todo |
 | A3 | Broken or decayed rule → issue + playbook → `@detection-decay-agent` (`submit_decay_proposal`); depends on S1 | 2 Quick wins | Todo |
 | A4 | Rule performance: add a `@rule-troubleshooter` patrol → issue → `@yaral-optimizer` (`submit_rule_proposal`) | 2 Quick wins | Todo |
-| A5 | Cloud status: make it information only (no issue), or fix the `cloud.audit_status` capability and the `data`/`platform` plane mismatch | 3 Cloud status | Todo |
+| A5 | Cloud status: make it information only (no issue), or fix the `cloud.audit_status` capability and the `data`/`platform` plane mismatch | 3 Cloud status | Done |
 | A6 | Findings agents can only report (IAM drift, posture drift, playbook decay, timestamp skew): per finding, add a proposal tool or send straight to Needs Attention | 4 Report-only | Todo |
 | A7 | Shadowed curated rules: give `@rule-conflict-agent` a proposal tool or send to Needs Attention | 4 Report-only | Todo |
 | A8 | Wire `@logjammer-agent` (`verify_proposal_with_replay`) into proposal validation before approval | 4 Report-only | Todo |

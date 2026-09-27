@@ -16,7 +16,7 @@ from agents.core.communication_router import CommunicationRouter, get_communicat
 from agents.core.evidence_store import EvidenceFabricStore, normalize_doc_id
 from agents.core.issue_worker import IssueWorker, autonomous_workers_enabled
 from agents.core.knowledge_store import BaseKnowledgeStore, get_knowledge_store
-from agents.core.lifecycle import SOCLifecycleManager
+from agents.core.lifecycle import SELF_RESOLVABLE_STATUSES, SOCLifecycleManager
 from agents.core.work_queue import BaseWorkQueue
 from engine.domain import (
     AuthorityTier,
@@ -36,6 +36,8 @@ from engine.domain import (
 
 
 logger = logging.getLogger(__name__)
+
+LEGACY_CLOUD_STATUS_ISSUE_ID = "issue_upstream_cloud_status"
 
 
 DEFAULT_AGENT_SCHEDULES: Dict[str, Dict[str, Any]] = {
@@ -422,14 +424,24 @@ class FleetScheduler:
                         if self.lifecycle_manager:
                             try:
                                 existing = self.lifecycle_manager.work_queue.get_issue(issue_id)
-                                if existing and existing.status in ("APPLIED", "VALIDATING"):
+                                if existing and existing.status in SELF_RESOLVABLE_STATUSES:
+                                    self.lifecycle_manager.resolve_without_change(
+                                        issue_id=issue_id,
+                                        actor="deacon.parser_patrol",
+                                        reason=f"Parser patrol observed 0 drops and healthy normalization on {log_type} before any change was made.",
+                                        commit=True,
+                                    )
+                                elif existing and existing.status in ("APPLIED", "VALIDATING"):
                                     verification = VerificationProof(
+                                        verification_id=f"verify-{issue_id}-{start_time}",
+                                        change_id=existing.applied_change_id or "",
+                                        issue_id=issue_id,
                                         verifier_actor="deacon.parser_patrol",
-                                        telemetry_proof_query=f"parser.audit_health(log_type='{log_type}')",
-                                        metric_before=str(existing.problem.observed_state),
-                                        metric_after="status=HEALTHY, drop_reason=None, unparsed=0",
                                         verified_at=datetime.now(timezone.utc).isoformat(),
-                                        success=True,
+                                        cleared=True,
+                                        metrics_before=dict(existing.problem.observed_state or {}),
+                                        metrics_after={"status": "HEALTHY", "drop_reason_code": None, "unparsed_count": 0},
+                                        summary=f"parser.audit_health(log_type='{log_type}') reported 0 drops.",
                                     )
                                     self.lifecycle_manager.verify_and_close(
                                         issue_id=issue_id,
@@ -628,6 +640,18 @@ class FleetScheduler:
                 active_incidents = result.get("active_incidents", [])
                 overall_health = result.get("overall_health", "HEALTHY")
                 todo_id = "todo_cloud_status_active"
+                # Upstream incidents are information only: the fleet can't fix Google Cloud.
+                # Retire the issue earlier versions opened (no-op once it is closed).
+                if self.lifecycle_manager and hasattr(self.lifecycle_manager, "close_issue_manually"):
+                    try:
+                        self.lifecycle_manager.close_issue_manually(
+                            issue_id=LEGACY_CLOUD_STATUS_ISSUE_ID,
+                            operator="deacon.cloud_status_patrol",
+                            reason="Cloud status is now information only (to-do and chat alert); no agent can act on it.",
+                            commit=False,
+                        )
+                    except Exception as ex:
+                        logger.debug("Legacy cloud status issue not retired: %s", ex)
                 if active_incidents:
                     severities = [i.get("severity", "medium") for i in active_incidents]
                     is_critical = "high" in severities or overall_health == "OUTAGE"
@@ -648,67 +672,11 @@ class FleetScheduler:
                     }
                     self.evidence_store.upsert_todo(todo_id, task)
                     created_bead_ids.append(todo_id)
-
-                    # Also open / update Gas Town SOCIssue if lifecycle_manager is available
-                    if self.lifecycle_manager and hasattr(self.lifecycle_manager, "open_issue"):
-                        try:
-                            sev = IssueSeverity.CRITICAL.value if is_critical else IssueSeverity.HIGH.value
-                            cloud_issue = SOCIssue(
-                                id="issue_upstream_cloud_status",
-                                type="upstream_cloud_disruption",
-                                plane=OperationalPlane.DATA.value,
-                                severity=sev,
-                                problem=IssueProblem(
-                                    title=f"Upstream Google Cloud Disruption: {active_incidents[0].get('external_desc', 'Service Incident')}",
-                                    observed_state={
-                                        "active_incident_count": len(active_incidents),
-                                        "incident_descriptions": desc_snippets,
-                                        "public_url": active_incidents[0].get("public_url"),
-                                    },
-                                    desired_state={
-                                        "active_incident_count": 0,
-                                        "status": "HEALTHY",
-                                    },
-                                    affected_objects=[inc.get("service_name", "gcp") for inc in active_incidents],
-                                ),
-                                routing=IssueRouting(
-                                    requires_capabilities={
-                                        "cloud.audit_status": 1,
-                                    },
-                                ),
-                                governance=IssueGovernance(
-                                    required_authority_tier=AuthorityTier.TIER_2_PEER_REVIEW.value,
-                                    validation_criteria=[
-                                        "cloud_status == HEALTHY",
-                                        "active_incidents == 0",
-                                    ],
-                                ),
-                            )
-                            self.lifecycle_manager.open_issue(
-                                issue=cloud_issue,
-                                deacon_id="deacon.cloud_status_patrol",
-                                commit=False,
-                            )
-                        except Exception as ex:
-                            logger.warning("Could not open SOCIssue for cloud status: %s", ex)
                 else:
                     self.evidence_store.resolve_todo(
                         todo_id,
                         reason="Deacon status patrol observed 0 active Google Cloud disruptions (HEALTHY).",
                     )
-                    if self.lifecycle_manager and hasattr(self.lifecycle_manager, "verify_and_close"):
-                        try:
-                            proof = VerificationProof(
-                                verifier_actor="deacon.cloud_status_patrol",
-                                telemetry_proof_query="cloud.audit_status()",
-                                metric_before="active_incidents > 0",
-                                metric_after="active_incidents=0, status=HEALTHY",
-                                verified_at=start_time,
-                                success=True,
-                            )
-                            self.lifecycle_manager.verify_and_close("issue_upstream_cloud_status", proof)
-                        except Exception:
-                            pass
 
         except Exception as e:
             logger.error("Failed to auto-create patrol beads for %s: %s", handle, e)

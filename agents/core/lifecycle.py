@@ -32,6 +32,14 @@ from agents.core.work_queue import (
 
 logger = logging.getLogger(__name__)
 
+# Statuses where no agent holds the issue and no change has been made yet, so a patrol
+# that sees the problem gone can simply close it.
+SELF_RESOLVABLE_STATUSES = frozenset({
+    IssueLifecycleStatus.OBSERVED.value,
+    IssueLifecycleStatus.QUALIFIED.value,
+    IssueLifecycleStatus.AVAILABLE.value,
+}) | ATTENTION_STATUSES
+
 
 class SOCLifecycleManager:
     """Orchestrates issue lifecycle state transitions across Firestore and Git."""
@@ -281,6 +289,40 @@ class SOCLifecycleManager:
             commit=commit,
         )
         logger.info("Successfully verified and closed issue %s", issue_id)
+        return True
+
+    def resolve_without_change(
+        self,
+        issue_id: str,
+        actor: str,
+        reason: str,
+        commit: bool = True,
+    ) -> bool:
+        """Closes an unworked issue whose problem cleared on its own (no change was made).
+
+        Only applies while nobody is working the issue: waiting in the pool or waiting on
+        a human. Claimed/in-flight issues and issues with an applied change are left alone
+        (the latter go through ``verify_and_close``).
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status not in SELF_RESOLVABLE_STATUSES:
+            return False
+        previous = issue.status
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.CLOSED.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="RESOLVED_WITHOUT_CHANGE",
+            actor=actor,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+            details={"previous_status": previous, "reason": reason},
+            commit=commit,
+        )
+        logger.info("%s closed %s without a change (was %s)", actor, issue_id, previous)
         return True
 
     # --- Operator interventions on stuck issues ---------------------------

@@ -371,31 +371,38 @@ class TestFleetScheduler(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPatrolIssueRouting(unittest.IsolatedAsyncioTestCase):
-    """An all-clear patrol must not open a SOC issue (it clutters Actions > Triage)."""
+    """Patrols never get issues fabricated by the router.
 
-    async def test_healthy_patrol_opens_no_issue_but_findings_do(self):
+    An all-clear patrol raises nothing. A patrol with findings raises its to-do; issues
+    come only from scheduler branches that build a routed issue (parser, ...), and the
+    feed patrol has none yet, so no SOC-AUTO issue may appear.
+    """
+
+    async def test_healthy_patrol_raises_nothing_findings_raise_todo_only(self):
         class _Healthy(PatrolAgentFixture):
             def audit_feeds(self, lookback_days: int = 7):
                 return {"status": "SUCCESS", "summary": {"total_feeds_audited": 4, "healthy_count": 4,
                         "irregular_count": 0, "failed_count": 0, "high_latency_count": 0,
                         "quota_rejections_detected": False}, "findings": [], "widget": None}
 
-        for agent_cls, expect_issue in ((_Healthy, False), (PatrolAgentFixture, True)):
+        for agent_cls, expect_todo in ((_Healthy, False), (PatrolAgentFixture, True)):
             with tempfile.TemporaryDirectory() as tmpdir:
                 root_dir = Path(tmpdir)
                 chat_store = ChatStore(root_dir=root_dir)
                 router = _isolated_router(root_dir, chat_store)
+                evidence = LocalFileEvidenceStore(root_dir=root_dir)
                 scheduler = FleetScheduler(
                     fleet={"@feed-agent": agent_cls("Feed Health Agent", "@feed-agent")},
-                    evidence_store=LocalFileEvidenceStore(root_dir=root_dir),
+                    evidence_store=evidence,
                     chat_store=chat_store,
                     communication_router=router,
                     knowledge_store=LocalKnowledgeStore(root_dir=str(root_dir)),
                 )
                 res = await scheduler.trigger_run_now("@feed-agent")
                 self.assertEqual(res["status"], "SUCCESS")
-                issues = router.work_queue.list_issues(limit=50)
-                self.assertEqual(bool(issues), expect_issue, agent_cls.__name__)
+                self.assertEqual(router.work_queue.list_issues(limit=50), [], agent_cls.__name__)
+                feed_todos = [t for t in evidence.list_todos() if str(t.get("todo_id", "")).startswith("todo_feed_")]
+                self.assertEqual(bool(feed_todos), expect_todo, agent_cls.__name__)
 
 if __name__ == "__main__":
     unittest.main()

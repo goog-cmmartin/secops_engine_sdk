@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from agents.core.work_queue import OPERATOR_REQUEUED_OUTCOME
+from agents.core.work_queue import OPERATOR_REQUEUED_OUTCOME, REOPENED_OUTCOME
 from engine.domain import IssueLifecycleStatus, SOCIssue
 
 logger = logging.getLogger(__name__)
@@ -96,10 +96,10 @@ def _parse_ts(value: Any) -> Optional[datetime]:
 
 
 def _attempts_since_requeue(issue: SOCIssue) -> List[Dict[str, Any]]:
-    """Attempts after the most recent operator requeue (the current retry budget window)."""
+    """Attempts after the most recent operator requeue or reopen (the current retry budget window)."""
     attempts = [a for a in issue.attempts if isinstance(a, dict)]
     for idx in range(len(attempts) - 1, -1, -1):
-        if attempts[idx].get("outcome") == OPERATOR_REQUEUED_OUTCOME:
+        if attempts[idx].get("outcome") in (OPERATOR_REQUEUED_OUTCOME, REOPENED_OUTCOME):
             return attempts[idx + 1:]
     return attempts
 

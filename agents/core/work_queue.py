@@ -47,6 +47,8 @@ RECLAIMABLE_STATUSES = frozenset({
 LEASE_EXPIRED_OUTCOME = "LEASE_EXPIRED"
 # Recorded when an operator returns a stuck issue to the pool; resets the retry budget.
 OPERATOR_REQUEUED_OUTCOME = "OPERATOR_REQUEUED"
+# Recorded when a patrol re-observes a problem on a CLOSED issue; also starts a fresh retry budget.
+REOPENED_OUTCOME = "REOPENED"
 
 # Dead-end states that no worker will pick up again: an operator has to act.
 ATTENTION_STATUSES = frozenset({
@@ -88,6 +90,48 @@ def _expiry_attempt(issue: SOCIssue, now: datetime) -> Dict[str, Any]:
     }
 
 
+def merge_reobserved_issue(existing: SOCIssue, fresh: SOCIssue, actor: str = "") -> Tuple[SOCIssue, bool]:
+    """Folds a fresh patrol observation into an existing issue without resetting its lifecycle.
+
+    The patrol owns the problem definition (what was observed, how severe, which
+    capabilities and authority it needs), so those fields are refreshed. The work
+    queue owns progress (status, lease, attempts, proposal/change pointers), so
+    those are kept. A CLOSED issue is reopened: the problem came back.
+
+    Returns ``(merged_issue, reopened)``.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    existing.problem = fresh.problem
+    existing.severity = fresh.severity
+    existing.confidence = fresh.confidence
+    existing.priority_score = fresh.priority_score
+    existing.routing.requires_capabilities = dict(fresh.routing.requires_capabilities)
+    existing.governance = fresh.governance
+    if fresh.source and fresh.source.deacon_id:
+        existing.source = fresh.source
+    existing.updated_at = now
+
+    reopened = existing.status == IssueLifecycleStatus.CLOSED.value
+    if reopened:
+        if existing.lease:
+            if not isinstance(existing.references, dict):
+                existing.references = {}
+            existing.references["lease_generation"] = existing.lease.generation
+        existing.lease = None
+        existing.status = IssueLifecycleStatus.AVAILABLE.value
+        existing.closed_at = None
+        existing.active_proposal_id = None
+        existing.routing.claimed_by = None
+        existing.routing.claim_timestamp = None
+        existing.attempts.append({
+            "actor": actor or "patrol",
+            "outcome": REOPENED_OUTCOME,
+            "timestamp": now,
+            "notes": "Problem observed again after the issue was closed.",
+        })
+    return existing, reopened
+
+
 class BaseWorkQueue(ABC):
     """Abstract interface for the SOC Operating System Work Queue."""
 
@@ -99,6 +143,22 @@ class BaseWorkQueue(ABC):
     def create_issue(self, issue: SOCIssue) -> str:
         """Alias for publish_issue."""
         return self.publish_issue(issue)
+
+    def upsert_observed_issue(self, issue: SOCIssue, actor: str = "") -> Tuple[SOCIssue, str]:
+        """Publishes a newly observed issue, or refreshes an existing one in place.
+
+        Returns ``(stored_issue, outcome)`` where outcome is ``"created"``,
+        ``"refreshed"`` or ``"reopened"``. Backends override this to make the
+        read-modify-write atomic.
+        """
+        existing = self.get_issue(issue.id)
+        if existing is None:
+            issue.status = IssueLifecycleStatus.AVAILABLE.value
+            issue.id = self.publish_issue(issue)
+            return issue, "created"
+        merged, reopened = merge_reobserved_issue(existing, issue, actor=actor)
+        merged.id = self.publish_issue(merged)
+        return merged, "reopened" if reopened else "refreshed"
 
 
     @abstractmethod
@@ -233,6 +293,10 @@ class LocalWorkQueue(BaseWorkQueue):
                 json.dump(issue.to_dict(), f, indent=2)
             logger.info("Published issue %s to LocalWorkQueue (status: %s)", issue.id, issue.status)
             return issue.id
+
+    def upsert_observed_issue(self, issue: SOCIssue, actor: str = "") -> Tuple[SOCIssue, str]:
+        with self._lock:
+            return super().upsert_observed_issue(issue, actor=actor)
 
 
     def get_issue(self, issue_id: str) -> Optional[SOCIssue]:
@@ -535,6 +599,30 @@ class FirestoreWorkQueue(BaseWorkQueue):
         self.issues_col.document(clean_id).set(payload)
         logger.info("Published issue %s to FirestoreWorkQueue (status: %s)", clean_id, issue.status)
         return clean_id
+
+    def upsert_observed_issue(self, issue: SOCIssue, actor: str = "") -> Tuple[SOCIssue, str]:
+        from google.cloud import firestore
+
+        clean_id = normalize_doc_id(issue.id)
+        issue.id = clean_id
+        doc_ref = self.issues_col.document(clean_id)
+
+        @firestore.transactional
+        def _txn_upsert(transaction: Any) -> Tuple[SOCIssue, str]:
+            snapshot = doc_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                issue.status = IssueLifecycleStatus.AVAILABLE.value
+                transaction.set(doc_ref, sanitize_for_firestore(issue.to_dict()))
+                return issue, "created"
+            existing = SOCIssue.from_dict(snapshot.to_dict() or {})
+            merged, reopened = merge_reobserved_issue(existing, issue, actor=actor)
+            merged.id = clean_id
+            transaction.set(doc_ref, sanitize_for_firestore(merged.to_dict()))
+            return merged, "reopened" if reopened else "refreshed"
+
+        stored, outcome = _txn_upsert(self.db.transaction())
+        logger.info("Upserted issue %s in FirestoreWorkQueue (%s, status: %s)", clean_id, outcome, stored.status)
+        return stored, outcome
 
 
     def get_issue(self, issue_id: str) -> Optional[SOCIssue]:

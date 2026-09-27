@@ -53,24 +53,43 @@ class SOCLifecycleManager:
         evidence_files: Optional[Dict[str, Any]] = None,
         commit: bool = True,
     ) -> SOCIssue:
-        """Opens a new issue, publishing to the work queue and materializing to Git."""
+        """Opens an issue, or refreshes it if the patrol has already opened it.
+
+        Patrols re-run on a schedule and re-emit the same issue ID while the problem
+        persists. Re-opening must not reset progress: status, lease, attempts and the
+        retry budget are kept (see ``merge_reobserved_issue``). Only a new issue is
+        materialized as OBSERVED; a CLOSED issue that comes back gets a REOPENED event;
+        a plain refresh writes nothing to Git.
+        """
         if deacon_id:
             if not issue.source:
                 issue.source = IssueSource(deacon_id=deacon_id)
             else:
                 issue.source.deacon_id = deacon_id
-        issue.status = IssueLifecycleStatus.AVAILABLE.value
-        clean_id = self.work_queue.publish_issue(issue)
-        issue.id = clean_id
+        actor = deacon_id or (issue.source.deacon_id if issue.source else "") or "sensing_deacon"
+        stored, outcome = self.work_queue.upsert_observed_issue(issue, actor=actor)
 
-        # Durability Boundary 1: ISSUE OPENED
-        self.materializer.materialize_issue_opened(
-            issue=issue,
-            evidence_files=evidence_files,
-            commit=commit,
-        )
-        logger.info("Opened SOC issue: %s (%s)", issue.id, issue.problem.title)
-        return issue
+        if outcome == "created":
+            # Durability Boundary 1: ISSUE OPENED
+            self.materializer.materialize_issue_opened(
+                issue=stored,
+                evidence_files=evidence_files,
+                commit=commit,
+            )
+            logger.info("Opened SOC issue: %s (%s)", stored.id, stored.problem.title)
+        elif outcome == "reopened":
+            self.materializer.materialize_operator_action(
+                issue_id=stored.id,
+                transition_type="REOPENED",
+                actor=actor,
+                new_status=stored.status,
+                details={"observed_state": stored.problem.observed_state},
+                commit=commit,
+            )
+            logger.info("Reopened SOC issue: %s (%s)", stored.id, stored.problem.title)
+        else:
+            logger.debug("Refreshed SOC issue %s (status %s kept)", stored.id, stored.status)
+        return stored
 
     def find_work(
         self,

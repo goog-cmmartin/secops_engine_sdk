@@ -2,28 +2,21 @@
 
 Enforces the operational communication contract:
 - URGENT: Real-time immediate alerts (Slack webhook / urgent stream)
-- OPERATIONAL: Issues created/updated in the work queue (Gas Town Git ledger)
+- OPERATIONAL: Observations recorded and attached to linked work-queue issues (never creates issues)
 - INFORMATIONAL: Buffered into the SOC Knowledge Store for the next shift briefing
 
 Prevents autonomous agents from uncoordinated direct messaging and chat channel spam.
 """
 
-from datetime import datetime, timezone
 import json
 import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
-import uuid
 
 from engine.domain import (
     CommunicationClass,
     CommunicationPolicy,
-    IssueLifecycleStatus,
-    IssueProblem,
-    IssueSeverity,
-    IssueSource,
     Observation,
-    OperationalPlane,
     SOCIssue,
 )
 from agents.core.knowledge_store import BaseKnowledgeStore, get_knowledge_store
@@ -55,24 +48,6 @@ class CommunicationRouter:
         self.chat_store = chat_store
         self.slack_webhook_url = slack_webhook_url or os.environ.get("SLACK_WEBHOOK_URL")
         self._urgent_alerts_log: List[Dict[str, Any]] = []
-
-    def _create_issue_for_observation(self, observation: Observation, severity: str) -> SOCIssue:
-        now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        rnd = uuid.uuid4().hex[:6]
-        subj = observation.subject.id
-        title = f"{subj}: {observation.predicate}"
-        issue = SOCIssue(
-            id=f"SOC-AUTO-{now_str}-{rnd}",
-            type=observation.predicate,
-            severity=severity,
-            source=IssueSource(deacon_id=observation.observed_by.agent),
-            problem=IssueProblem(
-                title=title,
-                observed_state=str(observation.value),
-                desired_state="NOMINAL",
-            ),
-        )
-        return self.lifecycle_manager.open_issue(issue, deacon_id=observation.observed_by.agent)
 
     def dispatch(
         self,
@@ -107,20 +82,20 @@ class CommunicationRouter:
             result["action_taken"].append("URGENT_ALERT_DISPATCHED")
             result["alert_payload"] = alert_payload
 
-            # Also ensure an issue is opened if not already existing
+            # Issue creation is owned by the scheduler's patrol branches, which build
+            # properly-routed issues with stable IDs. The router only links.
             if linked_issue:
                 issue = self.lifecycle_manager.open_issue(linked_issue, deacon_id=observation.observed_by.agent)
                 observation.issue_id = issue.id
                 result["issue_id"] = issue.id
                 result["action_taken"].append(f"SOC_ISSUE_OPENED_{issue.id}")
-            elif not observation.issue_id:
-                issue = self._create_issue_for_observation(observation, severity=IssueSeverity.CRITICAL.value)
-                observation.issue_id = issue.id
-                result["issue_id"] = issue.id
-                result["action_taken"].append(f"SOC_ISSUE_OPENED_{issue.id}")
+            elif observation.issue_id:
+                result["issue_id"] = observation.issue_id
 
         elif c_class == CommunicationClass.OPERATIONAL.value:
-            # OPERATIONAL: Register in Work Queue / Git ledger, zero Slack noise
+            # OPERATIONAL: zero Slack noise. Attach to an issue when one is known;
+            # otherwise the observation is recorded only (the patrol has already
+            # raised a to-do / issue for anything actionable).
             if linked_issue and not observation.issue_id:
                 issue = self.lifecycle_manager.open_issue(linked_issue, deacon_id=observation.observed_by.agent)
                 observation.issue_id = issue.id
@@ -130,10 +105,7 @@ class CommunicationRouter:
                 result["issue_id"] = observation.issue_id
                 result["action_taken"].append(f"OBSERVATION_ATTACHED_TO_{observation.issue_id}")
             else:
-                issue = self._create_issue_for_observation(observation, severity=IssueSeverity.MEDIUM.value)
-                observation.issue_id = issue.id
-                result["issue_id"] = issue.id
-                result["action_taken"].append(f"SOC_ISSUE_OPENED_{issue.id}")
+                result["action_taken"].append("OBSERVATION_RECORDED")
 
         else:
             # INFORMATIONAL: Buffered into next briefing, zero chat/queue noise

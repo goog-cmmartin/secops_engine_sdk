@@ -186,12 +186,29 @@ class KnowledgeLayerTest(unittest.TestCase):
 
         res = self.router.dispatch(obs)
         self.assertEqual(res["routing_class"], "operational")
-        self.assertIsNotNone(res["issue_id"])
+        # The router records the observation but never creates issues on its own:
+        # patrol branches own issue creation (stable IDs, real capability routing).
+        self.assertIsNone(res["issue_id"])
+        self.assertIn("OBSERVATION_RECORDED", res["action_taken"])
+        self.assertEqual(len(self.work_queue.list_issues()), 0)
+        self.assertEqual(len(self.knowledge_store.list_observations(subject_id="cisco_asa")), 1)
 
-        # Issue created in work queue
+    def test_communication_router_operational_links_given_issue(self):
+        obs = Observation(
+            subject=SubjectRef(type="parser", id="cisco_asa"),
+            predicate="error_rate_threshold",
+            value={"error_pct": 0.15},
+            observed_by=ObserverRef(agent="@parser-doctor", deacon="deacon_parser_01"),
+            policy=CommunicationPolicy(routing_class=CommunicationClass.OPERATIONAL),
+        )
+        linked = SOCIssue(
+            id="SOC-DATA-PARSER-CISCO_ASA",
+            type="parser_drop_spike",
+            problem=IssueProblem(title="Drops on cisco_asa"),
+        )
+        res = self.router.dispatch(obs, linked_issue=linked)
+        self.assertEqual(res["issue_id"], "SOC-DATA-PARSER-CISCO_ASA")
         issue = self.work_queue.get_issue(res["issue_id"])
-        self.assertIsNotNone(issue)
-        self.assertEqual(issue.problem.title, "cisco_asa: error_rate_threshold")
         self.assertEqual(issue.status, IssueLifecycleStatus.AVAILABLE.value)
 
     def test_communication_router_urgent(self):
@@ -211,12 +228,9 @@ class KnowledgeLayerTest(unittest.TestCase):
         self.assertTrue(res["published_to_chat"])
         self.assertIsNotNone(res["urgent_alert_card"])
         self.assertEqual(res["urgent_alert_card"]["type"], "urgent_alert_card")
-        self.assertIsNotNone(res["issue_id"])
-
-        # Issue created in work queue with CRITICAL severity
-        issue = self.work_queue.get_issue(res["issue_id"])
-        self.assertIsNotNone(issue)
-        self.assertEqual(issue.severity, IssueSeverity.CRITICAL.value)
+        # URGENT alerts operators; it does not fabricate an issue.
+        self.assertIsNone(res["issue_id"])
+        self.assertEqual(len(self.work_queue.list_issues()), 0)
 
     def test_deterministic_shift_briefing_aggregation(self):
         now = datetime.now(timezone.utc)

@@ -34,11 +34,31 @@ from agents.core.proposal_manager import (
     ProposalManager,
 )
 from agents.core.work_queue import BaseWorkQueue
-from engine.domain import AgentCapabilityProfile, Lease, SOCIssue
+from engine.domain import AgentCapabilityProfile, Lease, OperationalPlane, SOCIssue
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowCapability
 
 logger = logging.getLogger(__name__)
+
+# Agent subsystem -> operational plane the agent works issues in. Issues are only
+# offered to agents in the same plane, so an unmapped subsystem (default: platform)
+# silently hides that agent from its plane's work. Keep in sync with the
+# ``subsystem=`` values in agents/generated/*.py.
+SUBSYSTEM_PLANES: Dict[str, str] = {
+    "ingestion": OperationalPlane.DATA.value,
+    "detection": OperationalPlane.DETECTION.value,
+    "detections": OperationalPlane.DETECTION.value,
+    "detection_rules": OperationalPlane.DETECTION.value,
+    "soar": OperationalPlane.AUTOMATION.value,
+    "soar_automation": OperationalPlane.AUTOMATION.value,
+    "soar_playbooks": OperationalPlane.AUTOMATION.value,
+    "cost": OperationalPlane.PLATFORM.value,
+    "tenant": OperationalPlane.GOVERNANCE.value,
+    "audit": OperationalPlane.GOVERNANCE.value,
+    "identity_governance": OperationalPlane.GOVERNANCE.value,
+    "configuration_governance": OperationalPlane.GOVERNANCE.value,
+    "infrastructure": OperationalPlane.EXTERNAL.value,
+}
 
 
 # Model Input Token Ceilings & Safety Limits
@@ -422,15 +442,7 @@ class BaseSecOpsAdkAgent:
             caps[t] = 1
         caps["git.proposal.create"] = 1
 
-        plane_map = {
-            "ingestion": "data",
-            "detection": "detection",
-            "soar": "automation",
-            "cost": "platform",
-            "tenant": "governance",
-            "audit": "governance",
-        }
-        plane = plane_map.get(self.subsystem, "platform")
+        plane = SUBSYSTEM_PLANES.get(self.subsystem, OperationalPlane.PLATFORM.value)
 
         return AgentCapabilityProfile(
             agent_handle=self.handle,

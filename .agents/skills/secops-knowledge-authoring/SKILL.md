@@ -141,10 +141,11 @@ Follow these steps whenever creating or refining knowledge entries:
    ```
    Ensure 0 errors and that all documents pass OKF v0.2 verification.
 
-5. **Regenerate the Knowledge Graph Visualizer:**
-   After adding or updating knowledge files, update the interactive visualization:
+5. **Knowledge Graph Visualizer (automatic):**
+   The web UI rebuilds the graph (`/knowledge/viz.html`, `/api/knowledge/graph`) whenever
+   any `knowledge/**/*.md` file changes — no manual step. For an offline/shareable copy:
    ```bash
-   python scripts/generate_knowledge_graph.py
+   python scripts/generate_knowledge_graph.py --out /tmp/viz.html
    ```
 
 6. **Run the Full Contract Test Suite:**

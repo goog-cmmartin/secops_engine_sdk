@@ -134,3 +134,6 @@ references/
 
 # Impeccable design-skill reference copies & local live config
 .impeccable/
+
+# Generated on demand by the web server (engine/knowledge_graph.py)
+knowledge/viz.html

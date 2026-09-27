@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agents.core.base_adk_agent import llm_credentials_status
@@ -37,6 +37,7 @@ from agents.core.work_queue import get_work_queue, BaseWorkQueue, ATTENTION_STAT
 from agents.core.materializer import IssueMaterializer
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.knowledge_store import get_knowledge_store
+from engine.knowledge_graph import KnowledgeGraphCache
 from agents.core.communication_router import get_communication_router
 from agents.generated import create_agent_fleet
 from clients.web.chat_engine import ChatMessage, ChatStore, AgentDispatcher
@@ -111,6 +112,7 @@ dispatcher = AgentDispatcher(
     evidence_store=evidence_store,
 )
 knowledge_store = get_knowledge_store(root_dir=STATE_ROOT)
+knowledge_graph_cache = KnowledgeGraphCache(REPO_ROOT / "knowledge")
 communication_router = get_communication_router(
     work_queue=work_queue,
     chat_store=chat_store,
@@ -2431,12 +2433,10 @@ async def root_view() -> FileResponse:
 
 
 @app.get("/knowledge/viz.html")
-async def knowledge_viz_view() -> FileResponse:
-    """Serves the interactive OKF Knowledge Graph Cytoscape visualizer."""
-    viz_file = REPO_ROOT / "knowledge" / "viz.html"
-    if not viz_file.is_file():
-        raise HTTPException(status_code=404, detail="Knowledge graph not generated yet.")
-    return FileResponse(viz_file)
+async def knowledge_viz_view() -> HTMLResponse:
+    """Serves the OKF Knowledge Graph visualizer, rebuilt whenever knowledge/*.md changes."""
+    html = await asyncio.to_thread(knowledge_graph_cache.html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 # Mount static assets

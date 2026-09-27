@@ -522,7 +522,17 @@ class TestSOCOperatingSystem(unittest.TestCase):
             merged_by="secops_operator@example.com",
             lifecycle_manager=self.lifecycle,
         )
-        self.assertEqual(merge_res.status, "MERGED")
+        # No automated parser write exists: merge records approval only (N3).
+        self.assertEqual(merge_res.status, "MERGED_MANUAL_APPLY_REQUIRED")
+        self.assertEqual(self.work_queue.get_issue(issue_id).status, IssueLifecycleStatus.APPROVED.value)
+
+        # 7b. Operator applies the CBN patch in SecOps and marks it applied
+        proposal_mgr.mark_manually_applied(
+            proposal_id=proposal_id,
+            applied_by="secops_operator@example.com",
+            note="Applied cisco_asa CBN patch via parser extension editor.",
+            lifecycle_manager=self.lifecycle,
+        )
 
         app_issue = self.work_queue.get_issue(issue_id)
         self.assertEqual(app_issue.status, IssueLifecycleStatus.APPLIED.value)
@@ -549,16 +559,14 @@ class TestSOCOperatingSystem(unittest.TestCase):
         self.assertEqual(final_queue_issue.status, IssueLifecycleStatus.CLOSED.value)
         self.assertIsNone(final_queue_issue.lease)
 
-        # Verify all 7 event files were generated in Git materializer
+        # Verify all 8 event files were generated in Git materializer. The merge records a
+        # second approval ("awaiting manual apply"); APPLIED comes from the operator's mark-applied.
         events = self.materializer.list_issue_events(issue_id)
-        self.assertEqual(len(events), 7)
-        self.assertEqual(events[0].transition_type, "OBSERVED")
-        self.assertEqual(events[1].transition_type, "CLAIMED")
-        self.assertEqual(events[2].transition_type, "PROPOSAL_CREATED")
-        self.assertEqual(events[3].transition_type, "VALIDATION_PASSED")
-        self.assertEqual(events[4].transition_type, "DECISION_APPROVED")
-        self.assertEqual(events[5].transition_type, "APPLIED")
-        self.assertEqual(events[6].transition_type, "VERIFIED")
+        self.assertEqual([e.transition_type for e in events], [
+            "OBSERVED", "CLAIMED", "PROPOSAL_CREATED", "VALIDATION_PASSED",
+            "DECISION_APPROVED", "DECISION_APPROVED", "APPLIED", "VERIFIED",
+        ])
+        self.assertEqual(events[6].actor, "secops_operator@example.com")
 
         res_path = self.root_path / ".issues" / issue_id / "resolution.md"
         self.assertTrue(res_path.is_file())

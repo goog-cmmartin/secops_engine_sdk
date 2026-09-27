@@ -893,7 +893,7 @@ function setOpenProposalBadges(openCount) {
   if (navBoardBadge) {
     navBoardBadge.textContent = openCount > 99 ? "99+" : String(openCount);
     navBoardBadge.hidden = !openCount;
-    navBoardBadge.title = `${openCount} proposal${openCount === 1 ? "" : "s"} awaiting review`;
+    navBoardBadge.title = `${openCount} proposal${openCount === 1 ? "" : "s"} awaiting review or manual apply`;
     navBoardBadge.setAttribute("aria-label", navBoardBadge.title);
   }
   const drawerToggleBadge = document.getElementById("drawerToggleBadge");
@@ -927,7 +927,7 @@ async function loadProposals() {
   try {
     state.proposals = await fetchJsonOrThrow("/api/proposals");
     renderProposalsDrawer();
-    const openCount = state.proposals.filter(p => p.status === "OPEN").length;
+    const openCount = state.proposals.filter(needsOperator).length;
     const openPropCount = document.getElementById("openPropCount");
     if (openPropCount) openPropCount.textContent = openCount;
     setOpenProposalBadges(openCount);
@@ -1404,8 +1404,9 @@ function removeMessageCard(card) {
 
 function renderProposalWidget(widget) {
   const status = widget.status || "OPEN";
-  const statusClass = `status-${status.toLowerCase()}`;
-  const badgeClass = `badge-${status.toLowerCase()}`;
+  const manualPendingWidget = status === "MERGED" && widget.apply_status === "MANUAL_APPLY_REQUIRED";
+  const statusClass = manualPendingWidget ? "status-manual" : `status-${status.toLowerCase()}`;
+  const badgeClass = manualPendingWidget ? "badge-manual" : `badge-${status.toLowerCase()}`;
   const actionType = widget.action_type || "PROPOSAL";
   const riskLevel = widget.risk_level || "MEDIUM";
   const proposalId = widget.proposal_id || "";
@@ -1452,6 +1453,19 @@ function renderProposalWidget(widget) {
         <button class="btn-reject" data-id="${proposalId}">Reject</button>
       </div>
     `;
+  } else if (status === "MERGED" && widget.apply_status === "MANUAL_APPLY_REQUIRED") {
+    actionsHtml = `
+      <div class="prop-manual-apply">
+        <span><strong>Approved — apply manually.</strong> Nothing was changed in SecOps.</span>
+        <button type="button" class="btn btn-primary btn-sm" ${act("handleMarkApplied", proposalId)}>Mark applied</button>
+      </div>
+    `;
+  } else if (status === "MERGED" && widget.apply_status === "MANUALLY_APPLIED") {
+    actionsHtml = `
+      <div style="font-size:11.5px; color:var(--accent-green); font-weight:600; margin-top:6px; display:flex; align-items:center; gap:5px;">
+        <span>${ICONS.check}</span> Applied manually
+      </div>
+    `;
   } else if (status === "MERGED") {
     actionsHtml = `
       <div style="font-size:11.5px; color:var(--accent-green); font-weight:600; margin-top:6px; display:flex; align-items:center; gap:5px;">
@@ -1469,7 +1483,7 @@ function renderProposalWidget(widget) {
   return `
     <div class="proposal-card ${statusClass}">
       <div class="prop-meta-bar">
-        <span class="badge ${badgeClass}">${status}</span>
+        <span class="badge ${badgeClass}">${manualPendingWidget ? "APPLY MANUALLY" : status}</span>
         <span class="badge badge-risk">${actionType}</span>
         <span class="badge badge-risk">RISK: ${riskLevel}</span>
         <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-left:auto;">${proposalId}</span>
@@ -4024,6 +4038,82 @@ const APPROVAL_TIER_LABELS = {
 };
 // Mirrors CODE_CHANGE_ACTIONS in agents/core/approval_policy.py (server is authoritative).
 const PREFLIGHT_GATED_ACTIONS = new Set(["PATCH_RULE", "UPDATE_RULE_TEXT", "PATCH_PARSER_CBN"]);
+// Mirrors EXECUTABLE_ACTIONS in agents/core/proposal_manager.py. Anything else merges
+// without writing to SecOps; the server's has_executor field is preferred when present.
+const EXECUTABLE_ACTIONS = new Set([
+  "PATCH_RULE", "UPDATE_RULE_TEXT",
+  "UPDATE_RULE_DEPLOYMENT", "TOGGLE_RULE_DEPLOYMENT", "DEPLOY_RULE", "UNDEPLOY_RULE",
+  "GENERIC_CAPABILITY", "CREATE_FINDINGS_REFINEMENT",
+]);
+
+function proposalHasExecutor(p) {
+  if (!p) return true;
+  if (typeof p.has_executor === "boolean") return p.has_executor;
+  return EXECUTABLE_ACTIONS.has(String(p.action_type || "").toUpperCase());
+}
+
+// Approved, but nothing was written to SecOps yet: a human must apply it and mark it applied.
+function needsManualApply(p) {
+  return !!p && p.status === "MERGED" && p.apply_status === "MANUAL_APPLY_REQUIRED";
+}
+
+// Proposals that need an operator: open for review, or approved and awaiting a manual apply.
+function needsOperator(p) {
+  return !!p && (p.status === "OPEN" || needsManualApply(p));
+}
+
+// Status label + badge class for a proposal, distinguishing how a merge was applied.
+function proposalStatusView(p) {
+  const status = String((p && p.status) || "UNKNOWN").toUpperCase();
+  if (status === "MERGED") {
+    if (p.apply_status === "MANUAL_APPLY_REQUIRED") return { label: "Apply manually", cls: "badge-manual", title: "Approved, but nothing was changed in SecOps. Apply it, then mark it applied." };
+    if (p.apply_status === "MANUALLY_APPLIED") return { label: "Applied (manual)", cls: "badge-merged", title: `Applied by ${p.applied_by || "an operator"}${p.apply_note ? `: ${p.apply_note}` : ""}` };
+    return { label: "Merged", cls: "badge-merged", title: "Written to SecOps on approval" };
+  }
+  return { label: status, cls: `badge-${status.toLowerCase()}`, title: "" };
+}
+
+async function handleMarkApplied(proposalId) {
+  const p = (state.proposals || []).find((x) => x.id === proposalId)
+    || (gastownState.proposals || []).find((x) => x.id === proposalId);
+  const target = p ? `${p.target_resource_id || "the target"} (${p.action_type || "change"})` : "the target";
+  const result = await openActionDialog({
+    title: "Mark change applied",
+    message: `Confirm you applied ${proposalId} to ${target} in SecOps. The linked issue moves to Applied and the next patrol verifies it.`,
+    confirmLabel: "Mark applied",
+    fields: [{
+      name: "note",
+      label: "What did you apply, and where?",
+      type: "textarea",
+      required: true,
+      minLength: 10,
+      placeholder: "e.g. Pasted the CBN patch into the cisco_asa parser extension and saved in the SecOps console.",
+    }],
+  });
+  if (!result) return false;
+  try {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/mark-applied`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ applied_by: "secops-operator", note: result.note }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast("error", `Not recorded: ${formatApiError(err.detail, res.status)}`);
+      return false;
+    }
+    const data = await res.json().catch(() => ({}));
+    showToast("success", data.issue_id
+      ? `${proposalId} marked applied. Issue ${data.issue_id} will be verified on the next patrol.`
+      : `${proposalId} marked applied.`);
+    await Promise.all([loadProposals(), loadGastownOverview()]);
+    return true;
+  } catch (err) {
+    showToast("error", "Network error marking proposal applied: " + err);
+    return false;
+  }
+}
+
 // Mirrors supports_baseline() in agents/core/target_baseline.py.
 const BASELINE_CHECKED_ACTIONS = new Set([
   "PATCH_RULE", "UPDATE_RULE_TEXT",
@@ -4092,12 +4182,17 @@ async function handleApproveProposal(proposalId) {
   if (proposal && proposal.author) facts.push(["Author", proposal.author]);
   const baselineText = describeBaseline(proposal);
   if (baselineText) facts.push(["Target check", baselineText]);
+  const manual = !!proposal && !proposalHasExecutor(proposal);
+  if (manual) facts.push(["Apply", "Manual — no automated write for this change type"]);
   const factsHtml = facts.length
     ? `<dl class="about-grid">${facts.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>`
     : "";
-  const warnHtml = preflightFailed
+  const warnHtml = (preflightFailed
     ? `<div class="action-dialog-error" role="note">Syntax preflight did not pass. Applying this change may break the target in production. You must give an override reason.</div>`
-    : "";
+    : "")
+    + (manual
+      ? `<div class="action-dialog-note" role="note">Approving does <strong>not</strong> change SecOps. There is no automated write for ${escapeHtml(proposal.action_type || "this change")}. After approving, apply the diff yourself, then use <strong>Mark applied</strong>.</div>`
+      : "");
 
   const fields = [{ name: "note", label: "Approval note", type: "textarea", placeholder: "Why is this change safe to apply?" }];
   if (preflightFailed) {
@@ -4112,9 +4207,15 @@ async function handleApproveProposal(proposalId) {
   }
 
   const result = await openActionDialog({
-    title: preflightFailed ? "Override failed preflight & apply" : "Approve & apply change",
-    message: `Approving ${proposalId} executes a live production mutation in SecOps. This is recorded in the audit trail.`,
-    confirmLabel: preflightFailed ? "Override & Apply" : "Approve & Apply",
+    title: manual
+      ? (preflightFailed ? "Override failed preflight & approve" : "Approve change (manual apply)")
+      : (preflightFailed ? "Override failed preflight & apply" : "Approve & apply change"),
+    message: manual
+      ? `Approving ${proposalId} records the decision in the audit trail. Nothing is written to SecOps.`
+      : `Approving ${proposalId} executes a live production mutation in SecOps. This is recorded in the audit trail.`,
+    confirmLabel: manual
+      ? (preflightFailed ? "Override & Approve" : "Approve")
+      : (preflightFailed ? "Override & Apply" : "Approve & Apply"),
     variant: preflightFailed ? "danger" : "primary",
     bodyHtml: factsHtml + warnHtml,
     fields,
@@ -4149,7 +4250,12 @@ async function handleApproveProposal(proposalId) {
       showToast("error", `${prefix}: ${formatApiError(err.detail, res.status)}`);
       return false;
     }
-    showToast("success", `Proposal ${proposalId} approved and merged to production!`);
+    const data = await res.json().catch(() => ({}));
+    if (data.status === "MERGED_MANUAL_APPLY_REQUIRED") {
+      showToast("warning", `${proposalId} approved. Nothing was changed in SecOps: apply it manually, then mark it applied.`);
+    } else {
+      showToast("success", `Proposal ${proposalId} approved and applied to production.`);
+    }
     await Promise.all([loadProposals(), loadGastownOverview()]);
     return true;
   } catch (err) {
@@ -4193,6 +4299,7 @@ async function handleRejectProposal(proposalId, defaultReason = "") {
 window.handleProposalAction = async function (proposalId, action) {
   if (action === "approve") return handleApproveProposal(proposalId);
   if (action === "reject") return handleRejectProposal(proposalId);
+  if (action === "mark-applied") return handleMarkApplied(proposalId);
   return false;
 };
 
@@ -4476,10 +4583,8 @@ function renderProposalsDrawer() {
   container.innerHTML = "";
 
   const all = Array.isArray(state.proposals) ? state.proposals : [];
-  const openCount = all.filter((p) => (p.status || "").toUpperCase() === "OPEN").length;
-  const list = drawerProposalFilter === "OPEN"
-    ? all.filter((p) => (p.status || "").toUpperCase() === "OPEN")
-    : all;
+  const openCount = all.filter(needsOperator).length;
+  const list = drawerProposalFilter === "OPEN" ? all.filter(needsOperator) : all;
 
   const filterBar = document.createElement("div");
   filterBar.className = "drawer-filter-bar";
@@ -4509,15 +4614,18 @@ function renderProposalsDrawer() {
 
   list.forEach((p) => {
     const status = String(p.status || "UNKNOWN").toUpperCase();
+    const view = proposalStatusView(p);
     const item = document.createElement("button");
     item.type = "button";
     item.className = "drawer-proposal-item";
-    item.title = status === "OPEN" ? "Review diff and approve or reject" : "View proposal details";
+    item.title = status === "OPEN"
+      ? "Review diff and approve or reject"
+      : (needsManualApply(p) ? "Apply this change in SecOps, then mark it applied" : "View proposal details");
     item.innerHTML = `
       <div class="drawer-prop-title">${escapeHtml(p.title || p.id || "Untitled proposal")}</div>
       <div class="drawer-prop-sub">
         <span>${escapeHtml(p.subsystem || "—")} &bull; ${escapeHtml(p.action_type || "—")}</span>
-        <span class="badge badge-${escapeHtml(status.toLowerCase())}">${escapeHtml(status)}</span>
+        <span class="badge ${escapeHtml(view.cls)}" ${view.title ? `title="${escapeHtml(view.title)}"` : ""}>${escapeHtml(view.label)}</span>
       </div>
     `;
     item.addEventListener("click", () => openGastownDiffModal(p.id));
@@ -4750,6 +4858,7 @@ const ACTION_FNS = {
   handleDismissTodo: () => handleDismissTodo,
   openGastownDiffModal: () => openGastownDiffModal,
   handleProposalAction: () => window.handleProposalAction,
+  handleMarkApplied: () => handleMarkApplied,
   handleAckEscalation: () => handleAckEscalation,
   triggerGastownAgentPatrol: () => triggerGastownAgentPatrol,
   triggerGastownPatrolAll: () => triggerGastownPatrolAll,
@@ -6801,7 +6910,7 @@ function renderGastownHeader() {
 
   // Alerts Strip
   const gtAlertItem = document.getElementById("gtAlertItem");
-  const openProps = (gastownState.proposals || []).filter((p) => p.status === "OPEN").length;
+  const openProps = (gastownState.proposals || []).filter(needsOperator).length;
   const attentionCount = (ov.soc_issues || []).filter((i) => isAttentionStatus(i.status)).length;
   if (gtAlertItem) {
     gtAlertItem.dataset.target = attentionCount > 0 ? "attention" : "review";
@@ -6812,7 +6921,7 @@ function renderGastownHeader() {
       gtAlertItem.disabled = false;
       gtAlertItem.title = "Show the Needs Attention column";
     } else if (openProps > 0) {
-      gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting HITL operator review →`;
+      gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting operator review or manual apply →`;
       gtAlertItem.className = "gt-alert-pill";
       gtAlertItem.disabled = false;
       gtAlertItem.title = "Show the HITL Review column";
@@ -7111,14 +7220,14 @@ function renderGastownKanban() {
   // Col 3: HITL Review (Proposals & Validations)
   const colReview = document.getElementById("cardsColReview");
   const countColReview = document.getElementById("countColReview");
-  const openProposals = proposals.filter((p) => p.status === "OPEN");
+  const openProposals = proposals.filter(needsOperator);
   const socReview = socIssues.filter(i => i.status === "VALIDATING");
   const totalReview = openProposals.length + socReview.length;
   if (countColReview) countColReview.textContent = totalReview;
   // #34: oldest-first, so the item that has waited longest is on top; header shows the oldest wait.
   const reviewItems = [
     ...socReview.map((i) => ({ kind: "soc", item: i, ts: i.updated_at || i.created_at })),
-    ...openProposals.map((p) => ({ kind: "proposal", item: p, ts: p.created_at })),
+    ...openProposals.map((p) => ({ kind: "proposal", item: p, ts: needsManualApply(p) ? (p.merged_at || p.created_at) : p.created_at })),
   ].map((r) => ({ ...r, ms: ageMsFrom(r.ts) }))
     .sort((a, b) => (b.ms ?? -1) - (a.ms ?? -1));
   const oldestMs = reviewItems.length ? reviewItems[0].ms : null;
@@ -7137,7 +7246,7 @@ function renderGastownKanban() {
   }
   if (colReview) {
     if (totalReview === 0) {
-      colReview.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">No pending proposals awaiting review.</div>`;
+      colReview.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">Nothing awaiting review or manual apply.</div>`;
     } else {
       colReview.innerHTML = reviewItems.map((r) => (r.kind === "soc"
         ? renderSocKanbanCard(r.item, { showAge: true })
@@ -7149,6 +7258,25 @@ function renderGastownKanban() {
     const riskClass = (p.risk_level === "CRITICAL" || p.risk_level === "HIGH") ? "badge-risk-high" : (p.risk_level === "MEDIUM" ? "badge-risk-medium" : "badge-risk-low");
     const author = p.author || p.author_agent || "@secops-dispatcher";
     const target = p.target_resource_id || p.target_resource || "SecOps Resource";
+    if (needsManualApply(p)) {
+      return `
+      <div class="kanban-card kanban-card-manual" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)}>
+        <div class="kanban-card-head">
+          <span class="kanban-card-id">${escapeHtml(p.id)}</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            ${renderReviewAgeChip(p.merged_at || p.created_at, "Approved")}
+            <span class="kanban-card-badge badge-manual" title="Approved, but nothing was changed in SecOps">Apply manually</span>
+          </div>
+        </div>
+        <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Approved change")}</div>
+        <div class="kanban-card-target">${escapeHtml(target)} · ${escapeHtml(p.action_type || "")}</div>
+        <div class="kanban-card-footer">
+          <span class="kanban-card-author">Approved by ${escapeHtml(p.merged_by || "operator")}</span>
+          <button class="kanban-card-action-btn" ${act("handleMarkApplied", p.id)}>Mark applied</button>
+        </div>
+      </div>
+    `;
+    }
     return `
       <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)}>
         <div class="kanban-card-head">
@@ -7172,7 +7300,7 @@ function renderGastownKanban() {
   // Col 4: Merged / Resolved
   const colMerged = document.getElementById("cardsColMerged");
   const countColMerged = document.getElementById("countColMerged");
-  const closedProposals = proposals.filter((p) => p.status === "MERGED" || p.status === "APPLIED" || p.status === "CLOSED" || p.status === "REJECTED");
+  const closedProposals = proposals.filter((p) => !needsManualApply(p) && (p.status === "MERGED" || p.status === "APPLIED" || p.status === "CLOSED" || p.status === "REJECTED"));
   const socMerged = socIssues.filter(i => i.status === "APPROVED" || i.status === "APPLIED" || i.status === "CLOSED" || i.status === "VERIFIED");
   const totalMerged = closedProposals.length + socMerged.length;
   if (countColMerged) countColMerged.textContent = totalMerged;
@@ -7185,11 +7313,12 @@ function renderGastownKanban() {
         const isMerged = p.status === "MERGED" || p.status === "APPLIED";
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
+        const view = proposalStatusView(p);
         return `
           <div class="kanban-card" role="button" tabindex="0" ${act("openGastownDiffModal", p.id)} style="opacity:0.85;">
             <div class="kanban-card-head">
               <span class="kanban-card-id">${escapeHtml(p.id)}</span>
-              <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}">${p.status}</span>
+              <span class="kanban-card-badge ${isMerged ? 'badge-risk-low' : 'badge-risk-high'}" ${view.title ? `title="${escapeHtml(view.title)}"` : ""}>${escapeHtml(view.label)}</span>
             </div>
             <div class="kanban-card-title">${escapeHtml(p.title || p.rationale || "Resolved mutation")}</div>
             <div class="kanban-card-target">${escapeHtml(target)}</div>
@@ -7294,7 +7423,9 @@ function renderGastownRefinery() {
           <span class="badge ${gateBadge}" title="${escapeHtml(gateTitle)}">${gatesPassed}/${totalGates} gates passed</span>
         </td>
         <td>
-          <span class="badge ${isMerged ? 'badge-green' : (isRejected ? 'badge-red' : 'badge-blue')}">${p.status}</span>
+          ${needsManualApply(p)
+            ? `<span class="badge badge-manual" title="${escapeHtml(proposalStatusView(p).title)}">Apply manually</span>`
+            : `<span class="badge ${isMerged ? 'badge-green' : (isRejected ? 'badge-red' : 'badge-blue')}" ${proposalStatusView(p).title ? `title="${escapeHtml(proposalStatusView(p).title)}"` : ""}>${escapeHtml(proposalStatusView(p).label)}</span>`}
         </td>
         <td>
           ${diff ? `
@@ -7309,6 +7440,7 @@ function renderGastownRefinery() {
               <button class="btn btn-primary btn-sm" ${act("handleProposalAction", p.id, "approve")}>Approve</button>
               <button class="btn btn-danger btn-sm" ${act("handleProposalAction", p.id, "reject")}>Reject</button>
             ` : ''}
+            ${needsManualApply(p) ? `<button class="btn btn-primary btn-sm" ${act("handleMarkApplied", p.id)}>Mark applied</button>` : ''}
           </div>
         </td>
       </tr>
@@ -7503,6 +7635,22 @@ function openGastownDiffModal(proposalId) {
   }
 
   const isOpen = p.status === "OPEN";
+  const manualPending = needsManualApply(p);
+  const manualType = !proposalHasExecutor(p);
+  const applyBanner = document.getElementById("modalApplyBanner");
+  if (applyBanner) {
+    let bannerHtml = "";
+    if (manualPending) {
+      bannerHtml = `<strong>Approved — apply manually.</strong> Nothing was changed in SecOps. Apply the diff below to <code>${escapeHtml(target)}</code>, then mark it applied so the patrol can verify it.`;
+    } else if (isOpen && manualType) {
+      bannerHtml = `<strong>Manual apply.</strong> There is no automated write for ${escapeHtml(p.action_type || "this change type")}. Approving records the decision only; you apply the change in SecOps afterwards.`;
+    } else if (p.apply_status === "MANUALLY_APPLIED") {
+      bannerHtml = `<strong>Applied manually</strong> by ${escapeHtml(p.applied_by || "an operator")}${p.apply_note ? `: ${escapeHtml(p.apply_note)}` : "."}`;
+    }
+    applyBanner.innerHTML = bannerHtml;
+    applyBanner.hidden = !bannerHtml;
+    applyBanner.classList.toggle("is-done", p.apply_status === "MANUALLY_APPLIED");
+  }
   const btnApprove = document.getElementById("modalBtnApprove");
   const btnReject = document.getElementById("modalBtnReject");
   const setBusy = (busy) => {
@@ -7510,10 +7658,11 @@ function openGastownDiffModal(proposalId) {
     if (btnReject) btnReject.disabled = busy;
   };
   if (btnApprove) {
-    btnApprove.hidden = !isOpen;
+    btnApprove.hidden = !(isOpen || manualPending);
+    btnApprove.textContent = manualPending ? "Mark applied" : (manualType ? "Approve (manual apply)" : "Merge Proposal");
     btnApprove.onclick = async () => {
       setBusy(true);
-      const done = await handleApproveProposal(p.id);
+      const done = manualPending ? await handleMarkApplied(p.id) : await handleApproveProposal(p.id);
       setBusy(false);
       if (done) closeGastownDiffModal();
     };

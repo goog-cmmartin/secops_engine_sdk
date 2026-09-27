@@ -4,7 +4,7 @@ Manages autonomous change proposals (.proposals/open, .proposals/merged, .propos
 frontmatter serialization, unified diffs, pre-flight verification proofs, and automated merge execution.
 """
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -14,12 +14,54 @@ import subprocess
 from typing import Any, Dict, List, Optional
 import yaml
 
-from agents.core.approval_policy import check_approval, required_tier
+from agents.core.approval_policy import ApprovalPolicyError, check_approval, is_agent_actor, required_tier
 from agents.core.git_guard import git_commits_enabled
 from agents.core.ledger import resolve_ledger_root
 from agents.core.target_baseline import capture_baseline, verify_unchanged
 
 logger = logging.getLogger(__name__)
+
+# Action types that approve_and_merge can write to SecOps. Anything else has no
+# executor: merging records the decision and a human must apply the change.
+RULE_TEXT_ACTIONS = frozenset({"PATCH_RULE", "UPDATE_RULE_TEXT"})
+RULE_DEPLOYMENT_ACTIONS = frozenset({
+    "UPDATE_RULE_DEPLOYMENT", "TOGGLE_RULE_DEPLOYMENT", "DEPLOY_RULE", "UNDEPLOY_RULE",
+})
+EXECUTABLE_ACTIONS = RULE_TEXT_ACTIONS | RULE_DEPLOYMENT_ACTIONS | frozenset({
+    "GENERIC_CAPABILITY",
+    "CREATE_FINDINGS_REFINEMENT",
+})
+
+# ChangeProposal.apply_status values (only meaningful once MERGED).
+APPLY_STATUS_APPLIED = "APPLIED"
+APPLY_STATUS_MANUAL_REQUIRED = "MANUAL_APPLY_REQUIRED"
+APPLY_STATUS_MANUALLY_APPLIED = "MANUALLY_APPLIED"
+MERGED_MANUAL_APPLY_REQUIRED = "MERGED_MANUAL_APPLY_REQUIRED"
+
+MIN_MANUAL_APPLY_NOTE_LEN = 10
+
+
+def has_executor(action_type: str) -> bool:
+    """True when merging this action type writes the change to SecOps."""
+    return (action_type or "").upper() in EXECUTABLE_ACTIONS
+
+
+def _refinement_query(payload: Dict[str, Any]) -> str:
+    """UDM exclusion query from a tuning payload; strips the '//' header in tuned_rule_text."""
+    explicit = (payload.get("refinement_query") or "").strip()
+    if explicit:
+        return explicit
+    text = payload.get("tuned_rule_text") or ""
+    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("//")]
+    return "\n".join(lines).strip()
+
+
+def _as_dict(result: Any) -> Dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if is_dataclass(result) and not isinstance(result, type):
+        return asdict(result)
+    return {"result": str(result)}
 
 
 @dataclass
@@ -62,6 +104,12 @@ class ChangeProposal:
     issue_id: Optional[str] = None
     preflight: PreflightProof = field(default_factory=PreflightProof)
     mutation_payload: Dict[str, Any] = field(default_factory=dict)
+    # Set on merge: APPLIED (written to SecOps), MANUAL_APPLY_REQUIRED (no executor;
+    # a human must apply it), or MANUALLY_APPLIED (a human confirmed they applied it).
+    apply_status: Optional[str] = None
+    applied_by: Optional[str] = None
+    applied_at: Optional[str] = None
+    apply_note: Optional[str] = None
 
 
 @dataclass
@@ -118,6 +166,10 @@ class ProposalManager:
             "base_verified_at_merge": proposal.base_verified_at_merge,
             "preflight": asdict(proposal.preflight),
             "mutation_payload": proposal.mutation_payload,
+            "apply_status": proposal.apply_status,
+            "applied_by": proposal.applied_by,
+            "applied_at": proposal.applied_at,
+            "apply_note": proposal.apply_note,
         }
 
         yaml_text = yaml.dump(frontmatter, sort_keys=False, default_flow_style=False)
@@ -163,6 +215,14 @@ class ProposalManager:
             diff_section = body.split("```diff")[1]
             diff = diff_section.split("```")[0].strip()
 
+        status = frontmatter.get("status", "OPEN")
+        action_type = frontmatter.get("action_type", "")
+        apply_status = frontmatter.get("apply_status")
+        if status == "MERGED" and not apply_status:
+            # Merged before apply_status existed: action types without an executor
+            # were never written to SecOps.
+            apply_status = APPLY_STATUS_APPLIED if has_executor(action_type) else APPLY_STATUS_MANUAL_REQUIRED
+
         return ChangeProposal(
             id=frontmatter.get("id", file_path.stem),
             title=frontmatter.get("title", ""),
@@ -190,6 +250,10 @@ class ProposalManager:
             proposed_diff=diff,
             preflight=preflight,
             mutation_payload=frontmatter.get("mutation_payload", {}),
+            apply_status=apply_status,
+            applied_by=frontmatter.get("applied_by"),
+            applied_at=frontmatter.get("applied_at"),
+            apply_note=frontmatter.get("apply_note"),
         )
 
     def create_proposal(self, proposal: ChangeProposal, engine: Any = None) -> str:
@@ -286,6 +350,11 @@ class ProposalManager:
     ) -> MergeResult:
         """Applies mutation via SecOpsEngine, moves proposal to merged/, and records git commit.
 
+        Action types without an executor (see ``EXECUTABLE_ACTIONS``) are not written
+        to SecOps: the proposal is merged with ``apply_status=MANUAL_APPLY_REQUIRED``,
+        the result status is ``MERGED_MANUAL_APPLY_REQUIRED``, and the linked issue is
+        marked APPROVED (not APPLIED) until ``mark_manually_applied`` is called.
+
         Raises:
             ValueError: proposal is not OPEN.
             ApprovalPolicyError: approver is not permitted to merge this proposal
@@ -328,10 +397,12 @@ class ProposalManager:
         )
 
         execution_res = None
+        action = (proposal.action_type or "").upper()
+        manual_apply = not has_executor(action)
 
         try:
             # 1. Execute mutation against live Google SecOps API via SecOpsEngine
-            if proposal.action_type in ("PATCH_RULE", "UPDATE_RULE_TEXT"):
+            if action in RULE_TEXT_ACTIONS:
                 rule_id = proposal.target_resource_id
                 rule_text = proposal.mutation_payload.get("rule_text")
                 update_mask = proposal.mutation_payload.get("update_mask", "text")
@@ -343,7 +414,7 @@ class ProposalManager:
                     update_mask=update_mask,
                 )
 
-            elif proposal.action_type in ("UPDATE_RULE_DEPLOYMENT", "TOGGLE_RULE_DEPLOYMENT", "DEPLOY_RULE", "UNDEPLOY_RULE"):
+            elif action in RULE_DEPLOYMENT_ACTIONS:
                 rule_id = proposal.target_resource_id
                 enabled = proposal.mutation_payload.get("enabled")
                 alerting = proposal.mutation_payload.get("alerting")
@@ -353,14 +424,33 @@ class ProposalManager:
                     alerting=alerting,
                 )
 
-            elif proposal.action_type == "GENERIC_CAPABILITY":
+            elif action == "GENERIC_CAPABILITY":
                 cap_id = proposal.mutation_payload.get("capability_id")
                 kwargs = proposal.mutation_payload.get("kwargs", {})
                 execution_res = engine.execute(cap_id, **kwargs)
 
+            elif action == "CREATE_FINDINGS_REFINEMENT":
+                query = _refinement_query(proposal.mutation_payload)
+                if not query:
+                    raise ValueError(
+                        "CREATE_FINDINGS_REFINEMENT requires 'refinement_query' (or 'tuned_rule_text') in mutation_payload."
+                    )
+                if engine is None:
+                    raise ValueError("CREATE_FINDINGS_REFINEMENT requires an engine to write the refinement.")
+                rule_id = proposal.mutation_payload.get("rule_id") or proposal.target_resource_id
+                execution_res = engine.create_findings_refinement(
+                    display_name=(proposal.title or f"Exclusion for {rule_id}")[:200],
+                    query=query,
+                    curated_rule_ids=[rule_id] if rule_id else None,
+                )
+
             else:
-                logger.info("Executing custom mutation for action %s", proposal.action_type)
-                execution_res = {"status": "APPLIED_CUSTOM", "action": proposal.action_type}
+                logger.info("No executor for %s; merging %s as manual apply", action, proposal_id)
+                execution_res = {
+                    "status": MERGED_MANUAL_APPLY_REQUIRED,
+                    "action": proposal.action_type,
+                    "message": f"No automated write exists for {proposal.action_type}; apply it in SecOps and mark it applied.",
+                }
 
             # 2. Update proposal state
             proposal.status = "MERGED"
@@ -368,6 +458,12 @@ class ProposalManager:
             proposal.merged_by = merged_by
             proposal.approval_note = approval_note
             proposal.updated_at = proposal.merged_at
+            if manual_apply:
+                proposal.apply_status = APPLY_STATUS_MANUAL_REQUIRED
+            else:
+                proposal.apply_status = APPLY_STATUS_APPLIED
+                proposal.applied_by = merged_by
+                proposal.applied_at = proposal.merged_at
 
             # 3. Move file from open/ to merged/
             merged_file = self.merged_dir / f"{proposal_id}.md"
@@ -394,29 +490,30 @@ class ProposalManager:
             # 6. Optional SOC Lifecycle Integration
             if proposal.issue_id and lifecycle_manager:
                 try:
-                    from engine.domain import ChangeRecord
-                    change_record = ChangeRecord(
-                        change_id=proposal.id,
-                        issue_id=proposal.issue_id,
-                        proposal_id=proposal.id,
-                        subsystem=proposal.subsystem,
-                        target_resource_id=proposal.target_resource_id,
-                        applied_by=merged_by,
-                        commit_sha=commit_hash or "",
-                        api_response=execution_res if isinstance(execution_res, dict) else {"result": str(execution_res)},
-                    )
-                    lifecycle_manager.apply_change(
-                        issue_id=proposal.issue_id,
-                        change_record=change_record,
-                        commit=False,
-                    )
+                    if manual_apply:
+                        # Nothing changed in SecOps: record the approval, keep the issue open.
+                        lifecycle_manager.decide_issue(
+                            issue_id=proposal.issue_id,
+                            decision="APPROVED",
+                            approver=merged_by,
+                            rationale=(
+                                f"Approved {proposal.id}; no automated write for {proposal.action_type}, "
+                                "awaiting manual apply."
+                                + (f" Note: {approval_note}" if approval_note else "")
+                            ),
+                            commit=False,
+                        )
+                    else:
+                        self._record_applied_change(
+                            proposal, lifecycle_manager, merged_by, commit_hash, _as_dict(execution_res)
+                        )
                 except Exception as lm_err:
-                    logger.warning("Failed recording applied change in lifecycle manager: %s", lm_err)
+                    logger.warning("Failed recording merge in lifecycle manager: %s", lm_err)
 
             return MergeResult(
                 proposal_id=proposal_id,
                 success=True,
-                status="MERGED",
+                status=MERGED_MANUAL_APPLY_REQUIRED if manual_apply else "MERGED",
                 execution_result=execution_res,
                 commit_hash=commit_hash,
                 inventory_snapshot_triggered=snapshot_triggered,
@@ -430,6 +527,87 @@ class ProposalManager:
                 status="FAILED",
                 error_message=str(e),
             )
+
+    def _record_applied_change(
+        self,
+        proposal: ChangeProposal,
+        lifecycle_manager: Any,
+        applied_by: str,
+        commit_hash: Optional[str],
+        api_response: Dict[str, Any],
+    ) -> None:
+        from engine.domain import ChangeRecord
+        change_record = ChangeRecord(
+            change_id=proposal.id,
+            issue_id=proposal.issue_id,
+            proposal_id=proposal.id,
+            subsystem=proposal.subsystem,
+            target_resource_id=proposal.target_resource_id,
+            applied_by=applied_by,
+            commit_sha=commit_hash or "",
+            api_response=api_response,
+        )
+        lifecycle_manager.apply_change(
+            issue_id=proposal.issue_id,
+            change_record=change_record,
+            commit=False,
+        )
+
+    def mark_manually_applied(
+        self,
+        proposal_id: str,
+        applied_by: str,
+        note: str,
+        lifecycle_manager: Any = None,
+    ) -> ChangeProposal:
+        """Records that a human applied a merged, manual-apply proposal in SecOps.
+
+        Moves the linked issue to APPLIED so the patrol can verify and close it.
+
+        Raises:
+            FileNotFoundError: proposal does not exist.
+            ValueError: proposal is not waiting for a manual apply, or the note is too short.
+            ApprovalPolicyError: ``applied_by`` is an agent handle.
+        """
+        merged_file = self.merged_dir / f"{proposal_id}.md"
+        if not merged_file.is_file():
+            self.get_proposal(proposal_id)  # raises FileNotFoundError if missing entirely
+            raise ValueError(f"Proposal {proposal_id} has not been approved yet.")
+        proposal = self._parse_markdown(merged_file)
+        if proposal.apply_status != APPLY_STATUS_MANUAL_REQUIRED:
+            raise ValueError(f"Proposal {proposal_id} is not waiting for a manual apply ({proposal.apply_status}).")
+        if is_agent_actor(applied_by):
+            raise ApprovalPolicyError(
+                ApprovalPolicyError.HUMAN_REQUIRED,
+                "Only a human can confirm a change was applied manually.",
+                proposal.required_tier,
+            )
+        note = (note or "").strip()
+        if len(note) < MIN_MANUAL_APPLY_NOTE_LEN:
+            raise ValueError(f"Describe what was applied (at least {MIN_MANUAL_APPLY_NOTE_LEN} characters).")
+
+        now = datetime.now(timezone.utc).isoformat()
+        proposal.apply_status = APPLY_STATUS_MANUALLY_APPLIED
+        proposal.applied_by = applied_by
+        proposal.applied_at = now
+        proposal.apply_note = note
+        proposal.updated_at = now
+        merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
+
+        commit_hash = self._commit_merged_proposal(proposal, verb="manually applied")
+        if commit_hash:
+            proposal.merge_commit = commit_hash
+            merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
+
+        if proposal.issue_id and lifecycle_manager:
+            try:
+                self._record_applied_change(
+                    proposal, lifecycle_manager, applied_by, commit_hash,
+                    {"status": APPLY_STATUS_MANUALLY_APPLIED, "manual": True, "note": note},
+                )
+            except Exception as lm_err:
+                logger.warning("Failed recording manual apply in lifecycle manager: %s", lm_err)
+        return proposal
 
     def reject_proposal(
         self,
@@ -465,7 +643,7 @@ class ProposalManager:
 
         return proposal
 
-    def _commit_merged_proposal(self, proposal: ChangeProposal) -> Optional[str]:
+    def _commit_merged_proposal(self, proposal: ChangeProposal, verb: str = "merge") -> Optional[str]:
         """Creates a git commit tracking the proposal merge.
 
         The commit is scoped to ``.proposals/`` only, so unrelated staged changes
@@ -490,7 +668,7 @@ class ProposalManager:
             )
 
             commit_msg = (
-                f"proposal({proposal.subsystem}): merge {proposal.id} - {proposal.title}\n\n"
+                f"proposal({proposal.subsystem}): {verb} {proposal.id} - {proposal.title}\n\n"
                 f"Author: {proposal.author}\n"
                 f"Target: {proposal.target_resource_id}\n"
                 f"Action: {proposal.action_type}\n"
@@ -501,6 +679,10 @@ class ProposalManager:
                 commit_msg += f"Approved-By: {proposal.merged_by}\n"
             if proposal.required_tier:
                 commit_msg += f"Authority-Tier: {proposal.required_tier}\n"
+            if proposal.apply_status:
+                commit_msg += f"Apply-Status: {proposal.apply_status}\n"
+            if proposal.apply_note:
+                commit_msg += f"Apply-Note: {proposal.apply_note}\n"
             if proposal.preflight_override_reason:
                 commit_msg += f"Preflight-Override: {proposal.preflight_override_reason}\n"
             if proposal.base_revision:

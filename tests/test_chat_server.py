@@ -526,6 +526,46 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         if merged_file.exists():
             merged_file.unlink()
 
+    def test_manual_apply_proposal_flow(self):
+        """N3: a type with no executor merges as manual apply; mark-applied completes it."""
+        prop_id = proposal_manager.create_proposal(ChangeProposal(
+            id="",
+            title="Fix WINEVTLOG CBN grok",
+            author="@parser-doctor",
+            subsystem="parsers",
+            target_resource_id="WINEVTLOG",
+            action_type="PATCH_PARSER_CBN",
+            mutation_payload={"log_type": "WINEVTLOG", "cbn_snippet": "filter {}"},
+            preflight=PreflightProof(syntax_verified=True),
+        ))
+        try:
+            listed = {p["id"]: p for p in self.client.get("/api/proposals").json()}
+            self.assertFalse(listed[prop_id]["has_executor"])
+
+            res = self.client.post(f"/api/proposals/{prop_id}/approve", json={"merged_by": "alice@corp"})
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["status"], "MERGED_MANUAL_APPLY_REQUIRED")
+            detail = self.client.get(f"/api/proposals/{prop_id}").json()
+            self.assertEqual(detail["status"], "MERGED")
+            self.assertEqual(detail["apply_status"], "MANUAL_APPLY_REQUIRED")
+
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                              json={"note": "short"}).status_code, 409)
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                              json={"applied_by": "@parser-doctor",
+                                                    "note": "Applied it in the console"}).status_code, 403)
+            ok = self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                  json={"applied_by": "bob@corp", "note": "Applied CBN patch in parser editor"})
+            self.assertEqual(ok.status_code, 200)
+            self.assertEqual(ok.json()["apply_status"], "MANUALLY_APPLIED")
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                              json={"note": "Applied CBN patch again"}).status_code, 409)
+            self.assertEqual(self.client.post("/api/proposals/nope/mark-applied",
+                                              json={"note": "Applied CBN patch"}).status_code, 404)
+        finally:
+            for d in (proposal_manager.open_dir, proposal_manager.merged_dir):
+                (d / f"{prop_id}.md").unlink(missing_ok=True)
+
     def test_evidence_and_rules_state_endpoints(self):
         res_ev = self.client.get("/api/evidence?limit=10")
         self.assertEqual(res_ev.status_code, 200)

@@ -23,7 +23,13 @@ from pydantic import BaseModel, Field
 from agents.core.base_adk_agent import llm_credentials_status
 from agents.core.approval_policy import ApprovalPolicyError
 from agents.core.target_baseline import StaleTargetError
-from agents.core.proposal_manager import ProposalManager
+from agents.core.proposal_manager import (
+    APPLY_STATUS_APPLIED,
+    APPLY_STATUS_MANUAL_REQUIRED,
+    MERGED_MANUAL_APPLY_REQUIRED,
+    ProposalManager,
+    has_executor,
+)
 from agents.core.evidence_store import get_evidence_store, EvidenceFabricStore
 from agents.core.fleet_scheduler import FleetScheduler
 from agents.core.work_queue import get_work_queue, BaseWorkQueue, ATTENTION_STATUSES
@@ -200,6 +206,11 @@ class ApproveProposalRequest(BaseModel):
     approval_note: Optional[str] = Field(default=None, description="Operator justification recorded with the merge")
     override_preflight: bool = Field(default=False, description="Explicitly approve despite a failed syntax preflight")
     override_reason: Optional[str] = Field(default=None, description="Required justification when override_preflight is set")
+
+
+class MarkAppliedRequest(BaseModel):
+    applied_by: str = Field(default="secops-operator", description="Human who applied the change in SecOps")
+    note: str = Field(..., description="What was applied and where (min 10 chars)")
 
 
 class RejectProposalRequest(BaseModel):
@@ -520,6 +531,11 @@ async def list_proposals(
             "preflight_override_reason": p.preflight_override_reason,
             "base_revision": p.base_revision,
             "base_verified_at_merge": p.base_verified_at_merge,
+            "apply_status": p.apply_status,
+            "applied_by": p.applied_by,
+            "applied_at": p.applied_at,
+            "apply_note": p.apply_note,
+            "has_executor": has_executor(p.action_type),
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -553,6 +569,11 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
             "preflight_override_reason": p.preflight_override_reason,
             "base_revision": p.base_revision,
             "base_verified_at_merge": p.base_verified_at_merge,
+            "apply_status": p.apply_status,
+            "applied_by": p.applied_by,
+            "applied_at": p.applied_at,
+            "apply_note": p.apply_note,
+            "has_executor": has_executor(p.action_type),
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
             "proposed_diff": p.proposed_diff,
@@ -598,26 +619,38 @@ async def approve_proposal(
     if not res.success:
         raise HTTPException(status_code=500, detail=f"Mutation failed: {res.error_message}")
 
-    # Broadcast notification to the relevant stream/topic
-    target_stream = "detections" if "rule" in proposal.subsystem else "general"
-    chat_store.add_message(
-        stream=target_stream,
-        topic="rule-proposals",
-        sender_handle=proposal.author,
-        sender_type="agent",
-        content=(
+    manual = res.status == MERGED_MANUAL_APPLY_REQUIRED
+    target_stream = _proposal_stream(proposal)
+    if manual:
+        content = (
+            f"🛠️ **Change Proposal Approved — Apply Manually**: `{proposal_id}`\n\n"
+            f"- **Approved By**: {body.merged_by}\n"
+            + (f"- **Approval Note**: {body.approval_note}\n" if body.approval_note else "")
+            + f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n\n"
+            f"**Nothing was changed in SecOps.** There is no automated write for `{proposal.action_type}`. "
+            f"Apply the diff in SecOps, then use **Mark applied** on the proposal so the patrol can verify it."
+        )
+    else:
+        content = (
             f"✅ **Change Proposal Merged**: `{proposal_id}`\n\n"
             f"- **Approved By**: {body.merged_by}\n"
             + (f"- **Approval Note**: {body.approval_note}\n" if body.approval_note else "")
             + f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n"
             f"- **Git Commit**: `{res.commit_hash or 'HEAD'}`\n\n"
             f"Production mutation executed successfully via SecOpsEngine."
-        ),
+        )
+    chat_store.add_message(
+        stream=target_stream,
+        topic="rule-proposals",
+        sender_handle=proposal.author,
+        sender_type="agent",
+        content=content,
         proposal_id=proposal_id,
         widget={
             "type": "hitl_proposal_card",
             "proposal_id": proposal_id,
             "status": "MERGED",
+            "apply_status": APPLY_STATUS_MANUAL_REQUIRED if manual else APPLY_STATUS_APPLIED,
             "title": proposal.title,
             "target_resource_id": proposal.target_resource_id,
             "action_type": proposal.action_type,
@@ -626,26 +659,89 @@ async def approve_proposal(
         },
     )
 
-    # Cascade resolution to any matching pending tasks in Evidence Fabric
-    if proposal.target_resource_id:
-        try:
-            pending_todos = evidence_store.list_todos(status="PENDING")
-            for td in pending_todos:
-                t_desc = f"{td.get('title', '')} {td.get('description', '')} {td.get('target_resource_id', '')}"
-                if proposal.target_resource_id in t_desc:
-                    tid = td.get("todo_id") or td.get("id")
-                    if tid:
-                        evidence_store.update_todo_status(
-                            todo_id=tid,
-                            status="RESOLVED",
-                            resolved_by=body.merged_by,
-                            proposal_id=proposal_id,
-                            resolution=f"Resolved via approved proposal {proposal_id}",
-                        )
-        except Exception as e:
-            logger.warning("Could not cascade approval resolution to todos: %s", e)
+    # Only a change that is live resolves the matching to-dos; a manual apply waits for Mark applied.
+    if not manual:
+        _cascade_resolve_todos(proposal, body.merged_by, f"Resolved via approved proposal {proposal_id}")
 
     return asdict(res)
+
+
+@app.post("/api/proposals/{proposal_id}/mark-applied")
+async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> Dict[str, Any]:
+    """Records that a human applied an approved manual-apply proposal in SecOps."""
+    try:
+        proposal = proposal_manager.mark_manually_applied(
+            proposal_id=proposal_id,
+            applied_by=body.applied_by,
+            note=body.note,
+            lifecycle_manager=lifecycle_manager,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
+    except ApprovalPolicyError as policy_err:
+        raise HTTPException(status_code=403, detail=policy_err.to_dict())
+    except ValueError as state_err:
+        raise HTTPException(status_code=409, detail=str(state_err))
+
+    chat_store.add_message(
+        stream=_proposal_stream(proposal),
+        topic="rule-proposals",
+        sender_handle=proposal.author,
+        sender_type="agent",
+        content=(
+            f"✅ **Change Applied Manually**: `{proposal_id}`\n\n"
+            f"- **Applied By**: {body.applied_by}\n"
+            f"- **Note**: {proposal.apply_note}\n"
+            f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})"
+            + ("\n\nThe linked issue is now APPLIED; the next patrol will verify and close it." if proposal.issue_id else "")
+        ),
+        proposal_id=proposal_id,
+        widget={
+            "type": "hitl_proposal_card",
+            "proposal_id": proposal_id,
+            "status": "MERGED",
+            "apply_status": proposal.apply_status,
+            "title": proposal.title,
+            "target_resource_id": proposal.target_resource_id,
+            "action_type": proposal.action_type,
+            "merged_by": proposal.merged_by,
+            "commit_hash": proposal.merge_commit,
+        },
+    )
+    _cascade_resolve_todos(proposal, body.applied_by, f"Resolved via manually applied proposal {proposal_id}")
+    return {
+        "proposal_id": proposal_id,
+        "apply_status": proposal.apply_status,
+        "applied_by": proposal.applied_by,
+        "applied_at": proposal.applied_at,
+        "issue_id": proposal.issue_id,
+    }
+
+
+def _proposal_stream(proposal: Any) -> str:
+    return "detections" if "rule" in (proposal.subsystem or "") else "general"
+
+
+def _cascade_resolve_todos(proposal: Any, resolved_by: str, resolution: str) -> None:
+    """Resolves pending to-dos that mention the proposal's target."""
+    if not proposal.target_resource_id:
+        return
+    try:
+        pending_todos = evidence_store.list_todos(status="PENDING")
+        for td in pending_todos:
+            t_desc = f"{td.get('title', '')} {td.get('description', '')} {td.get('target_resource_id', '')}"
+            if proposal.target_resource_id in t_desc:
+                tid = td.get("todo_id") or td.get("id")
+                if tid:
+                    evidence_store.update_todo_status(
+                        todo_id=tid,
+                        status="RESOLVED",
+                        resolved_by=resolved_by,
+                        proposal_id=proposal.id,
+                        resolution=resolution,
+                    )
+    except Exception as e:
+        logger.warning("Could not cascade resolution to todos: %s", e)
 
 
 @app.post("/api/proposals/{proposal_id}/reject")

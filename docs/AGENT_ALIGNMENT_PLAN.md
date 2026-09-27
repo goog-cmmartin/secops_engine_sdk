@@ -14,19 +14,21 @@ A second agent reviewed this plan and agreed with S1–S5. Checking the code tur
 | S2 | Router no longer creates `SOC-AUTO-*` issues. OPERATIONAL without a linked issue = record the observation only (the to-do already exists). URGENT = alert only. Update `test_knowledge_layer` (asserts at 189 and 214) | `communication_router.dispatch` | Done |
 | A5 | Cloud status becomes information only: remove the `upstream_cloud_disruption` issue, keep the to-do and chat alert, close the existing `issue_upstream_cloud_status` once | `fleet_scheduler` cloud branch | Done |
 | N2 | Parser auto-close only runs when the issue is APPLIED/VALIDATING. If the problem clears while the issue is AVAILABLE or NEEDS_HUMAN, the issue stays open and an agent can still claim it. Close those too, as "resolved without a change" | `fleet_scheduler` parser branch | Done |
-| N3 | Merge does nothing for `PATCH_PARSER_CBN`, `REMEDIATE_FEED`, `CREATE_FINDINGS_REFINEMENT`: they fall through to `APPLIED_CUSTOM` and nothing is written to production, yet the proposal shows MERGED and the issue APPLIED. Fix: connect `CREATE_FINDINGS_REFINEMENT` → `curated_detections.refinements.create`. For action types with no executor, record `MERGED_MANUAL_APPLY_REQUIRED`, leave the issue open, and show "Apply manually" in the UI | `proposal_manager.approve_and_merge` | Todo |
+| N3 | Merge does nothing for `PATCH_PARSER_CBN`, `REMEDIATE_FEED`, `CREATE_FINDINGS_REFINEMENT`: they fall through to `APPLIED_CUSTOM` and nothing is written to production, yet the proposal shows MERGED and the issue APPLIED. Fix: connect `CREATE_FINDINGS_REFINEMENT` → `curated_detections.refinements.create`. For action types with no executor, record `MERGED_MANUAL_APPLY_REQUIRED`, leave the issue open, and show "Apply manually" in the UI | `proposal_manager.approve_and_merge` | Done |
 | S5 | Test: every `requires_capabilities` set the scheduler emits must be met by at least one agent profile in that issue's plane | `tests/` | Todo |
 
 **Next (after the items above):** A3 decay and A2 tuning. Both use `UPDATE_RULE_TEXT`, which really writes to production and goes through the stale-target check. Feed (A1) waits: there is no feed write capability, so a feed proposal can only recommend.
 
 ### Where this plan differs from the peer review
-- "`@parser-doctor` is fully functional end to end": no. N3 means merging changes nothing in SecOps, and N1 means each patrol resets the issue.
+- "`@parser-doctor` is fully functional end to end": no. There is still no parser write capability, so after N3 a parser fix is approved in the UI and applied by hand ("Mark applied"). N1 is fixed.
 - "Feed as the second autonomous slice": no feed write capability exists (`feed.*` has only get/search/audit). Rules are the better second slice.
 - S2 fix: don't let the router create issues at all, rather than gating on "requests tracking + has playbook". Scheduler branches own issue creation.
 - `infrastructure` → `external` (the enum value exists), not `platform`. This mostly stops mattering once A5 lands.
 - The ~125 orphaned `SOC-AUTO` issues were cleaned up earlier; 1 remains in `.state/work_queue`.
 
 **Found during N2 (fixed):** the parser patrol's APPLIED/VALIDATING close path built `VerificationProof` with fields that don't exist (`telemetry_proof_query`, `metric_before`, `success`). The exception was caught and logged, so applied parser fixes were **never** verified and closed by the patrol. Now uses the real fields (`verification_id`, `change_id`, `metrics_before/after`, `summary`).
+
+**N3 notes:** `EXECUTABLE_ACTIONS` in `proposal_manager.py` is the source of truth for which action types write to SecOps (mirrored in `app.js`). Other action types merge with `apply_status: MANUAL_APPLY_REQUIRED` and appear in the HITL Review column as "Apply manually". `POST /api/proposals/{id}/mark-applied` (human only, note of 10+ chars) moves the linked issue to APPLIED so the patrol can verify and close it. Proposals merged before N3 without an executor are shown as "Apply manually" because their changes were never written.
 
 ## How work gets picked up today
 Patrol findings take one of two paths:

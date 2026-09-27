@@ -337,6 +337,10 @@ class DetectionTuningAgentAgent(BaseSecOpsAdkAgent):
             "rule_id": rule_id,
             "action_type": action_type,
             "tuned_rule_text": tuned_rule_text,
+            "refinement_query": "\n".join(
+                ln for ln in tuned_rule_text.splitlines() if ln.strip() and not ln.strip().startswith("//")
+            ).strip() if is_curated else "",
+            "rule_text": tuned_rule_text if not is_curated else "",
             "unsuppressed_trigger_count": unsuppressed_trigger_count,
             "projected_suppressed_count": projected_suppressed_count,
             "noise_reduction_pct": noise_reduction_pct,

@@ -131,3 +131,6 @@ references/
 .state/
 .chat/
 .chris.json
+
+# Impeccable design-skill reference copies & local live config
+.impeccable/

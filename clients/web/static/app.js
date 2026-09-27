@@ -1043,7 +1043,6 @@ function renderStreams() {
       <span># ${escapeHtml(s.name)}</span>
       <span class="stream-header-badges">
         ${unreadBadgeHtml(streamUnread)}
-        <span class="stream-badge" title="Topics">${s.topics ? s.topics.length : 0}</span>
       </span>
     `;
 
@@ -4882,6 +4881,10 @@ const ACTIONS = {
   runTelemetrySync() {
     document.getElementById("btnRunSyncNow")?.click();
   },
+  openDm(handle) {
+    switchView("chat");
+    switchTopic("dm", handle);
+  },
   useSuggestedPrompt(text) {
     const input = document.getElementById("composerInput");
     if (!input) return;
@@ -6476,13 +6479,21 @@ async function renderIngestionPage(forceRefresh = false) {
     const totalFeeds = feedSummary.total_feeds_audited || ingestionData.feeds.length || 0;
     const totalParsers = parserSummary.total_parsers_audited || ingestionData.parsers.length || 0;
     const versionDrifts = parserSummary.version_drift_count || 0;
-    const p95Latency = feedSummary.high_latency_count ? `${feedSummary.high_latency_count} lagging` : "SLA Met";
+    const p95Latency = feedSummary.high_latency_count
+      ? `${feedSummary.high_latency_count} lagging`
+      : (totalFeeds > 0 ? "SLA Met" : "—");
     const dropCodes = parserSummary.failed_count || 0;
 
     const elTotalFeeds = document.getElementById("kpiTotalFeeds");
     if (elTotalFeeds) elTotalFeeds.textContent = totalFeeds;
     const elFeedSub = document.getElementById("kpiFeedSub");
-    if (elFeedSub) elFeedSub.textContent = `${feedSummary.healthy_count || totalFeeds} healthy • 0 failed`;
+    if (elFeedSub) {
+      elFeedSub.textContent = feedsRes._error
+        ? "Feed audit unavailable"
+        : totalFeeds === 0
+          ? "No feeds configured"
+          : `${feedSummary.healthy_count ?? totalFeeds} healthy • ${feedSummary.failed_count || 0} failed`;
+    }
 
     const elP95Latency = document.getElementById("kpiP95Latency");
     if (elP95Latency) elP95Latency.textContent = p95Latency;
@@ -6981,8 +6992,15 @@ function renderGastownHeader() {
       gtAlertItem.className = "gt-alert-pill";
       gtAlertItem.disabled = false;
       gtAlertItem.title = "Show the Needs Operator column";
+    } else if (typeof summary.escalation_count === "number" && summary.escalation_count > 0) {
+      const n = summary.escalation_count;
+      gtAlertItem.dataset.target = "escalations";
+      gtAlertItem.textContent = `⚠ No reviews pending · ${n} unacknowledged escalation${n > 1 ? "s" : ""} →`;
+      gtAlertItem.className = "gt-alert-pill gt-alert-amber";
+      gtAlertItem.disabled = false;
+      gtAlertItem.title = "Show Escalations";
     } else {
-      gtAlertItem.textContent = "✓ All clear — 0 pending reviews";
+      gtAlertItem.textContent = "✓ All clear: nothing pending review, no open escalations";
       gtAlertItem.className = "gt-alert-pill gt-alert-green";
       gtAlertItem.disabled = true;
       gtAlertItem.removeAttribute("title");
@@ -6995,8 +7013,12 @@ function renderGastownHeader() {
 
 // Alert strip -> Kanban board, scrolled to and briefly highlighting the column the pill refers to.
 function focusReviewColumn() {
-  switchGastownSubtab("kanban");
   const pill = document.getElementById("gtAlertItem");
+  if (pill && pill.dataset.target === "escalations") {
+    switchGastownSubtab("escalations");
+    return;
+  }
+  switchGastownSubtab("kanban");
   const wantAttention = pill && pill.dataset.target === "attention";
   const col = document.getElementById(wantAttention ? "kanbanColAttention" : "kanbanColReview");
   if (!col) return;
@@ -8579,15 +8601,47 @@ function setupLibraryListeners() {
     });
   }
 
-  const chips = document.querySelectorAll(".lib-filter-chip");
-  chips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      chips.forEach((c) => c.classList.remove("active"));
-      chip.classList.add("active");
+  const chipBar = document.querySelector(".library-filter-chips");
+  if (chipBar && !chipBar.dataset.bound) {
+    chipBar.dataset.bound = "1";
+    chipBar.addEventListener("click", (e) => {
+      const chip = e.target.closest(".lib-filter-chip");
+      if (!chip) return;
       libraryState.activeSubsystemFilter = chip.getAttribute("data-subsystem") || "ALL";
+      renderLibraryFilterChips();
       renderAgentLibraryList();
     });
-  });
+  }
+  renderLibraryFilterChips();
+}
+
+// Agent grouping for the library chips. Every agent maps to exactly one group, so no agent is unreachable.
+const LIBRARY_GROUPS = [
+  { id: "detections", label: "Detections", test: (s) => /detection|rule/.test(s) },
+  { id: "ingestion", label: "Ingestion & Telemetry", test: (s) => /ingestion|telemetry|replay|testing/.test(s) },
+  { id: "identity", label: "Identity & Governance", test: (s) => /identity|governance|posture/.test(s) },
+  { id: "intel", label: "Threat Intel", test: (s) => /threat|mitre/.test(s) },
+  { id: "soar", label: "SOAR", test: (s) => /soar|automation/.test(s) },
+  { id: "analytics", label: "Analytics", test: (s) => /analytics|sql/.test(s) },
+  { id: "platform", label: "Platform & Coordination", test: () => true },
+];
+
+function libraryGroupOf(agent) {
+  const sub = String(agent.subsystem || "").toLowerCase();
+  return LIBRARY_GROUPS.find((g) => g.test(sub)).id;
+}
+
+function renderLibraryFilterChips() {
+  const bar = document.querySelector(".library-filter-chips");
+  if (!bar) return;
+  const agents = libraryState.agents || [];
+  const active = libraryState.activeSubsystemFilter || "ALL";
+  const counts = {};
+  agents.forEach((a) => { const g = libraryGroupOf(a); counts[g] = (counts[g] || 0) + 1; });
+  const chip = (id, label, n) =>
+    `<button type="button" class="lib-filter-chip${active === id ? " active" : ""}" data-subsystem="${id}" aria-pressed="${active === id}">${escapeHtml(label)}${n != null ? ` <span class="lib-chip-count">${n}</span>` : ""}</button>`;
+  bar.innerHTML = chip("ALL", "All", agents.length || null) +
+    LIBRARY_GROUPS.filter((g) => counts[g.id]).map((g) => chip(g.id, g.label, counts[g.id])).join("");
 }
 
 function renderAgentLibraryList() {
@@ -8600,26 +8654,11 @@ function renderAgentLibraryList() {
   }
 
   const query = libraryState.searchQuery;
-  const filter = (libraryState.activeSubsystemFilter || "all").toLowerCase();
+  const filter = libraryState.activeSubsystemFilter || "ALL";
+  renderLibraryFilterChips();
 
   const filtered = libraryState.agents.filter((a) => {
-    // Subsystem filter
-    if (filter !== "all") {
-      const sub = (a.subsystem || "").toLowerCase();
-      const match =
-        sub === filter ||
-        sub.includes(filter) ||
-        (filter === "detections" && (sub.includes("detection") || sub.includes("rule"))) ||
-        (filter === "ingestion" && (sub.includes("ingestion") || sub.includes("telemetry") || sub.includes("replay"))) ||
-        (filter === "identity" && sub.includes("identity")) ||
-        (filter === "analytics" && (sub.includes("analytics") || sub.includes("sql"))) ||
-        (filter === "cartography" && (sub.includes("cartography") || sub.includes("survey"))) ||
-        (filter === "governance" && (sub.includes("governance") || sub.includes("posture"))) ||
-        (filter === "soar" && sub.includes("soar"));
-      if (!match) {
-        return false;
-      }
-    }
+    if (filter !== "ALL" && libraryGroupOf(a) !== filter) return false;
     // Search query filter
     if (query) {
       const matchName = (a.name || "").toLowerCase().includes(query);
@@ -8638,7 +8677,7 @@ function renderAgentLibraryList() {
   if (filtered.length === 0) {
     const filterDesc = query
       ? `matching "${escapeHtml(query)}"`
-      : `in category "${escapeHtml(libraryState.activeSubsystemFilter)}"`;
+      : `in "${escapeHtml((LIBRARY_GROUPS.find((g) => g.id === filter) || {}).label || filter)}"`;
     container.innerHTML = `
       <div style="padding: 24px 12px; text-align: center; color: var(--c-neutral); font-size: 12px;">
         No agents found ${filterDesc}.
@@ -8815,7 +8854,6 @@ function selectAgentInLibrary(handle) {
           <span>Bound SDK Tools &amp; Workflow Capabilities</span>
           <span class="lib-section-subtitle">(${(agent.tools || []).length} registered)</span>
         </div>
-        <span class="meta-tag">100% Live GEAP Ready</span>
       </div>
       <div class="lib-tools-grid">
         ${renderToolCards(agent.tools || [])}
@@ -9085,9 +9123,16 @@ async function loadShiftBriefing(hours = 8) {
     // Update banner metadata
     const timeBadge = document.getElementById("shiftTimestampBadge");
     if (timeBadge) {
-      const s = briefing.start_time ? new Date(briefing.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      const e = briefing.end_time ? new Date(briefing.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      timeBadge.textContent = `${briefing.shift_name || "Shift"} (${s} – ${e})`;
+      // shift_name already carries the UTC window; append the local-time equivalent only when it differs.
+      const startIso = briefing.window_start || briefing.start_time;
+      const endIso = briefing.window_end || briefing.end_time;
+      const fmt = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      let label = briefing.shift_name || "Shift briefing";
+      if (startIso && endIso && new Date().getTimezoneOffset() !== 0) {
+        label += ` (${fmt(startIso)}–${fmt(endIso)} local)`;
+      }
+      timeBadge.textContent = label;
+      if (briefing.generated_at) timeBadge.title = `Generated ${new Date(briefing.generated_at).toLocaleString()}`;
     }
 
     // Render 5 delta categories
@@ -9109,6 +9154,17 @@ async function loadShiftBriefing(hours = 8) {
   }
 }
 
+const BRIEFING_SUBSYSTEM_LABELS = {
+  ingestion: "Ingestion: no failing observations",
+  telemetry: "Telemetry: no failing observations",
+  parsers: "Parsers: no failing observations",
+  rules: "Detection rules: no failing observations",
+  soar: "SOAR: no failing observations",
+  identity: "Identity: no failing observations",
+  timestamp: "Timestamps: no failing observations",
+  infrastructure: "Infrastructure: no failing observations",
+};
+
 function renderDeltaSection(countElemId, listElemId, items, emptyText) {
   const countEl = document.getElementById(countElemId);
   const listEl = document.getElementById(listElemId);
@@ -9122,7 +9178,9 @@ function renderDeltaSection(countElemId, listElemId, items, emptyText) {
     return;
   }
 
-  listEl.innerHTML = items.map(item => {
+  listEl.innerHTML = items.map(raw => {
+    // Baseline entries arrive as plain strings; bare subsystem ids get a readable label.
+    const item = typeof raw === "string" ? { title: BRIEFING_SUBSYSTEM_LABELS[raw] || raw } : (raw || {});
     const title = item.title || item.summary || item.headline || item.id || JSON.stringify(item);
     const id = item.id || item.issue_id || "";
     const agent = item.agent || item.author || "";
@@ -9183,14 +9241,24 @@ async function loadPostureSnapshot() {
           <tr style="border-bottom:1px solid var(--border-color);">
             <td style="padding:8px 10px; font-family:monospace; color:var(--text-muted);">${escapeHtml(g.gap_id || "-")}</td>
             <td style="padding:8px 10px; text-transform:uppercase; font-size:11px; color:var(--text-dim);">${escapeHtml(g.category || "-")}</td>
-            <td style="padding:8px 10px; font-weight:600; color:var(--text-main);">${escapeHtml(g.subject || "-")}</td>
+            <td style="padding:8px 10px; font-weight:600; color:var(--text-main);">${escapeHtml(g.title || (g.subject && (g.subject.name || g.subject.id)) || g.subject || "-")}</td>
             <td style="padding:8px 10px; color:var(--text-muted);">${escapeHtml(g.description || "-")}</td>
             <td style="padding:8px 10px;">
-              <span style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:3px; background:${g.severity === 'high' ? 'var(--c-danger-bg)' : 'var(--c-warn-bg)'}; color:${g.severity === 'high' ? 'var(--c-danger)' : 'var(--c-warn)'}; text-transform:uppercase;">
-                ${escapeHtml(g.severity || "medium")}
-              </span>
+              ${(() => {
+                const sev = String(g.impact || g.severity || "medium").toLowerCase();
+                const hot = sev === "high" || sev === "critical";
+                return `<span style="font-size:11px; font-weight:700; padding:2px 6px; border-radius:3px; background:${hot ? 'var(--c-danger-bg)' : 'var(--c-warn-bg)'}; color:${hot ? 'var(--c-danger)' : 'var(--c-warn)'}; text-transform:uppercase;">${escapeHtml(sev)}</span>`;
+              })()}
             </td>
-            <td style="padding:8px 10px; color:var(--c-sky);">@${escapeHtml((g.recommended_agent || "tenant-cartographer").replace('@', ''))}</td>
+            <td style="padding:8px 10px;">${(() => {
+              const agent = g.recommended_agent || ((g.recommendation || "").match(/@[a-z0-9-]+/) || [])[0];
+              const handle = agent ? "@" + agent.replace(/^@/, "") : "";
+              const known = handle && (state.agents || []).some((a) => a.handle === handle);
+              if (!handle) return `<span style="color:var(--text-dim);">—</span>`;
+              return known
+                ? `<button type="button" class="link-btn" ${act("openDm", handle)} title="${escapeHtml(g.recommendation ? g.recommendation + " (click to message)" : "Message this agent")}">${escapeHtml(handle)}</button>`
+                : `<span style="color:var(--c-sky);" title="${escapeHtml(g.recommendation || "")}">${escapeHtml(handle)}</span>`;
+            })()}</td>
           </tr>
         `).join("");
       }

@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/vendor/secops-theme/tokens.css">
   <link rel="stylesheet" href="/static/vendor/secops-theme/secops-theme.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.5">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.6">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 </head>
 <body>
@@ -143,7 +143,6 @@
             <span id="currentTopicLabel" class="breadcrumb-topic">rule-proposals</span>
           </div>
           <div class="chat-actions">
-            <span class="chat-header-meta">Google ADK 2 &bull; GEAP Ready</span>
             <button id="btnTriggerRuleAudit" class="btn-drawer-action" style="display:none; background:var(--c-ok-solid); color:var(--on-solid); border:none; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; cursor:pointer;" title="Run unified detection repository audit across custom and curated rules">
               <span>🛡️ Audit Rules</span>
             </button>
@@ -206,7 +205,7 @@
                   <span class="gt-badge gt-badge-green">Attached</span>
                 </div>
                 <div class="gt-mayor-sub">
-                  Coordinator: <code id="gtMayorHandle">@secops-dispatcher</code> &bull; Google ADK 2 &bull; GEAP Engine
+                  Coordinator: <code id="gtMayorHandle">@secops-dispatcher</code>
                 </div>
               </div>
             </div>
@@ -668,7 +667,7 @@
             <div class="kpi-card">
               <div class="kpi-label">Configured Feeds</div>
               <div id="kpiTotalFeeds" class="kpi-value">--</div>
-              <div id="kpiFeedSub" class="kpi-sub">Auditing Health Hub...</div>
+              <div id="kpiFeedSub" class="kpi-sub">Loading…</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">P95 Transport Latency</div>
@@ -1027,9 +1026,7 @@
               <p class="page-subtitle">Inspect specialized Google ADK 2 agents, system instructions, operational protocols, and bound SDK tools</p>
             </div>
             <div class="page-actions library-header-actions">
-              <span id="libraryAgentCountBadge" class="meta-tag">19 Active Agents</span>
-              <span class="meta-tag">Google ADK 2</span>
-              <span class="meta-tag">Live Chronicle / GEAP</span>
+              <span id="libraryAgentCountBadge" class="meta-tag">— agents</span>
             </div>
           </div>
 
@@ -1048,14 +1045,7 @@
 
               <!-- Filter Chips by Subsystem -->
               <div class="library-filter-chips">
-                <button class="lib-filter-chip active" data-subsystem="ALL">All</button>
-                <button class="lib-filter-chip" data-subsystem="detections">Detections</button>
-                <button class="lib-filter-chip" data-subsystem="ingestion">Ingestion</button>
-                <button class="lib-filter-chip" data-subsystem="identity">Identity</button>
-                <button class="lib-filter-chip" data-subsystem="analytics">Analytics</button>
-                <button class="lib-filter-chip" data-subsystem="cartography">Cartography</button>
-                <button class="lib-filter-chip" data-subsystem="governance">Governance</button>
-                <button class="lib-filter-chip" data-subsystem="soar">SOAR</button>
+                <button type="button" class="lib-filter-chip active" data-subsystem="ALL" aria-pressed="true">All</button>
               </div>
 
               <!-- Scrollable Agent Cards List -->
@@ -1215,29 +1205,29 @@
               <div class="metric-card">
                 <span class="metric-label">Assertion Freshness</span>
                 <div class="freshness-bar-container">
-                  <div id="freshnessBarFresh" style="width:60%;" title="Fresh (<1h)"></div>
-                  <div id="freshnessBarRecent" style="width:30%;" title="Recent (1-24h)"></div>
-                  <div id="freshnessBarStale" style="width:10%;" title="Stale (>24h)"></div>
+                  <div id="freshnessBarFresh" style="width:0%;" title="Fresh (<1h)"></div>
+                  <div id="freshnessBarRecent" style="width:0%;" title="Recent (1-24h)"></div>
+                  <div id="freshnessBarStale" style="width:0%;" title="Stale (>24h)"></div>
                 </div>
                 <div id="freshnessLegend" class="freshness-legend">Fresh: 0 | Recent: 0 | Stale: 0</div>
               </div>
 
               <div class="metric-card">
                 <span class="metric-label">Telemetry &amp; Feeds</span>
-                <span id="postureTelemetryVal" class="metric-val status-blue">Active</span>
-                <span class="metric-sub">Chronicle Ingestion</span>
+                <span id="postureTelemetryVal" class="metric-val" title="No live measurement wired to this card yet">—</span>
+                <span class="metric-sub">Not measured yet</span>
               </div>
 
               <div class="metric-card">
                 <span class="metric-label">Parsing Quality</span>
-                <span id="postureParsingVal" class="metric-val status-green">Healthy</span>
-                <span class="metric-sub">CBN Normalization</span>
+                <span id="postureParsingVal" class="metric-val" title="No live measurement wired to this card yet">—</span>
+                <span class="metric-sub">Not measured yet</span>
               </div>
 
               <div class="metric-card">
                 <span class="metric-label">Detection Health</span>
-                <span id="postureDetectionsVal" class="metric-val status-purple">Operational</span>
-                <span class="metric-sub">YARA-L Rule Engine</span>
+                <span id="postureDetectionsVal" class="metric-val" title="No live measurement wired to this card yet">—</span>
+                <span class="metric-sub">Not measured yet</span>
               </div>
 
               <div class="metric-card">
@@ -1251,7 +1241,6 @@
             <div class="card gaps-card">
               <h3 class="card-section-title">
                 <span>Surfaced Institutional Knowledge Gaps &amp; Unknowns</span>
-                <span class="badge-blue" style="font-size:11px; padding:2px 6px;">Zero Hallucination</span>
               </h3>
               <div class="table-responsive">
                 <table class="data-table" id="tableKnowledgeGaps">
@@ -1259,10 +1248,10 @@
                     <tr>
                       <th>Gap ID</th>
                       <th>Category</th>
-                      <th>Subject</th>
+                      <th>Gap</th>
                       <th>Description</th>
-                      <th>Severity</th>
-                      <th>Investigation Agent</th>
+                      <th>Impact</th>
+                      <th>Suggested Agent</th>
                     </tr>
                   </thead>
                   <tbody id="bodyKnowledgeGaps">
@@ -1387,6 +1376,6 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="/static/app.js?v=2.7.2"></script>
+  <script src="/static/app.js?v=2.7.3"></script>
 </body>
 </html>

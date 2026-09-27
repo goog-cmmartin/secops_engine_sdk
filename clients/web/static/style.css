@@ -2540,6 +2540,12 @@ button.gt-alert-pill:disabled { cursor: default; opacity: 1; }
   border-color: rgba(16, 185, 129, 0.3);
 }
 
+.gt-alert-pill.gt-alert-amber {
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
+  border-color: var(--c-warn-bd);
+}
+
 .gt-alert-pill.gt-alert-red {
   background: var(--c-danger-bg);
   color: var(--c-danger);
@@ -4911,4 +4917,24 @@ td.load-error-cell { padding: 0 !important; }
   font-size: 11px;
   color: var(--text-dim);
   margin: 0 2px 4px;
+}
+
+/* Inline text-style button (e.g. agent handle in the knowledge-gaps table) */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--c-sky);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+}
+.link-btn:hover { text-decoration-color: currentColor; }
+
+.lib-chip-count {
+  margin-left: 3px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }

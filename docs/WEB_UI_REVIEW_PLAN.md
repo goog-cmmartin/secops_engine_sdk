@@ -148,3 +148,22 @@ Root cause of the chat noise found in the audit (133 unread, repeated "Agent Con
 | 37 | Missing credentials: show one persistent chat banner instead of a config-error reply per message | Done — `/api/health.llm_configured` (bool only) + composer notice; creds logic shared via `llm_credentials_status()` |
 | 38 | 390px viewport overflows to 484px — find and fix the wide element | Done — top-bar meta, chat-header actions, Actions/Dashboards tab strips (now scroll), coordinator banner, page padding. `ovfcheck` now flags horizontal-scroll containers and regenerates `ovf.html` from live index.html; 390px via cdp.py |
 | 39 | Kanban Triage: collapse/group empty scheduled-audit tasks | Root cause fixed — (a) `fleet_scheduler` set `CommunicationPolicy(urgency=…)` but the router reads `communication_class` (default OPERATIONAL), so every all-clear patrol opened a SOC issue; (b) `test_fleet_scheduler` used the router singleton → live `.state/work_queue`. Regression test added. UI grouping deferred pending purge of the ~125 stale issues |
+
+## Session 2026-09-27 (UX re-review, part 4)
+Live walk-through of every view on the running server (CDP text/DOM scans).
+| # | Item | Status |
+|---|------|--------|
+| 38 | Agent posts to streams outside `DEFAULT_STREAMS` (`#infrastructure`, `#governance`, …) were stored but unreachable from the sidebar. `ChatStore.list_streams()` now appends any stream that has messages | Done + test |
+| 39 | Actions alert strip said "All clear" while an escalation was unacked → amber pill that links to Escalations | Done |
+| 40 | Shift brief header rendered "( – )": read `window_start`/`window_end`; show local time only when not UTC | Done |
+| 41 | Verified Baselines listed raw ids (`"ingestion"`) → readable labels | Done |
+| 42 | Knowledge-gaps table: Subject/Severity/Agent read non-existent fields (all "-", all MEDIUM, all @tenant-cartographer) → title/impact/agent parsed from the recommendation; handle opens a DM | Done |
+| 43 | Posture cards hard-coded "Active/Healthy/Operational" with no data source → "—" / "Not measured yet"; freshness bar placeholder widths 60/30/10 → 0 | Done |
+| 44 | Library chips: Cartography/Governance matched 0–1 agents; 5 agents unreachable by any chip → groups built from real subsystems, with counts; every agent lands in exactly one group | Done |
+| 45 | Feeds KPI "N healthy • 0 failed" hard-coded 0; "SLA Met" with zero feeds → real failed count / "No feeds configured" / "—" | Done |
+| 46 | Marketing tags removed (GEAP Ready ×3, Google ADK 2, Zero Hallucination); sidebar stream topic-count badge removed (read as unread) | Done |
+
+### Open (backend, not UI)
+- `compute_knowledge_snapshot()` returns hard-coded tenant counts (427 rules, 83 log sources, …) and four static knowledge gaps (gap-001…004). The UI renders the gaps accurately, but the data is still fabricated. Needs real derivation, or should be labelled as sample data.
+- Shift brief falls back to "All scheduled Deacons completed patrols…" (legacy term).
+

@@ -1,6 +1,7 @@
 /**
  * Google SecOps Design System Tokens
- * Version: 1.0.0
+ * Version: 1.0.1
+ * 1.0.1: text/status tokens raised to WCAG AA (4.5:1) on all surfaces and own tints
  * Verified against live Google SecOps (SDL)
  */
 
@@ -59,7 +60,7 @@
   /* Typography & Foreground Colors */
   --secops-text-primary: #c3d2e8;
   --secops-text-heading: #e8eaed;
-  --secops-text-secondary: #9aa0a6;
+  --secops-text-secondary: #aaafb4;
   --secops-text-disabled: #5f6368;
   --secops-text-accent: #8ab4f8;
   --secops-text-inverse: #161625;
@@ -73,11 +74,11 @@
   --secops-border-selected: #1a73e8;
 
   /* Semantic Severity Tokens (Dark Mode) */
-  --secops-status-critical: #ff5a50;
+  --secops-status-critical: #ff8e87;
   --secops-status-critical-bg: rgba(255, 90, 80, 0.16);
   --secops-status-critical-border: rgba(255, 90, 80, 0.35);
 
-  --secops-status-high: #fa7b17;
+  --secops-status-high: #fb9544;
   --secops-status-high-bg: rgba(250, 123, 23, 0.16);
   --secops-status-high-border: rgba(250, 123, 23, 0.35);
 
@@ -85,15 +86,15 @@
   --secops-status-medium-bg: rgba(252, 201, 52, 0.16);
   --secops-status-medium-border: rgba(252, 201, 52, 0.35);
 
-  --secops-status-low: #24c1e0;
+  --secops-status-low: #2fc4e2;
   --secops-status-low-bg: rgba(36, 193, 224, 0.16);
   --secops-status-low-border: rgba(36, 193, 224, 0.35);
 
-  --secops-status-success: #54ab98;
+  --secops-status-success: #78bdae;
   --secops-status-success-bg: rgba(84, 171, 152, 0.16);
   --secops-status-success-border: rgba(84, 171, 152, 0.35);
 
-  --secops-chip-event: #d272ff;
+  --secops-chip-event: #db90ff;
   --secops-chip-event-bg: rgba(190, 53, 255, 0.16);
   --secops-chip-event-border: rgba(190, 53, 255, 0.35);
 
@@ -154,7 +155,7 @@
   --secops-text-heading: #1f1f1f;
   --secops-text-secondary: #5f6368;
   --secops-text-disabled: #80868b;
-  --secops-text-accent: #1a73e8;
+  --secops-text-accent: #0b57d0;
   --secops-text-inverse: #ffffff;
   --secops-text-code: #0b57d0;
 
@@ -166,19 +167,19 @@
   --secops-border-selected: #1a73e8;
 
   /* Semantic Severity Tokens (Light Mode) */
-  --secops-status-critical: #d93025;
+  --secops-status-critical: #c5221f;
   --secops-status-critical-bg: #fce8e6;
   --secops-status-critical-border: #fad2cf;
 
-  --secops-status-high: #e37400;
+  --secops-status-high: #a35400;
   --secops-status-high-bg: #feefe3;
   --secops-status-high-border: #fdd0a2;
 
-  --secops-status-medium: #b06000;
+  --secops-status-medium: #7a5c00;
   --secops-status-medium-bg: #fef7e0;
   --secops-status-medium-border: #feeaa7;
 
-  --secops-status-low: #007b83;
+  --secops-status-low: #00747c;
   --secops-status-low-bg: #e0f2f1;
   --secops-status-low-border: #b2dfdb;
 

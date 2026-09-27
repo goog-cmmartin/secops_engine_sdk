@@ -36,6 +36,7 @@ EXECUTABLE_ACTIONS = RULE_TEXT_ACTIONS | RULE_DEPLOYMENT_ACTIONS | frozenset({
 APPLY_STATUS_APPLIED = "APPLIED"
 APPLY_STATUS_MANUAL_REQUIRED = "MANUAL_APPLY_REQUIRED"
 APPLY_STATUS_MANUALLY_APPLIED = "MANUALLY_APPLIED"
+APPLY_STATUS_ABANDONED = "ABANDONED"
 MERGED_MANUAL_APPLY_REQUIRED = "MERGED_MANUAL_APPLY_REQUIRED"
 
 MIN_MANUAL_APPLY_NOTE_LEN = 10
@@ -105,11 +106,15 @@ class ChangeProposal:
     preflight: PreflightProof = field(default_factory=PreflightProof)
     mutation_payload: Dict[str, Any] = field(default_factory=dict)
     # Set on merge: APPLIED (written to SecOps), MANUAL_APPLY_REQUIRED (no executor;
-    # a human must apply it), or MANUALLY_APPLIED (a human confirmed they applied it).
+    # a human must apply it), MANUALLY_APPLIED (a human confirmed they applied it),
+    # or ABANDONED (a human decided not to apply it; the linked issue goes back to a human).
     apply_status: Optional[str] = None
     applied_by: Optional[str] = None
     applied_at: Optional[str] = None
     apply_note: Optional[str] = None
+    abandoned_by: Optional[str] = None
+    abandoned_at: Optional[str] = None
+    abandon_reason: Optional[str] = None
 
 
 @dataclass
@@ -170,6 +175,9 @@ class ProposalManager:
             "applied_by": proposal.applied_by,
             "applied_at": proposal.applied_at,
             "apply_note": proposal.apply_note,
+            "abandoned_by": proposal.abandoned_by,
+            "abandoned_at": proposal.abandoned_at,
+            "abandon_reason": proposal.abandon_reason,
         }
 
         yaml_text = yaml.dump(frontmatter, sort_keys=False, default_flow_style=False)
@@ -254,6 +262,9 @@ class ProposalManager:
             applied_by=frontmatter.get("applied_by"),
             applied_at=frontmatter.get("applied_at"),
             apply_note=frontmatter.get("apply_note"),
+            abandoned_by=frontmatter.get("abandoned_by"),
+            abandoned_at=frontmatter.get("abandoned_at"),
+            abandon_reason=frontmatter.get("abandon_reason"),
         )
 
     def create_proposal(self, proposal: ChangeProposal, engine: Any = None) -> str:
@@ -609,6 +620,66 @@ class ProposalManager:
                 logger.warning("Failed recording manual apply in lifecycle manager: %s", lm_err)
         return proposal
 
+    def abandon_manual_apply(
+        self,
+        proposal_id: str,
+        abandoned_by: str,
+        reason: str,
+        lifecycle_manager: Any = None,
+    ) -> ChangeProposal:
+        """Records that a human decided not to apply a merged, manual-apply proposal.
+
+        The proposal stays in merged/ (status MERGED) with apply_status ABANDONED; nothing
+        was written to SecOps. The linked issue moves from APPROVED to NEEDS_HUMAN so an
+        operator can requeue it with guidance or close it.
+
+        Raises:
+            FileNotFoundError: proposal does not exist.
+            ValueError: proposal is not waiting for a manual apply, or the reason is too short.
+            ApprovalPolicyError: ``abandoned_by`` is an agent handle.
+        """
+        merged_file = self.merged_dir / f"{proposal_id}.md"
+        if not merged_file.is_file():
+            self.get_proposal(proposal_id)  # raises FileNotFoundError if missing entirely
+            raise ValueError(f"Proposal {proposal_id} has not been approved yet.")
+        proposal = self._parse_markdown(merged_file)
+        if proposal.apply_status != APPLY_STATUS_MANUAL_REQUIRED:
+            raise ValueError(f"Proposal {proposal_id} is not waiting for a manual apply ({proposal.apply_status}).")
+        if is_agent_actor(abandoned_by):
+            raise ApprovalPolicyError(
+                ApprovalPolicyError.HUMAN_REQUIRED,
+                "Only a human can abandon an approved change.",
+                proposal.required_tier,
+            )
+        reason = (reason or "").strip()
+        if len(reason) < MIN_MANUAL_APPLY_NOTE_LEN:
+            raise ValueError(f"Explain why it won't be applied (at least {MIN_MANUAL_APPLY_NOTE_LEN} characters).")
+
+        now = datetime.now(timezone.utc).isoformat()
+        proposal.apply_status = APPLY_STATUS_ABANDONED
+        proposal.abandoned_by = abandoned_by
+        proposal.abandoned_at = now
+        proposal.abandon_reason = reason
+        proposal.updated_at = now
+        merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
+
+        commit_hash = self._commit_merged_proposal(proposal, verb="abandoned")
+        if commit_hash:
+            proposal.merge_commit = commit_hash
+            merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
+
+        if proposal.issue_id and lifecycle_manager:
+            try:
+                lifecycle_manager.abandon_approved_change(
+                    issue_id=proposal.issue_id,
+                    operator=abandoned_by,
+                    reason=reason,
+                    proposal_id=proposal.id,
+                )
+            except Exception as lm_err:
+                logger.warning("Failed recording abandoned change in lifecycle manager: %s", lm_err)
+        return proposal
+
     def reject_proposal(
         self,
         proposal_id: str,
@@ -683,6 +754,9 @@ class ProposalManager:
                 commit_msg += f"Apply-Status: {proposal.apply_status}\n"
             if proposal.apply_note:
                 commit_msg += f"Apply-Note: {proposal.apply_note}\n"
+            if proposal.abandon_reason:
+                commit_msg += f"Abandoned-By: {proposal.abandoned_by}\n"
+                commit_msg += f"Abandon-Reason: {proposal.abandon_reason}\n"
             if proposal.preflight_override_reason:
                 commit_msg += f"Preflight-Override: {proposal.preflight_override_reason}\n"
             if proposal.base_revision:

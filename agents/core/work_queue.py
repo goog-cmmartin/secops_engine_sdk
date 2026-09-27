@@ -47,6 +47,8 @@ RECLAIMABLE_STATUSES = frozenset({
 LEASE_EXPIRED_OUTCOME = "LEASE_EXPIRED"
 # Recorded when an operator returns a stuck issue to the pool; resets the retry budget.
 OPERATOR_REQUEUED_OUTCOME = "OPERATOR_REQUEUED"
+# An operator decided not to apply an approved manual-apply change; issue returned to a human.
+CHANGE_ABANDONED_OUTCOME = "CHANGE_ABANDONED"
 # Recorded when a patrol re-observes a problem on a CLOSED issue; also starts a fresh retry budget.
 REOPENED_OUTCOME = "REOPENED"
 

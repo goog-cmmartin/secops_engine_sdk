@@ -14,6 +14,7 @@ from agents.core.approval_policy import ApprovalPolicyError
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.materializer import IssueMaterializer
 from agents.core.proposal_manager import (
+    APPLY_STATUS_ABANDONED,
     APPLY_STATUS_APPLIED,
     APPLY_STATUS_MANUAL_REQUIRED,
     APPLY_STATUS_MANUALLY_APPLIED,
@@ -172,6 +173,68 @@ class MergeApplyTests(unittest.TestCase):
         self.assertFalse(res.success)
         self.assertEqual(self.engine.refinements, [])
         self.assertEqual(self.manager.get_proposal("p-fr-empty").status, "OPEN")
+
+    def test_abandon_manual_apply_returns_issue_to_human(self):
+        issue_id = self._issue()
+        self._create("p-cbn", "PATCH_PARSER_CBN", {"log_type": "WINEVTLOG"}, issue_id)
+        self.manager.approve_and_merge("p-cbn", engine=self.engine, merged_by="alice@corp",
+                                       lifecycle_manager=self.lifecycle)
+
+        with self.assertRaises(ValueError):  # reason too short
+            self.manager.abandon_manual_apply("p-cbn", abandoned_by="bob@corp", reason="nope",
+                                              lifecycle_manager=self.lifecycle)
+        with self.assertRaises(ApprovalPolicyError):
+            self.manager.abandon_manual_apply("p-cbn", abandoned_by="@parser-doctor",
+                                              reason="Vendor fixed the format upstream",
+                                              lifecycle_manager=self.lifecycle)
+
+        p = self.manager.abandon_manual_apply("p-cbn", abandoned_by="bob@corp",
+                                              reason="Vendor fixed the format upstream",
+                                              lifecycle_manager=self.lifecycle)
+        self.assertEqual(p.apply_status, APPLY_STATUS_ABANDONED)
+        reread = self.manager.get_proposal("p-cbn")
+        self.assertEqual(reread.status, "MERGED")
+        self.assertEqual(reread.apply_status, APPLY_STATUS_ABANDONED)
+        self.assertEqual(reread.abandoned_by, "bob@corp")
+        self.assertTrue(reread.abandoned_at)
+        self.assertEqual(reread.abandon_reason, "Vendor fixed the format upstream")
+        self.assertIsNone(reread.applied_by)
+
+        issue = self.queue.get_issue(issue_id)
+        self.assertEqual(issue.status, IssueLifecycleStatus.NEEDS_HUMAN.value)
+        self.assertFalse(issue.applied_change_id)
+        self.assertEqual(issue.attempts[-1]["outcome"], "CHANGE_ABANDONED")
+        events = self.lifecycle.materializer.list_issue_events(issue_id)
+        self.assertEqual(events[-1].transition_type, "PROPOSAL_ABANDONED")
+        self.assertEqual(events[-1].details["proposal_id"], "p-cbn")
+        # NEEDS_HUMAN is operator-actionable: requeue works from here.
+        self.assertTrue(self.lifecycle.requeue_issue(issue_id, "bob@corp", "Try the v2 grok pattern"))
+
+        with self.assertRaises(ValueError):  # terminal: cannot abandon or apply again
+            self.manager.abandon_manual_apply("p-cbn", abandoned_by="bob@corp",
+                                              reason="Vendor fixed the format upstream")
+        with self.assertRaises(ValueError):
+            self.manager.mark_manually_applied("p-cbn", applied_by="bob@corp", note="Applied it in console")
+
+    def test_abandon_rejects_open_missing_and_auto_applied(self):
+        self._create("p-open", "PATCH_PARSER_CBN", {})
+        with self.assertRaises(ValueError):
+            self.manager.abandon_manual_apply("p-open", abandoned_by="bob@corp", reason="Not needed any more")
+        with self.assertRaises(FileNotFoundError):
+            self.manager.abandon_manual_apply("p-missing", abandoned_by="bob@corp", reason="Not needed any more")
+        self._create("p-rule", "UPDATE_RULE_TEXT", {"rule_text": "rule x { condition: true }"}, target="ru_1")
+        self.manager.approve_and_merge("p-rule", engine=self.engine, merged_by="alice@corp")
+        with self.assertRaises(ValueError):
+            self.manager.abandon_manual_apply("p-rule", abandoned_by="bob@corp", reason="Not needed any more")
+
+    def test_abandon_without_linked_issue(self):
+        self._create("p-feed", "REMEDIATE_FEED", {"feed_id": "f1"}, target="f1")
+        self.manager.approve_and_merge("p-feed", engine=self.engine, merged_by="alice@corp",
+                                       lifecycle_manager=self.lifecycle)
+        p = self.manager.abandon_manual_apply("p-feed", abandoned_by="bob@corp",
+                                              reason="Feed was decommissioned instead",
+                                              lifecycle_manager=self.lifecycle)
+        self.assertEqual(p.apply_status, APPLY_STATUS_ABANDONED)
 
     def test_legacy_merged_proposal_without_apply_status_is_inferred(self):
         self._create("p-legacy", "REMEDIATE_FEED", {"feed_id": "f1"}, target="f1")

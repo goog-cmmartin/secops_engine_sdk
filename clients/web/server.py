@@ -213,6 +213,11 @@ class MarkAppliedRequest(BaseModel):
     note: str = Field(..., description="What was applied and where (min 10 chars)")
 
 
+class AbandonProposalRequest(BaseModel):
+    abandoned_by: str = Field(default="secops-operator", description="Human deciding not to apply the change")
+    reason: str = Field(..., description="Why the approved change will not be applied (min 10 chars)")
+
+
 class RejectProposalRequest(BaseModel):
     reason: str = Field(..., description="Explanation of why change was rejected")
     rejected_by: str = Field(default="secops-operator", description="Reviewer identifier")
@@ -535,6 +540,9 @@ async def list_proposals(
             "applied_by": p.applied_by,
             "applied_at": p.applied_at,
             "apply_note": p.apply_note,
+            "abandoned_by": p.abandoned_by,
+            "abandoned_at": p.abandoned_at,
+            "abandon_reason": p.abandon_reason,
             "has_executor": has_executor(p.action_type),
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
@@ -573,6 +581,9 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
             "applied_by": p.applied_by,
             "applied_at": p.applied_at,
             "apply_note": p.apply_note,
+            "abandoned_by": p.abandoned_by,
+            "abandoned_at": p.abandoned_at,
+            "abandon_reason": p.abandon_reason,
             "has_executor": has_executor(p.action_type),
             "preflight": asdict(p.preflight),
             "rationale": p.rationale,
@@ -714,6 +725,61 @@ async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> D
         "apply_status": proposal.apply_status,
         "applied_by": proposal.applied_by,
         "applied_at": proposal.applied_at,
+        "issue_id": proposal.issue_id,
+    }
+
+
+@app.post("/api/proposals/{proposal_id}/abandon")
+async def abandon_proposal(proposal_id: str, body: AbandonProposalRequest) -> Dict[str, Any]:
+    """Records that a human decided not to apply an approved manual-apply proposal."""
+    try:
+        proposal = proposal_manager.abandon_manual_apply(
+            proposal_id=proposal_id,
+            abandoned_by=body.abandoned_by,
+            reason=body.reason,
+            lifecycle_manager=lifecycle_manager,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
+    except ApprovalPolicyError as policy_err:
+        raise HTTPException(status_code=403, detail=policy_err.to_dict())
+    except ValueError as state_err:
+        raise HTTPException(status_code=409, detail=str(state_err))
+
+    chat_store.add_message(
+        stream=_proposal_stream(proposal),
+        topic="rule-proposals",
+        sender_handle=proposal.author,
+        sender_type="agent",
+        content=(
+            f"🚫 **Approved Change Abandoned**: `{proposal_id}`\n\n"
+            f"- **Abandoned By**: {body.abandoned_by}\n"
+            f"- **Reason**: {proposal.abandon_reason}\n"
+            f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n\n"
+            "Nothing was changed in SecOps."
+            + (f" Issue `{proposal.issue_id}` needs a human: requeue it with guidance or close it."
+               if proposal.issue_id else "")
+        ),
+        proposal_id=proposal_id,
+        widget={
+            "type": "hitl_proposal_card",
+            "proposal_id": proposal_id,
+            "status": "MERGED",
+            "apply_status": proposal.apply_status,
+            "title": proposal.title,
+            "target_resource_id": proposal.target_resource_id,
+            "action_type": proposal.action_type,
+            "merged_by": proposal.merged_by,
+            "abandoned_by": proposal.abandoned_by,
+            "abandon_reason": proposal.abandon_reason,
+            "commit_hash": proposal.merge_commit,
+        },
+    )
+    return {
+        "proposal_id": proposal_id,
+        "apply_status": proposal.apply_status,
+        "abandoned_by": proposal.abandoned_by,
+        "abandoned_at": proposal.abandoned_at,
         "issue_id": proposal.issue_id,
     }
 

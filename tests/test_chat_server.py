@@ -566,6 +566,47 @@ class FastApiServerEndpointsTest(unittest.TestCase):
             for d in (proposal_manager.open_dir, proposal_manager.merged_dir):
                 (d / f"{prop_id}.md").unlink(missing_ok=True)
 
+    def test_abandon_manual_apply_endpoint(self):
+        """An approved manual-apply proposal can be abandoned; it then shows as ABANDONED."""
+        prop_id = proposal_manager.create_proposal(ChangeProposal(
+            id="",
+            title="Remediate stale feed",
+            author="@feed-medic",
+            subsystem="feeds",
+            target_resource_id="feed-1",
+            action_type="REMEDIATE_FEED",
+            mutation_payload={"feed_id": "feed-1"},
+            preflight=PreflightProof(syntax_verified=True),
+        ))
+        try:
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                              json={"reason": "Not approved yet anyway"}).status_code, 409)
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/approve",
+                                              json={"merged_by": "alice@corp"}).status_code, 200)
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                              json={"reason": "short"}).status_code, 409)
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                              json={"abandoned_by": "@feed-medic",
+                                                    "reason": "Agent should not do this"}).status_code, 403)
+            ok = self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                  json={"abandoned_by": "bob@corp", "reason": "Feed was decommissioned instead"})
+            self.assertEqual(ok.status_code, 200)
+            self.assertEqual(ok.json()["apply_status"], "ABANDONED")
+            self.assertEqual(ok.json()["abandoned_by"], "bob@corp")
+            detail = self.client.get(f"/api/proposals/{prop_id}").json()
+            self.assertEqual(detail["status"], "MERGED")
+            self.assertEqual(detail["apply_status"], "ABANDONED")
+            self.assertEqual(detail["abandon_reason"], "Feed was decommissioned instead")
+            listed = {p["id"]: p for p in self.client.get("/api/proposals").json()}
+            self.assertEqual(listed[prop_id]["apply_status"], "ABANDONED")
+            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                              json={"note": "Applied it after all"}).status_code, 409)
+            self.assertEqual(self.client.post("/api/proposals/nope/abandon",
+                                              json={"reason": "Not needed any more"}).status_code, 404)
+        finally:
+            for d in (proposal_manager.open_dir, proposal_manager.merged_dir):
+                (d / f"{prop_id}.md").unlink(missing_ok=True)
+
     def test_evidence_and_rules_state_endpoints(self):
         res_ev = self.client.get("/api/evidence?limit=10")
         self.assertEqual(res_ev.status_code, 200)

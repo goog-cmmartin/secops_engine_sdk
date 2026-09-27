@@ -25,6 +25,7 @@ from engine.domain import (
 from agents.core.materializer import IssueMaterializer
 from agents.core.work_queue import (
     ATTENTION_STATUSES,
+    CHANGE_ABANDONED_OUTCOME,
     OPERATOR_REQUEUED_OUTCOME,
     BaseWorkQueue,
     get_work_queue,
@@ -357,6 +358,40 @@ class SOCLifecycleManager:
             commit=commit,
         )
         logger.info("Operator %s requeued %s (was %s)", operator, issue_id, previous)
+        return True
+
+    def abandon_approved_change(
+        self,
+        issue_id: str,
+        operator: str,
+        reason: str,
+        proposal_id: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Returns an APPROVED issue to a human after its manual-apply change was abandoned.
+
+        The issue moves to NEEDS_HUMAN so an operator can requeue it with guidance or close it.
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status != IssueLifecycleStatus.APPROVED.value:
+            return False
+        previous = issue.status
+        self.work_queue.record_attempt(issue_id, operator, CHANGE_ABANDONED_OUTCOME, reason)
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.NEEDS_HUMAN.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.NEEDS_HUMAN.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="PROPOSAL_ABANDONED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.NEEDS_HUMAN.value,
+            details={"previous_status": previous, "reason": reason, "proposal_id": proposal_id},
+            commit=commit,
+        )
+        logger.info("Operator %s abandoned change %s on %s (was %s)", operator, proposal_id, issue_id, previous)
         return True
 
     def close_issue_manually(

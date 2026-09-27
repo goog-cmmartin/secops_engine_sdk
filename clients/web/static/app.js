@@ -1457,7 +1457,16 @@ function renderProposalWidget(widget) {
     actionsHtml = `
       <div class="prop-manual-apply">
         <span><strong>Approved — apply manually.</strong> Nothing was changed in SecOps.</span>
-        <button type="button" class="btn btn-primary btn-sm" ${act("handleMarkApplied", proposalId)}>Mark applied</button>
+        <span class="prop-manual-actions">
+          <button type="button" class="btn btn-ghost btn-sm" ${act("handleAbandonProposal", proposalId)}>Won't apply</button>
+          <button type="button" class="btn btn-primary btn-sm" ${act("handleMarkApplied", proposalId)}>Mark applied</button>
+        </span>
+      </div>
+    `;
+  } else if (status === "MERGED" && widget.apply_status === "ABANDONED") {
+    actionsHtml = `
+      <div style="font-size:11.5px; color:var(--c-danger); font-weight:600; margin-top:6px; display:flex; align-items:center; gap:5px;">
+        <span>${ICONS.cross}</span> Abandoned, not applied${widget.abandon_reason ? ` (${escapeHtml(widget.abandon_reason)})` : ""}
       </div>
     `;
   } else if (status === "MERGED" && widget.apply_status === "MANUALLY_APPLIED") {
@@ -4067,6 +4076,7 @@ function proposalStatusView(p) {
   const status = String((p && p.status) || "UNKNOWN").toUpperCase();
   if (status === "MERGED") {
     if (p.apply_status === "MANUAL_APPLY_REQUIRED") return { label: "Apply manually", cls: "badge-manual", title: "Approved, but nothing was changed in SecOps. Apply it, then mark it applied." };
+    if (p.apply_status === "ABANDONED") return { label: "Abandoned", cls: "badge-rejected", title: `Approved, then not applied. Abandoned by ${p.abandoned_by || "an operator"}${p.abandon_reason ? `: ${p.abandon_reason}` : ""}` };
     if (p.apply_status === "MANUALLY_APPLIED") return { label: "Applied (manual)", cls: "badge-merged", title: `Applied by ${p.applied_by || "an operator"}${p.apply_note ? `: ${p.apply_note}` : ""}` };
     return { label: "Merged", cls: "badge-merged", title: "Written to SecOps on approval" };
   }
@@ -4296,10 +4306,55 @@ async function handleRejectProposal(proposalId, defaultReason = "") {
   }
 }
 
+async function handleAbandonProposal(proposalId) {
+  const p = (state.proposals || []).find((x) => x.id === proposalId)
+    || (gastownState.proposals || []).find((x) => x.id === proposalId);
+  const issueNote = p && p.issue_id
+    ? ` Issue ${p.issue_id} goes back to Needs human, where you can requeue it with guidance or close it.`
+    : "";
+  const result = await openActionDialog({
+    title: "Abandon approved change",
+    message: `${proposalId} was approved but never applied. Abandoning records that it won't be applied; nothing in SecOps changes.${issueNote}`,
+    confirmLabel: "Abandon change",
+    variant: "danger",
+    fields: [{
+      name: "reason",
+      label: "Why won't it be applied?",
+      type: "textarea",
+      required: true,
+      minLength: 10,
+      placeholder: "e.g. Vendor fixed the log format upstream; the parser patch is no longer needed.",
+    }],
+  });
+  if (!result) return false;
+  try {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/abandon`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ abandoned_by: "secops-operator", reason: result.reason }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast("error", `Not recorded: ${formatApiError(err.detail, res.status)}`);
+      return false;
+    }
+    const data = await res.json().catch(() => ({}));
+    showToast("info", data.issue_id
+      ? `${proposalId} abandoned. Issue ${data.issue_id} now needs a human.`
+      : `${proposalId} abandoned.`);
+    await Promise.all([loadProposals(), loadGastownOverview()]);
+    return true;
+  } catch (err) {
+    showToast("error", "Network error abandoning proposal: " + err);
+    return false;
+  }
+}
+
 window.handleProposalAction = async function (proposalId, action) {
   if (action === "approve") return handleApproveProposal(proposalId);
   if (action === "reject") return handleRejectProposal(proposalId);
   if (action === "mark-applied") return handleMarkApplied(proposalId);
+  if (action === "abandon") return handleAbandonProposal(proposalId);
   return false;
 };
 
@@ -4859,6 +4914,7 @@ const ACTION_FNS = {
   openGastownDiffModal: () => openGastownDiffModal,
   handleProposalAction: () => window.handleProposalAction,
   handleMarkApplied: () => handleMarkApplied,
+  handleAbandonProposal: () => handleAbandonProposal,
   handleAckEscalation: () => handleAckEscalation,
   triggerGastownAgentPatrol: () => triggerGastownAgentPatrol,
   triggerGastownPatrolAll: () => triggerGastownPatrolAll,
@@ -6924,7 +6980,7 @@ function renderGastownHeader() {
       gtAlertItem.textContent = `⏰ ${openProps} proposal${openProps > 1 ? "s" : ""} awaiting operator review or manual apply →`;
       gtAlertItem.className = "gt-alert-pill";
       gtAlertItem.disabled = false;
-      gtAlertItem.title = "Show the HITL Review column";
+      gtAlertItem.title = "Show the Needs Operator column";
     } else {
       gtAlertItem.textContent = "✓ All clear — 0 pending reviews";
       gtAlertItem.className = "gt-alert-pill gt-alert-green";
@@ -7217,7 +7273,7 @@ function renderGastownKanban() {
     }
   }
 
-  // Col 3: HITL Review (Proposals & Validations)
+  // Col 3: Needs operator (awaiting decision + approved-awaiting-manual-apply)
   const colReview = document.getElementById("cardsColReview");
   const countColReview = document.getElementById("countColReview");
   const openProposals = proposals.filter(needsOperator);
@@ -7248,9 +7304,26 @@ function renderGastownKanban() {
     if (totalReview === 0) {
       colReview.innerHTML = `<div style="color:var(--text-dim); font-size:12px; text-align:center; padding:24px 8px;">Nothing awaiting review or manual apply.</div>`;
     } else {
-      colReview.innerHTML = reviewItems.map((r) => (r.kind === "soc"
+      // Two operator jobs live here; label them so an approved-but-unapplied card is not
+      // mistaken for something still awaiting approve/reject.
+      const renderItem = (r) => (r.kind === "soc"
         ? renderSocKanbanCard(r.item, { showAge: true })
-        : renderReviewProposalCard(r.item))).join("");
+        : renderReviewProposalCard(r.item));
+      const decide = reviewItems.filter((r) => !(r.kind === "proposal" && needsManualApply(r.item)));
+      const apply = reviewItems.filter((r) => r.kind === "proposal" && needsManualApply(r.item));
+      const subhead = (label, n, title) =>
+        `<div class="kanban-subgroup-head" title="${escapeHtml(title)}"><span>${escapeHtml(label)}</span><span class="kanban-subgroup-count">${n}</span></div>`;
+      let html = "";
+      if (decide.length) {
+        html += subhead("Awaiting decision", decide.length, "Approve or reject these proposals and validations");
+        html += decide.map(renderItem).join("");
+      }
+      if (apply.length) {
+        html += subhead("Approved — apply in SecOps", apply.length, "Already approved. Nothing was changed in SecOps yet.");
+        html += `<div class="kanban-subgroup-hint">Apply the diff in SecOps, then click Mark applied.</div>`;
+        html += apply.map(renderItem).join("");
+      }
+      colReview.innerHTML = html;
     }
   }
 
@@ -7310,7 +7383,7 @@ function renderGastownKanban() {
     } else {
       const socCards = socMerged.map(renderSocKanbanCard).join("");
       const propCards = closedProposals.map((p) => {
-        const isMerged = p.status === "MERGED" || p.status === "APPLIED";
+        const isMerged = (p.status === "MERGED" || p.status === "APPLIED") && p.apply_status !== "ABANDONED";
         const author = p.author || p.author_agent || "@secops-dispatcher";
         const target = p.target_resource_id || p.target_resource || "SecOps Resource";
         const view = proposalStatusView(p);
@@ -7425,7 +7498,7 @@ function renderGastownRefinery() {
         <td>
           ${needsManualApply(p)
             ? `<span class="badge badge-manual" title="${escapeHtml(proposalStatusView(p).title)}">Apply manually</span>`
-            : `<span class="badge ${isMerged ? 'badge-green' : (isRejected ? 'badge-red' : 'badge-blue')}" ${proposalStatusView(p).title ? `title="${escapeHtml(proposalStatusView(p).title)}"` : ""}>${escapeHtml(proposalStatusView(p).label)}</span>`}
+            : `<span class="badge ${p.apply_status === 'ABANDONED' ? 'badge-red' : (isMerged ? 'badge-green' : (isRejected ? 'badge-red' : 'badge-blue'))}" ${proposalStatusView(p).title ? `title="${escapeHtml(proposalStatusView(p).title)}"` : ""}>${escapeHtml(proposalStatusView(p).label)}</span>`}
         </td>
         <td>
           ${diff ? `
@@ -7641,15 +7714,18 @@ function openGastownDiffModal(proposalId) {
   if (applyBanner) {
     let bannerHtml = "";
     if (manualPending) {
-      bannerHtml = `<strong>Approved — apply manually.</strong> Nothing was changed in SecOps. Apply the diff below to <code>${escapeHtml(target)}</code>, then mark it applied so the patrol can verify it.`;
+      bannerHtml = `<strong>Approved — apply manually.</strong> Nothing was changed in SecOps. Apply the diff below to <code>${escapeHtml(target)}</code>, then mark it applied so the patrol can verify it. If it shouldn't be applied after all, abandon it.`;
     } else if (isOpen && manualType) {
       bannerHtml = `<strong>Manual apply.</strong> There is no automated write for ${escapeHtml(p.action_type || "this change type")}. Approving records the decision only; you apply the change in SecOps afterwards.`;
     } else if (p.apply_status === "MANUALLY_APPLIED") {
       bannerHtml = `<strong>Applied manually</strong> by ${escapeHtml(p.applied_by || "an operator")}${p.apply_note ? `: ${escapeHtml(p.apply_note)}` : "."}`;
+    } else if (p.apply_status === "ABANDONED") {
+      bannerHtml = `<strong>Abandoned, not applied</strong> by ${escapeHtml(p.abandoned_by || "an operator")}${p.abandon_reason ? `: ${escapeHtml(p.abandon_reason)}` : "."} Nothing was changed in SecOps.`;
     }
     applyBanner.innerHTML = bannerHtml;
     applyBanner.hidden = !bannerHtml;
     applyBanner.classList.toggle("is-done", p.apply_status === "MANUALLY_APPLIED");
+    applyBanner.classList.toggle("is-abandoned", p.apply_status === "ABANDONED");
   }
   const btnApprove = document.getElementById("modalBtnApprove");
   const btnReject = document.getElementById("modalBtnReject");
@@ -7668,10 +7744,12 @@ function openGastownDiffModal(proposalId) {
     };
   }
   if (btnReject) {
-    btnReject.hidden = !isOpen;
+    // Reject while open; once approved-but-unapplied, the same slot abandons the change.
+    btnReject.hidden = !(isOpen || manualPending);
+    btnReject.textContent = manualPending ? "Abandon change" : "Reject Proposal";
     btnReject.onclick = async () => {
       setBusy(true);
-      const done = await handleRejectProposal(p.id);
+      const done = manualPending ? await handleAbandonProposal(p.id) : await handleRejectProposal(p.id);
       setBusy(false);
       if (done) closeGastownDiffModal();
     };

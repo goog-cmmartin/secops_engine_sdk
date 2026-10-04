@@ -1,0 +1,424 @@
+"""Issue Lifecycle Coordinator for the Autonomous SOC Operating System.
+
+Coordinates state transitions between the ephemeral coordination plane (Firestore)
+and the durable evidence plane (Git), ensuring atomic state updates and durability
+boundary checkpoints.
+"""
+
+from datetime import datetime, timezone
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from engine.domain import (
+    AgentCapabilityProfile,
+    AuthorityTier,
+    ChangeRecord,
+    IssueLifecycleStatus,
+    IssueSeverity,
+    IssueSource,
+    Lease,
+    OperationalPlane,
+    SOCIssue,
+    VerificationProof,
+)
+from agents.core.materializer import IssueMaterializer
+from agents.core.work_queue import (
+    ATTENTION_STATUSES,
+    CHANGE_ABANDONED_OUTCOME,
+    OPERATOR_REQUEUED_OUTCOME,
+    BaseWorkQueue,
+    get_work_queue,
+)
+
+logger = logging.getLogger(__name__)
+
+# Statuses where no agent holds the issue and no change has been made yet, so a patrol
+# that sees the problem gone can simply close it.
+SELF_RESOLVABLE_STATUSES = frozenset({
+    IssueLifecycleStatus.OBSERVED.value,
+    IssueLifecycleStatus.QUALIFIED.value,
+    IssueLifecycleStatus.AVAILABLE.value,
+}) | ATTENTION_STATUSES
+
+
+class SOCLifecycleManager:
+    """Orchestrates issue lifecycle state transitions across Firestore and Git."""
+
+    def __init__(
+        self,
+        work_queue: Optional[BaseWorkQueue] = None,
+        materializer: Optional[IssueMaterializer] = None,
+        root_dir: Optional[Path] = None,
+    ):
+        self.root_dir = Path(root_dir) if root_dir else Path.cwd()
+        self.work_queue = work_queue or get_work_queue(root_dir=str(self.root_dir))
+        self.materializer = materializer or IssueMaterializer()
+
+    def open_issue(
+        self,
+        issue: SOCIssue,
+        deacon_id: Optional[str] = None,
+        evidence_files: Optional[Dict[str, Any]] = None,
+        commit: bool = True,
+    ) -> SOCIssue:
+        """Opens an issue, or refreshes it if the patrol has already opened it.
+
+        Patrols re-run on a schedule and re-emit the same issue ID while the problem
+        persists. Re-opening must not reset progress: status, lease, attempts and the
+        retry budget are kept (see ``merge_reobserved_issue``). Only a new issue is
+        materialized as OBSERVED; a CLOSED issue that comes back gets a REOPENED event;
+        a plain refresh writes nothing to Git.
+        """
+        if deacon_id:
+            if not issue.source:
+                issue.source = IssueSource(deacon_id=deacon_id)
+            else:
+                issue.source.deacon_id = deacon_id
+        actor = deacon_id or (issue.source.deacon_id if issue.source else "") or "sensing_deacon"
+        stored, outcome = self.work_queue.upsert_observed_issue(issue, actor=actor)
+
+        if outcome == "created":
+            # Durability Boundary 1: ISSUE OPENED
+            self.materializer.materialize_issue_opened(
+                issue=stored,
+                evidence_files=evidence_files,
+                commit=commit,
+            )
+            logger.info("Opened SOC issue: %s (%s)", stored.id, stored.problem.title)
+        elif outcome == "reopened":
+            self.materializer.materialize_operator_action(
+                issue_id=stored.id,
+                transition_type="REOPENED",
+                actor=actor,
+                new_status=stored.status,
+                details={"observed_state": stored.problem.observed_state},
+                commit=commit,
+            )
+            logger.info("Reopened SOC issue: %s (%s)", stored.id, stored.problem.title)
+        else:
+            logger.debug("Refreshed SOC issue %s (status %s kept)", stored.id, stored.status)
+        return stored
+
+    def find_work(
+        self,
+        agent_capabilities: Dict[str, int],
+        plane: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[SOCIssue]:
+        """Queries the work queue for available work matching agent capabilities."""
+        return self.work_queue.find_eligible_issues(
+            agent_capabilities=agent_capabilities,
+            plane=plane,
+            limit=limit,
+        )
+
+    def claim_issue(
+        self,
+        issue_id: str,
+        agent_handle: str,
+        duration_seconds: int = 300,
+        commit: bool = False,
+    ) -> Optional[Lease]:
+        """Claims an issue lease in the coordination plane and appends claim event to Git."""
+        lease = self.work_queue.acquire_lease(
+            issue_id=issue_id,
+            agent_handle=agent_handle,
+            duration_seconds=duration_seconds,
+        )
+        if not lease:
+            return None
+
+        # Record claim in durable append ledger
+        self.materializer.materialize_claimed(
+            issue_id=issue_id,
+            agent_handle=agent_handle,
+            lease=lease,
+            commit=commit,
+        )
+        return lease
+
+    def heartbeat(
+        self,
+        issue_id: str,
+        agent_handle: str,
+        duration_seconds: int = 300,
+    ) -> bool:
+        """Heartbeat renewal of an active lease in the coordination plane."""
+        return self.work_queue.renew_lease(
+            issue_id=issue_id,
+            agent_handle=agent_handle,
+            duration_seconds=duration_seconds,
+        )
+
+    def submit_proposal(
+        self,
+        issue_id: str,
+        proposal_id: str,
+        proposal_title: str,
+        author: str,
+        diff_text: str = "",
+        mutation_payload: Optional[Dict[str, Any]] = None,
+        commit: bool = True,
+    ) -> bool:
+        """Submits a proposed change, moving status to VALIDATING."""
+        updated = self.work_queue.update_issue_status(
+            issue_id=issue_id,
+            new_status=IssueLifecycleStatus.VALIDATING.value,
+            active_proposal_id=proposal_id,
+        )
+        if not updated:
+            return False
+
+        # Durability Boundary 2: PROPOSAL CREATED
+        self.materializer.materialize_proposal_created(
+            issue_id=issue_id,
+            proposal_id=proposal_id,
+            proposal_title=proposal_title,
+            author=author,
+            diff_text=diff_text,
+            mutation_payload=mutation_payload,
+            commit=commit,
+        )
+        return True
+
+    def record_validation(
+        self,
+        issue_id: str,
+        validator_actor: str,
+        passed: bool,
+        diagnostics: List[str],
+        test_evidence: Optional[Dict[str, Any]] = None,
+        commit: bool = True,
+    ) -> bool:
+        """Records peer validation results across the durability boundary."""
+        target_status = (
+            IssueLifecycleStatus.APPROVED.value
+            if passed
+            else IssueLifecycleStatus.VALIDATION_FAILED.value
+        )
+        self.work_queue.update_issue_status(
+            issue_id=issue_id,
+            new_status=target_status,
+        )
+
+        # Durability Boundary 3: VALIDATION RECORDED
+        self.materializer.materialize_validation_recorded(
+            issue_id=issue_id,
+            validator_actor=validator_actor,
+            passed=passed,
+            diagnostics=diagnostics,
+            test_evidence=test_evidence,
+            commit=commit,
+        )
+        return True
+
+    def decide_issue(
+        self,
+        issue_id: str,
+        decision: str,  # APPROVED or REJECTED
+        approver: str,
+        rationale: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Records human or policy gate decision."""
+        target_status = (
+            IssueLifecycleStatus.APPROVED.value
+            if decision.upper() == "APPROVED"
+            else IssueLifecycleStatus.BLOCKED.value
+        )
+        self.work_queue.update_issue_status(
+            issue_id=issue_id,
+            new_status=target_status,
+        )
+
+        # Durability Boundary 4: DECISION RECORDED
+        self.materializer.materialize_decision(
+            issue_id=issue_id,
+            decision=decision,
+            approver=approver,
+            rationale=rationale,
+            commit=commit,
+        )
+        return True
+
+    def apply_change(
+        self,
+        issue_id: str,
+        change_record: ChangeRecord,
+        commit: bool = True,
+    ) -> bool:
+        """Applies mutation to production and records change event in Git."""
+        self.work_queue.update_issue_status(
+            issue_id=issue_id,
+            new_status=IssueLifecycleStatus.APPLIED.value,
+            applied_change_id=change_record.change_id,
+        )
+
+        # Durability Boundary 5: CHANGE APPLIED
+        self.materializer.materialize_applied(
+            issue_id=issue_id,
+            change_record=change_record,
+            commit=commit,
+        )
+        return True
+
+    def verify_and_close(
+        self,
+        issue_id: str,
+        verification: VerificationProof,
+        resolution_markdown: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Records post-deployment verification proof, releases lease, and closes issue."""
+        self.work_queue.update_issue_status(
+            issue_id=issue_id,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            agent_handle=verification.verifier_actor,
+            force=True,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+
+        # Durability Boundary 6: ISSUE VERIFIED & CLOSED
+        self.materializer.materialize_verified(
+            issue_id=issue_id,
+            verification=verification,
+            resolution_markdown=resolution_markdown,
+            commit=commit,
+        )
+        logger.info("Successfully verified and closed issue %s", issue_id)
+        return True
+
+    def resolve_without_change(
+        self,
+        issue_id: str,
+        actor: str,
+        reason: str,
+        commit: bool = True,
+    ) -> bool:
+        """Closes an unworked issue whose problem cleared on its own (no change was made).
+
+        Only applies while nobody is working the issue: waiting in the pool or waiting on
+        a human. Claimed/in-flight issues and issues with an applied change are left alone
+        (the latter go through ``verify_and_close``).
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status not in SELF_RESOLVABLE_STATUSES:
+            return False
+        previous = issue.status
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.CLOSED.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="RESOLVED_WITHOUT_CHANGE",
+            actor=actor,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+            details={"previous_status": previous, "reason": reason},
+            commit=commit,
+        )
+        logger.info("%s closed %s without a change (was %s)", actor, issue_id, previous)
+        return True
+
+    # --- Operator interventions on stuck issues ---------------------------
+
+    def requeue_issue(
+        self,
+        issue_id: str,
+        operator: str,
+        guidance: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Returns an issue needing attention to the pool with a fresh retry budget.
+
+        ``guidance`` is recorded on the attempt trail so the next worker sees it.
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status not in ATTENTION_STATUSES:
+            return False
+        previous = issue.status
+        self.work_queue.record_attempt(issue_id, operator, OPERATOR_REQUEUED_OUTCOME, guidance)
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.AVAILABLE.value,
+        )
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="OPERATOR_REQUEUED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.AVAILABLE.value,
+            details={"previous_status": previous, "guidance": guidance},
+            commit=commit,
+        )
+        logger.info("Operator %s requeued %s (was %s)", operator, issue_id, previous)
+        return True
+
+    def abandon_approved_change(
+        self,
+        issue_id: str,
+        operator: str,
+        reason: str,
+        proposal_id: str = "",
+        commit: bool = True,
+    ) -> bool:
+        """Returns an APPROVED issue to a human after its manual-apply change was abandoned.
+
+        The issue moves to NEEDS_HUMAN so an operator can requeue it with guidance or close it.
+        """
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status != IssueLifecycleStatus.APPROVED.value:
+            return False
+        previous = issue.status
+        self.work_queue.record_attempt(issue_id, operator, CHANGE_ABANDONED_OUTCOME, reason)
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.NEEDS_HUMAN.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.NEEDS_HUMAN.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="PROPOSAL_ABANDONED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.NEEDS_HUMAN.value,
+            details={"previous_status": previous, "reason": reason, "proposal_id": proposal_id},
+            commit=commit,
+        )
+        logger.info("Operator %s abandoned change %s on %s (was %s)", operator, proposal_id, issue_id, previous)
+        return True
+
+    def close_issue_manually(
+        self,
+        issue_id: str,
+        operator: str,
+        reason: str,
+        commit: bool = True,
+    ) -> bool:
+        """Closes an issue an operator resolved (or dismissed) outside the fleet."""
+        issue = self.work_queue.get_issue(issue_id)
+        if not issue or issue.status == IssueLifecycleStatus.CLOSED.value:
+            return False
+        previous = issue.status
+        self.work_queue.release_lease(
+            issue_id=issue_id,
+            force=True,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+        )
+        self.work_queue.update_issue_status(issue_id, IssueLifecycleStatus.CLOSED.value)
+        self.materializer.materialize_operator_action(
+            issue_id=issue_id,
+            transition_type="OPERATOR_CLOSED",
+            actor=operator,
+            new_status=IssueLifecycleStatus.CLOSED.value,
+            details={"previous_status": previous, "reason": reason},
+            commit=commit,
+        )
+        logger.info("Operator %s closed %s (was %s)", operator, issue_id, previous)
+        return True

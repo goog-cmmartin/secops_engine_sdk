@@ -28,6 +28,7 @@ from engine.workflows.dashboards import (
 )
 from engine.workflows.detection_rules import (
     ListRulesWorkflow,
+    ListRuleDeploymentsWorkflow,
     ListRuleErrorsWorkflow,
     GetRuleWorkflow,
 )
@@ -69,9 +70,13 @@ class AuditRuleHealthWorkflow:
                 r_key = err.curated_rule.split("/")[-1].split("@")[0].lower()
             if r_key:
                 errors_by_rule.setdefault(r_key, []).append(err)
+                base_key = r_key.split("@")[0]
+                if base_key != r_key:
+                    errors_by_rule.setdefault(base_key, []).append(err)
 
         # 3. Collect Telemetry from Rule Detections Overview & Rule Observability
         telemetry = self._collect_rule_dashboard_telemetry()
+        deployments_by_rule = self._collect_deployments()
 
         # 4. Evaluate each rule
         findings: List[RuleHealthFinding] = []
@@ -89,6 +94,7 @@ class AuditRuleHealthWorkflow:
                 errors_by_rule=errors_by_rule,
                 telemetry=telemetry,
                 latency_threshold_min=latency_threshold_min,
+                deployment=deployments_by_rule.get((rule.name or "").split("/")[-1]),
             )
             findings.append(finding)
 
@@ -141,6 +147,7 @@ class AuditRuleHealthWorkflow:
         errors_by_rule: Dict[str, List[RuleExecutionError]],
         telemetry: Dict[str, Any],
         latency_threshold_min: float,
+        deployment: Optional[Any] = None,
     ) -> RuleHealthFinding:
         """Evaluates health status, latency, detection volume, and error diagnostics for a rule."""
         rule_id = rule.name.split("/")[-1].split("@")[0] if rule.name else ""
@@ -177,16 +184,21 @@ class AuditRuleHealthWorkflow:
         details = "Rule is operating normally."
 
         # Deployment & enabled status
-        if "enabled" in rule.raw:
+        if deployment is not None:
+            is_enabled = bool(deployment.enabled)
+            is_alerting = bool(deployment.alerting)
+        elif "enabled" in rule.raw:
             is_enabled = bool(rule.raw["enabled"])
+            is_alerting = bool(rule.raw.get("alerting", True))
         elif rule.raw.get("executionState") in ("PAUSED", "DISABLED"):
             is_enabled = False
+            is_alerting = bool(rule.raw.get("alerting", False))
         else:
             is_enabled = bool(
                 rule.run_frequency in ("LIVE", "HOURLY", "DAILY")
                 or rule.raw.get("executionState") == "ACTIVE"
             )
-        is_alerting = bool(rule.raw.get("alerting", True))
+            is_alerting = bool(rule.raw.get("alerting", True))
 
         if not is_enabled:
             status = RuleHealthStatus.DISABLED
@@ -230,6 +242,24 @@ class AuditRuleHealthWorkflow:
             remediation_steps=remediations,
             raw=rule.raw,
         )
+
+    def _collect_deployments(self) -> Dict[str, Any]:
+        """Maps rule_id -> RuleDeployment across all pages. Empty on failure."""
+        out: Dict[str, Any] = {}
+        wf = ListRuleDeploymentsWorkflow(self.adapter)
+        token: Optional[str] = None
+        try:
+            for _ in range(50):
+                res = wf.execute(page_size=1000, page_token=token)
+                for dep in res.deployments:
+                    if dep.rule_id:
+                        out[dep.rule_id] = dep
+                token = res.next_page_token
+                if not token:
+                    break
+        except Exception as exc:
+            logger.warning("Rule deployment listing failed; enabled/alerting state unknown: %s", exc)
+        return out
 
     def _evaluate_curated_rulesets(self, telemetry: Dict[str, Any]) -> List[RuleHealthFinding]:
         """Evaluates status of Google curated ruleset categories and deployments."""

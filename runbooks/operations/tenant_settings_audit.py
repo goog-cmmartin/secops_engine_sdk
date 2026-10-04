@@ -37,6 +37,7 @@ def generate_tenant_settings_report(
 
     # 1. Root Instance
     ti = engine.get_tenant_instance()
+    report["tenant_id"] = ti.customer_code or ti.id or "default"
     report["instance"] = {
         "id": ti.id,
         "display_name": ti.display_name,

@@ -10,6 +10,7 @@ Verifies:
 """
 
 from tests.test_helpers import get_live_adapter, get_live_engine
+from tests.live_guard import require_live_writes
 import ast
 import os
 import unittest
@@ -63,6 +64,7 @@ class TestMilestone5CaseInvestigation(unittest.TestCase):
 
     def test_case_inv_003_case_comment_mutation_and_retrieval(self):
         """Validates posting a real comment and verifying its appearance in the case workspace."""
+        require_live_writes(self)
         timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         test_comment = f"Automated M5 verification test at {timestamp_str}"
 

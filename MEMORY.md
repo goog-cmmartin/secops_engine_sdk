@@ -10,11 +10,18 @@ Table of contents for project documentation and governance.
 - [docs/SDK_INTERFACE_STANDARD.md](docs/SDK_INTERFACE_STANDARD.md) — SDK interface standards, polymorphic arguments, and design principles.
 - [docs/WORKFLOW_EXECUTION_GUIDE.md](docs/WORKFLOW_EXECUTION_GUIDE.md) — Comprehensive execution guide for all 21 composed workflows with real live outputs using Case 104982.
 - [docs/UDM_STATS_SYNTAX.md](docs/UDM_STATS_SYNTAX.md) — Query language reference and canonical examples for UDM Stats Search (aggregations, match/outcome clauses, entity graph, detections).
+- [docs/GASTOWN_ROADMAP.md](docs/GASTOWN_ROADMAP.md) — Architecture and roadmap for Steve Yegge's Gas Town autonomous fleet (Mayor, Deacon, Polecats, Beads, Convoys, Refinery).
+- [clients/web/static/vendor/secops-theme/tokens.css](clients/web/static/vendor/secops-theme/tokens.css) — Canonical Google SecOps Uno design tokens (light & dark mode WCAG AAA/AA color palette, typography, elevation, and layout).
 
 ## Reports & Artifacts
 
+- [docs/WEB_UI_REVIEW_PLAN.md](docs/WEB_UI_REVIEW_PLAN.md) — Web UI review findings and cross-session progress tracker (bugs, UX polish, a11y, cleanup).
+- [docs/AGENT_ALIGNMENT_PLAN.md](docs/AGENT_ALIGNMENT_PLAN.md) — Agent alignment action plan: which patrol findings agents can claim and fix vs. which need a human; plumbing fixes (planes, capabilities, duplicate issues) and a phased tracker.
 - [reports/M1_CAPABILITY_REPORT.md](reports/M1_CAPABILITY_REPORT.md) — Milestone 1.1 capability & robustness report (UDM Search slice). Point-in-time record.
 - [discovery/observations/01_udm_search_discovery.md](discovery/observations/01_udm_search_discovery.md) — Live UDM search behavior/API observations.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.
 - [discovery/observations/detection_tuning_observations.md](discovery/observations/detection_tuning_observations.md) — Live Detection Tuning and UDM Findings Refinements observations.
+- [discovery/observations/mitre_attack_coverage_observations.md](discovery/observations/mitre_attack_coverage_observations.md) — Live MITRE ATT&CK coverage mapping, rules caching, and telemetry correlation observations.
+- [discovery/observations/cloud_status_observations.md](discovery/observations/cloud_status_observations.md) — Live Google Cloud SecOps service status incident feed and outage correlation observations.
 - [tests/UDM_SEARCH_TEST_INVENTORY.md](tests/UDM_SEARCH_TEST_INVENTORY.md) — UDM search test inventory.
+- [tests/evals/test_adk_prompts.json](tests/evals/test_adk_prompts.json) — ADK 2 Prompt & Skill evaluation benchmark dataset (ambiguity guardrails, routing precision, modular skills, conciseness constraints). Run via `python scripts/eval_adk_prompts.py`.

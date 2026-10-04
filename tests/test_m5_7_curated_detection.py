@@ -13,6 +13,7 @@ Invariants: Strict live API provenance, no synthetic fallbacks, explicit errors.
 """
 
 from tests.test_helpers import get_live_adapter, get_live_engine
+from tests.live_guard import require_live_writes
 from datetime import datetime, timedelta, timezone
 import os
 import unittest
@@ -136,6 +137,7 @@ class TestCuratedDetectionsLive(unittest.TestCase):
 
     def test_06_set_curated_ruleset_deployment(self):
         """Verify updating a curated rule set deployment state (enable/disable, alerting)."""
+        require_live_writes(self)
         # Fetch current deployment state
         detail = self.engine.get_curated_ruleset("Azure - Network")
         precise_dep = next((d for d in detail.deployments if d.precision == "PRECISE"), None)

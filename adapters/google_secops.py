@@ -28,8 +28,37 @@ from engine.domain import (
     UDMEvent,
     ValidationResult,
 )
+from engine.parsing import parse_id_list
 
 logger = logging.getLogger(__name__)
+
+
+class SecOpsApiError(RuntimeError):
+    """HTTP error from a Google SecOps API. Subclasses RuntimeError for backward compatibility."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(f"Google SecOps API Error [{status}]: {message}")
+        self.status = status
+        self.api_message = message
+
+
+def _extract_error_message(error_body: str) -> str:
+    """Pulls the human-readable message out of a Google API error body.
+
+    Most endpoints return ``{"error": {...}}``; some (e.g. :testFindingsRefinement)
+    return a JSON array ``[{"error": {...}}]``. Falls back to the raw body.
+    """
+    try:
+        err_json = json.loads(error_body)
+    except (ValueError, TypeError):
+        return error_body
+    if isinstance(err_json, list) and err_json:
+        err_json = err_json[0]
+    if isinstance(err_json, dict):
+        err = err_json.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+    return error_body
 
 
 class GoogleSecOpsAdapter:
@@ -81,10 +110,13 @@ class GoogleSecOpsAdapter:
         timeout: Optional[float] = None,
     ) -> Any:
         """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
-        encoded_path = urllib.parse.quote(path, safe="/:@&=+$,?%#")
-        url = f"{self.api_base}{encoded_path}"
+        if path.startswith("https://"):
+            url = path
+        else:
+            encoded_path = urllib.parse.quote(path, safe="/:@&=+$,?%#")
+            url = f"{self.api_base}{encoded_path}"
         if params:
-            query_string = urllib.parse.urlencode(params)
+            query_string = urllib.parse.urlencode(params, doseq=True)
             url = f"{url}?{query_string}"
 
         data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -112,12 +144,8 @@ class GoogleSecOpsAdapter:
                     time.sleep(2.5 * attempt)
                     continue
                 error_body = e.read().decode("utf-8")
-                try:
-                    err_json = json.loads(error_body)
-                    err_msg = err_json.get("error", {}).get("message", error_body)
-                except Exception:
-                    err_msg = error_body
-                raise RuntimeError(f"Google SecOps API Error [{e.code}]: {err_msg}") from e
+                err_msg = _extract_error_message(error_body)
+                raise SecOpsApiError(e.code, err_msg) from e
             except (TimeoutError, urllib.error.URLError) as e:
                 if attempt < max_retries:
                     time.sleep(1.0 * attempt)
@@ -1244,6 +1272,24 @@ class GoogleSecOpsAdapter:
             return res["featuredContentRules"][0]
         return {}
 
+    def list_featured_content_rules(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists Curated Rules and their executable YARA-L logic from Content Hub Marketplace."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/contentHub/featuredContentRules"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        res = self._request("GET", path, params=params)
+        if isinstance(res, dict):
+            return res
+        return {"featuredContentRules": []}
+
     def count_curated_ruleset_detections(
         self,
         start_time: str,
@@ -1308,6 +1354,7 @@ class GoogleSecOpsAdapter:
             "query": query,
             "type": refinement_type,
         }
+        curated_rule_ids = parse_id_list(curated_rule_ids, "curated_rule_ids")
         if curated_rule_ids:
             formatted_rules = []
             for r in curated_rule_ids:
@@ -1339,7 +1386,7 @@ class GoogleSecOpsAdapter:
         """Simulates and dry-runs an exclusion query against historical detections."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:testFindingsRefinement"
         formatted_rules = []
-        for r in curated_rule_ids:
+        for r in parse_id_list(curated_rule_ids, "curated_rule_ids"):
             clean_r = r.split("/")[-1].strip()
             if r.startswith("projects/"):
                 formatted_rules.append(r)
@@ -1361,6 +1408,8 @@ class GoogleSecOpsAdapter:
         res = self._request("POST", path, body=body, timeout=timeout)
         if isinstance(res, list):
             return res
+        if isinstance(res, dict) and res:
+            return [res]
         return []
 
 
@@ -1472,6 +1521,9 @@ class GoogleSecOpsAdapter:
         time_unit: str = "DAY",
         time_value: str = "1",
         dialect: str = "YL2",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        clear_cache: Optional[bool] = None,
     ) -> DashboardQueryResult:
         """Executes a dashboard query and returns normalized columnar/row-oriented results.
         
@@ -1490,7 +1542,10 @@ class GoogleSecOpsAdapter:
             query_source: Query source context (default: "DASHBOARD").
             time_unit: Relative time unit for inline queries (e.g. "DAY", "HOUR", "MONTH").
             time_value: Relative time value for inline queries (e.g. "1", "24", "7").
-            dialect: Query dialect for inline queries (default: "YL2").
+            dialect: Query dialect for inline queries (default: "YL2", supports "SQL").
+            start_time: Optional absolute start timestamp in RFC3339 format.
+            end_time: Optional absolute end timestamp in RFC3339 format.
+            clear_cache: Optional boolean to force fresh query execution bypassing cache.
             
         Returns:
             DashboardQueryResult with parsed columns and rows for easy data access.
@@ -1512,15 +1567,24 @@ class GoogleSecOpsAdapter:
                 target_name = None
 
         if target_text:
-            query_payload = {
-                "query": target_text,
-                "dialect": dialect,
-                "input": {
+            if start_time and end_time:
+                input_payload = {
+                    "timeWindow": {
+                        "startTime": start_time,
+                        "endTime": end_time,
+                    }
+                }
+            else:
+                input_payload = {
                     "relativeTime": {
                         "timeUnit": time_unit,
                         "startTimeVal": str(time_value),
                     }
-                },
+                }
+            query_payload = {
+                "query": target_text,
+                "dialect": dialect,
+                "input": input_payload,
             }
             query_label = "inline_dashboard_query"
         elif target_name:
@@ -1540,6 +1604,8 @@ class GoogleSecOpsAdapter:
             "usePreviousTimeRange": use_previous_time_range,
             "querySource": query_source,
         }
+        if clear_cache is not None:
+            body["clearCache"] = bool(clear_cache)
         res = self._request("POST", path, body=body)
         
         # Parse column-oriented response into rows
@@ -1613,8 +1679,20 @@ class GoogleSecOpsAdapter:
                 values = col_data.get('values', [])
                 
                 if row_idx < len(values):
-                    val_obj = values[row_idx].get('value', {})
-                    row[col_name] = _extract_dashboard_val(val_obj)
+                    val_container = values[row_idx]
+                    val_obj = val_container.get('value', {})
+                    if 'list' in val_container and isinstance(val_container['list'], dict):
+                        row[col_name] = [
+                            _extract_dashboard_val(item.get('value', item) if isinstance(item, dict) and 'value' in item else item)
+                            for item in val_container['list'].get('values', [])
+                        ]
+                    elif 'arrayVal' in val_obj and isinstance(val_obj['arrayVal'], dict):
+                        row[col_name] = [
+                            _extract_dashboard_val(item.get('value', item) if isinstance(item, dict) and 'value' in item else item)
+                            for item in val_obj['arrayVal'].get('values', [])
+                        ]
+                    else:
+                        row[col_name] = _extract_dashboard_val(val_obj)
             
             rows.append(row)
         
@@ -2692,6 +2770,18 @@ class GoogleSecOpsAdapter:
             params["pageToken"] = page_token
         return self._request("GET", path, params=params)
 
+    def list_rule_deployments(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists rule deployments across all detection rules in Chronicle SIEM."""
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/-/deployments"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", path, params=params)
+
     def get_rule_deployment(self, rule_id_or_name: str) -> Dict[str, Any]:
         """Gets deployment, frequency, and alerting status for a detection rule."""
         clean_id = rule_id_or_name.strip()
@@ -2750,9 +2840,73 @@ class GoogleSecOpsAdapter:
         if page_token:
             params["pageToken"] = page_token
         if rule_id_or_name:
-            clean_id = rule_id_or_name.split("/")[-1]
-            params["filter"] = f'rule_id = "{clean_id}"'
+            if "curatedRules/" in rule_id_or_name:
+                filter_key = "curated_rule"
+                full_name = rule_id_or_name
+            elif rule_id_or_name.startswith("projects/"):
+                filter_key = "rule"
+                full_name = rule_id_or_name
+            else:
+                filter_key = "rule"
+                clean_id = rule_id_or_name.split("/")[-1]
+                full_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+            params["filter"] = f'{filter_key} = "{full_name}"'
         return self._request("GET", path, params=params)
+
+    def query_cloud_logging(
+        self,
+        filter_str: str,
+        project_ids: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+        order_by: str = "timestamp desc",
+    ) -> Dict[str, Any]:
+        """Queries Google Cloud Logging API (v2/entries:list) via OAuth token."""
+        url = "https://logging.googleapis.com/v2/entries:list"
+        projects = project_ids or [self.project_id]
+        body: Dict[str, Any] = {
+            "resourceNames": [f"projects/{p}" for p in projects],
+            "filter": filter_str,
+            "orderBy": order_by,
+            "pageSize": page_size,
+        }
+        if page_token:
+            body["pageToken"] = page_token
+        return self._request("POST", url, body=body)
+
+    def query_cloud_monitoring_time_series(
+        self,
+        filter_str: str,
+        start_time: str,
+        end_time: str,
+        project_id: Optional[str] = None,
+        alignment_period: Optional[str] = None,
+        per_series_aligner: Optional[str] = None,
+        cross_series_reducer: Optional[str] = None,
+        group_by_fields: Optional[List[str]] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Queries Google Cloud Monitoring API (v3/projects/{project_id}/timeSeries) via OAuth token."""
+        proj = project_id or self.project_id
+        url = f"https://monitoring.googleapis.com/v3/projects/{proj}/timeSeries"
+        params: Dict[str, Any] = {
+            "filter": filter_str,
+            "interval.startTime": start_time,
+            "interval.endTime": end_time,
+            "pageSize": page_size,
+        }
+        if alignment_period:
+            params["aggregation.alignmentPeriod"] = alignment_period
+        if per_series_aligner:
+            params["aggregation.perSeriesAligner"] = per_series_aligner
+        if cross_series_reducer:
+            params["aggregation.crossSeriesReducer"] = cross_series_reducer
+        if group_by_fields:
+            params["aggregation.groupByFields"] = group_by_fields
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", url, params=params)
 
 
 

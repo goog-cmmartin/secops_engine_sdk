@@ -50,6 +50,15 @@ This document outlines the mandatory operational invariants, architectural bound
      agent cannot page an entire tenant. An explicit `False` override requires
      documented human justification.
 
+10. **Tenant Data Never Lives in the SDK Repo:**
+   - Issue records (`.issues/`) and change proposals (`.proposals/`) are tenant
+     operational data. They are written to and committed in a separate ledger
+     git repository at `$SECOPS_LEDGER_ROOT` (default `~/.secops/ledger`),
+     resolved by `agents/core/ledger.py`.
+   - A ledger path inside the SDK checkout is rejected with `LedgerLocationError`.
+     Agents never commit to the SDK repository.
+   - Tests run with commits disabled and a throwaway temp ledger (`tests/conftest.py`).
+
 ---
 
 ## 2. Classification Status Taxonomy

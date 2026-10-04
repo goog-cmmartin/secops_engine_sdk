@@ -25,6 +25,23 @@ from engine.domain import (
 )
 
 
+def _parse_playbook_timestamp(iso_val: Any, ms_val: Any) -> Optional[datetime]:
+    """Parses a playbook timestamp from either an ISO-8601 string or Unix epoch milliseconds."""
+    if iso_val:
+        try:
+            dt = datetime.fromisoformat(str(iso_val).replace("Z", "+00:00"))
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+        except Exception:
+            pass
+    if ms_val is not None and ms_val != "":
+        try:
+            ms = int(ms_val)
+            return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+
 class SearchPlaybooksWorkflow:
     """Orchestrates SOAR Playbook discovery and multi-facet filtering."""
 
@@ -90,26 +107,12 @@ class SearchPlaybooksWorkflow:
                 playbook_type = PlaybookType.UNKNOWN
 
             # Parse timestamps
-            created_at = None
-            if "creationTime" in card and card["creationTime"]:
-                try:
-                    created_at = datetime.fromisoformat(card["creationTime"].replace("Z", "+00:00"))
-                except Exception:
-                    pass
-            elif "creationTimeUnixTimeInMs" in card and card["creationTimeUnixTimeInMs"]:
-                try:
-                    ms = int(card["creationTimeUnixTimeInMs"])
-                    created_at = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
-                except Exception:
-                    pass
-
-            modified_at = None
-            if "modificationTimeUnixTimeInMs" in card and card["modificationTimeUnixTimeInMs"]:
-                try:
-                    ms = int(card["modificationTimeUnixTimeInMs"])
-                    modified_at = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
-                except Exception:
-                    pass
+            created_at = _parse_playbook_timestamp(
+                card.get("creationTime"), card.get("creationTimeUnixTimeInMs")
+            )
+            modified_at = _parse_playbook_timestamp(
+                card.get("modificationTime"), card.get("modificationTimeUnixTimeInMs")
+            )
 
             summaries.append(
                 PlaybookSummary(
@@ -239,21 +242,12 @@ class GetPlaybookWorkflow:
             playbook_type = PlaybookType.UNKNOWN
 
         # Parse timestamps
-        created_at = None
-        if "creationTimeUnixTimeInMs" in raw_info and raw_info["creationTimeUnixTimeInMs"]:
-            try:
-                ms = int(raw_info["creationTimeUnixTimeInMs"])
-                created_at = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
-            except Exception:
-                pass
-
-        modified_at = None
-        if "modificationTimeUnixTimeInMs" in raw_info and raw_info["modificationTimeUnixTimeInMs"]:
-            try:
-                ms = int(raw_info["modificationTimeUnixTimeInMs"])
-                modified_at = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
-            except Exception:
-                pass
+        created_at = _parse_playbook_timestamp(
+            raw_info.get("creationTime"), raw_info.get("creationTimeUnixTimeInMs")
+        )
+        modified_at = _parse_playbook_timestamp(
+            raw_info.get("modificationTime"), raw_info.get("modificationTimeUnixTimeInMs")
+        )
 
         return PlaybookDetail(
             id=str(raw_info.get("id", "")),

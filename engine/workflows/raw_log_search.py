@@ -131,6 +131,10 @@ class ValidateRawLogQueryWorkflow:
                 error_message=None,
             )
         except Exception as ex:
+            from engine.config import SecOpsConfigurationError
+
+            if isinstance(ex, SecOpsConfigurationError):
+                raise
             return RawLogValidationResult(
                 query_type="",
                 is_valid=False,

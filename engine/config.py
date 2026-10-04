@@ -9,14 +9,34 @@ Fails loudly with `SecOpsConfigurationError` if required tenant identity paramet
 """
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class SecOpsConfigurationError(Exception):
     """Raised when required Google SecOps tenant or project configuration is missing."""
     pass
+
+
+def _strip_env_value(raw_val: str) -> str:
+    """Strips surrounding quotes or unquoted inline comments from a .env value."""
+    val = raw_val.strip()
+    if not val:
+        return ""
+    if (val.startswith('"') and val.endswith('"')) or (
+        val.startswith("'") and val.endswith("'")
+    ):
+        return val[1:-1]
+    # Strip unquoted inline comment (preceded by whitespace)
+    for idx, ch in enumerate(val):
+        if ch == "#" and (idx == 0 or val[idx - 1].isspace()):
+            val = val[:idx].rstrip()
+            break
+    return val
 
 
 def _load_env_file(env_path: Optional[Path] = None) -> None:
@@ -38,14 +58,18 @@ def _load_env_file(env_path: Optional[Path] = None) -> None:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
                 key, val = line.split("=", 1)
                 key = key.strip()
-                val = val.strip().strip("'\"")
+                if not key:
+                    continue
+                val = _strip_env_value(val)
                 # Do not overwrite already exported environment variables
                 if key not in os.environ:
                     os.environ[key] = val
-    except Exception:
-        pass
+    except OSError as e:
+        logger.warning("Failed to read .env configuration file at %s: %s", env_path, e)
 
 
 @dataclass
@@ -86,7 +110,8 @@ def load_config(
     resolved_project_number = (
         project_number
         or os.environ.get("SECOPS_PROJECT_NUMBER")
-        or "0"
+        or resolved_project_id
+        or ""
     )
     resolved_location = (
         location

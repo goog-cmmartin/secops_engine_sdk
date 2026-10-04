@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from engine.domain import (
@@ -287,6 +287,7 @@ from engine.workflows.case_investigation import (
 from engine.workflows.case_search import SearchCasesWorkflow
 from engine.workflows.case_triage import (
     CaseTriageWorkflow,
+    GetCaseTimelineWorkflow,
     OrchestrateCaseTriageWorkflow,
 )
 from engine.workflows.case_ai_investigation import InvestigateCaseWithAIWorkflow
@@ -491,6 +492,24 @@ def _normalize_case_id(case_id: Union[str, int]) -> str:
     return s.split("/")[-1] if "/" in s else s
 
 
+def _resolve_time_window(
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    lookback_hours: int = 24,
+) -> Tuple[str, str]:
+    """Resolves start_time and end_time, defaulting omitted bounds to a UTC lookback window."""
+    if start_time is not None and end_time is not None:
+        return start_time, end_time
+    now = datetime.now(timezone.utc)
+    resolved_end = end_time if end_time is not None else now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    resolved_start = (
+        start_time
+        if start_time is not None
+        else (now - timedelta(hours=lookback_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    return resolved_start, resolved_end
+
+
 class SecOpsEngine:
     """The central workflow engine exposing high-level SecOps domain capabilities."""
 
@@ -503,11 +522,14 @@ class SecOpsEngine:
             from adapters.google_secops import GoogleSecOpsAdapter
             adapter = GoogleSecOpsAdapter()
         self.adapter = adapter
-        self.registry = custom_registry or registry
+        self.registry = custom_registry if custom_registry is not None else WorkflowRegistry()
         self._wf_cache: Dict[str, Any] = {}
 
         # Register default capabilities
         self._register_default_capabilities()
+        if custom_registry is None:
+            for cap in self.registry.list_capabilities():
+                registry.register(cap)
 
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
@@ -536,6 +558,7 @@ class SecOpsEngine:
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
         "_case_triage_wf": lambda e: CaseTriageWorkflow(e.adapter),
+        "_get_case_timeline_wf": lambda e: GetCaseTimelineWorkflow(e.adapter),
         "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter, triage_workflow=e._case_triage_wf),
         "_case_ai_investigate_wf": lambda e: InvestigateCaseWithAIWorkflow(
             e.adapter,
@@ -848,7 +871,7 @@ class SecOpsEngine:
                 handler=self.investigate_entity,
                 mcp_tool_name="investigate_entity",
                 composed=True,
-                uses=("entity.search_udm", "search.from_entity", "ioc.search_enterprise", "case.search"),
+                uses=("entity.search_udm", "search.from_entity", "ioc.search_enterprise", "case.search", "entity.summarize"),
                 evidence_path="evidence/entity/investigate",
             )
         )
@@ -1372,7 +1395,11 @@ class SecOpsEngine:
                 handler=self.audit_curated_detections_health,
                 mcp_tool_name="audit_curated_detections_health",
                 composed=True,
-                uses=["curated_detections.metrics"],
+                uses=(
+                    "curated_detections.search_rulesets",
+                    "curated_detections.get_ruleset",
+                    "curated_detections.metrics",
+                ),
                 evidence_path="evidence/curated_detections/audit_health",
             )
         )
@@ -1469,13 +1496,13 @@ class SecOpsEngine:
                 handler=self.tune_detection,
                 mcp_tool_name="tune_detection",
                 composed=True,
-                uses=[
+                uses=(
                     "curated_detections.tuning.entity_cardinality",
                     "curated_detections.tuning.case_history",
                     "curated_detections.refinements.test",
                     "curated_detections.get_rule",
                     "rule.get",
-                ],
+                ),
                 evidence_path="evidence/curated_detections/tuning_diagnose",
             )
         )
@@ -1584,6 +1611,7 @@ class SecOpsEngine:
                 handler=self.run_dashboard_health_check,
                 mcp_tool_name="run_dashboard_health_check",
                 composed=True,
+                uses=("dashboard.search", "dashboard.get", "dashboard.execute_query"),
                 evidence_path="evidence/dashboard/health_check",
             )
         )
@@ -1754,12 +1782,12 @@ class SecOpsEngine:
                 handler=self.diagnose_unparsed_logs,
                 mcp_tool_name="diagnose_unparsed_logs",
                 composed=True,
-                uses=[
+                uses=(
                     "log.raw_logs.search",
                     "parser.log_types.list",
                     "parser.get",
                     "parser.run",
-                ],
+                ),
                 evidence_path="evidence/parser/diagnose_unparsed",
             )
         )
@@ -2743,7 +2771,13 @@ class SecOpsEngine:
 
 
 
-    def execute(self, capability_id: str, *args: Any, **kwargs: Any) -> Any:
+    def execute(
+        self,
+        capability_id: str,
+        *args: Any,
+        enforce_agent_policy: bool = False,
+        **kwargs: Any,
+    ) -> Any:
         """Universal capability dispatcher.
 
         Executes any registered workflow capability by its capability ID (e.g. 'dashboards.health_check')
@@ -2752,12 +2786,19 @@ class SecOpsEngine:
         Args:
             capability_id: Capability ID or MCP tool name.
             *args: Positional arguments forwarded to the capability handler.
+            enforce_agent_policy: When True, enforces the require-filter policy on
+                unbounded queries (Invariant #9) before invoking the handler.
             **kwargs: Keyword arguments forwarded to the capability handler.
 
         Returns:
             The output returned by the capability's handler.
         """
-        return self.registry.execute(capability_id, *args, **kwargs)
+        return self.registry.execute(
+            capability_id,
+            *args,
+            enforce_agent_policy=enforce_agent_policy,
+            **kwargs,
+        )
 
     def search_udm(
         self,
@@ -2765,6 +2806,7 @@ class SecOpsEngine:
         query: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        lookback_hours: int = 24,
         receive_limit: int = 10000,
         limit: Optional[int] = None,
         batch_size: int = 2000,
@@ -2790,13 +2832,16 @@ class SecOpsEngine:
             q = query or (request if isinstance(request, str) else None)
             if not q:
                 raise ValueError("A query string or SearchRequest must be provided to search_udm")
-            if start_time is None or end_time is None:
-                raise ValueError("start_time and end_time are required when query is passed as a string or keyword argument")
+            resolved_start, resolved_end = _resolve_time_window(
+                start_time=start_time,
+                end_time=end_time,
+                lookback_hours=lookback_hours,
+            )
             effective_limit = limit if limit is not None else kwargs.get("limit", receive_limit)
             req = SearchRequest(
                 query=q,
-                start_time=start_time,
-                end_time=end_time,
+                start_time=resolved_start,
+                end_time=resolved_end,
                 receive_limit=effective_limit,
                 batch_size=batch_size,
                 customer_id=customer_id,
@@ -2818,6 +2863,7 @@ class SecOpsEngine:
         query: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        lookback_hours: int = 24,
         max_events: int = 10000,
         case_insensitive: bool = True,
         generate_ai_overview: bool = True,
@@ -2835,12 +2881,15 @@ class SecOpsEngine:
             q = query or (request if isinstance(request, str) else None)
             if not q:
                 raise ValueError("A query string or StatsSearchRequest must be provided")
-            if start_time is None or end_time is None:
-                raise ValueError("start_time and end_time are required when query is passed as a string")
-            req = StatsSearchRequest(
-                query=q,
+            resolved_start, resolved_end = _resolve_time_window(
                 start_time=start_time,
                 end_time=end_time,
+                lookback_hours=lookback_hours,
+            )
+            req = StatsSearchRequest(
+                query=q,
+                start_time=resolved_start,
+                end_time=resolved_end,
                 max_events=max_events,
                 case_insensitive=case_insensitive,
                 generate_ai_overview=generate_ai_overview,
@@ -2965,8 +3014,9 @@ class SecOpsEngine:
         self,
         entity_type: Union[EntityType, str],
         entity_value: str,
-        start_time: str,
-        end_time: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        lookback_hours: int = 24,
         receive_limit: int = 10000,
         batch_size: int = 2000,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
@@ -2979,11 +3029,16 @@ class SecOpsEngine:
         such as 'ip', 'hostname', 'user', 'hash', 'domain', 'email').
         """
         coerced_type = coerce_entity_type(entity_type)
+        resolved_start, resolved_end = _resolve_time_window(
+            start_time=start_time,
+            end_time=end_time,
+            lookback_hours=lookback_hours,
+        )
         return self._search_from_entity_wf.execute(
             entity_type=coerced_type,
             entity_value=entity_value,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=resolved_start,
+            end_time=resolved_end,
             receive_limit=receive_limit,
             batch_size=batch_size,
             on_batch=on_batch,
@@ -3280,7 +3335,7 @@ class SecOpsEngine:
         if isinstance(query, CaseSearchQuery):
             return self._search_cases_wf.execute(query)
         norm_priorities = [priorities] if isinstance(priorities, (str, CasePriority)) else (priorities or [])
-        p_strings = [p.value if isinstance(p, CasePriority) else str(p) for p in norm_priorities]
+        p_strings = [coerce_case_priority(p).value for p in norm_priorities]
         norm_tags = [tags] if isinstance(tags, str) else (tags or [])
         norm_stages = [stages] if isinstance(stages, str) else (stages or [])
         norm_envs = [environments] if isinstance(environments, str) else (environments or [])
@@ -3305,7 +3360,7 @@ class SecOpsEngine:
         entity_value: str,
         start_time: Optional[Any] = None,
         end_time: Optional[Any] = None,
-        environments: Optional[List[str]] = None,
+        environments: Optional[Union[List[str], str]] = None,
         page_size: int = 50,
         page_number: int = 0,
     ) -> CaseSearchBatch:
@@ -3386,9 +3441,8 @@ class SecOpsEngine:
 
     def get_case_timeline(self, case_id: Union[str, int]) -> CaseTimeline:
         """Constructs a unified, chronologically sorted timeline of events and milestones in a case (`case.timeline`)."""
-        from engine.workflows.case_triage import GetCaseTimelineWorkflow
         cid = _normalize_case_id(case_id)
-        return GetCaseTimelineWorkflow(self.adapter).execute(case_id=cid)
+        return self._get_case_timeline_wf.execute(case_id=cid)
 
     def orchestrate_case_triage(
         self,
@@ -3420,7 +3474,7 @@ class SecOpsEngine:
             norm_case_ids = None
 
         norm_priorities = [priorities] if isinstance(priorities, (str, CasePriority)) else (priorities or [])
-        p_strings = [p.value if isinstance(p, CasePriority) else str(p) for p in norm_priorities] if priorities is not None else None
+        p_strings = [coerce_case_priority(p).value for p in norm_priorities] if priorities is not None else None
         norm_tags = [tags] if isinstance(tags, str) else tags
         norm_stages = [stages] if isinstance(stages, str) else stages
         norm_envs = [environments] if isinstance(environments, str) else environments
@@ -3710,13 +3764,18 @@ class SecOpsEngine:
         self,
         display_name: str,
         query: str,
-        curated_rule_ids: Optional[List[str]] = None,
+        curated_rule_ids: Optional[Union[List[str], str]] = None,
     ) -> FindingsRefinementSummary:
         """Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections."""
+        norm_rule_ids = (
+            [curated_rule_ids]
+            if isinstance(curated_rule_ids, str)
+            else curated_rule_ids
+        )
         return self._manage_findings_refinements_wf.create_refinement(
             display_name=display_name,
             query=query,
-            curated_rule_ids=curated_rule_ids,
+            curated_rule_ids=norm_rule_ids,
         )
 
     def delete_findings_refinement(
@@ -3728,15 +3787,20 @@ class SecOpsEngine:
 
     def test_findings_refinement(
         self,
-        curated_rule_ids: List[str],
+        curated_rule_ids: Union[List[str], str],
         query: str,
         lookback_days: int = 14,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
     ) -> FindingsRefinementTestResult:
         """Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio."""
+        norm_rule_ids = (
+            [curated_rule_ids]
+            if isinstance(curated_rule_ids, str)
+            else list(curated_rule_ids)
+        )
         return self._test_findings_refinement_wf.execute(
-            curated_rule_ids=curated_rule_ids,
+            curated_rule_ids=norm_rule_ids,
             query=query,
             lookback_days=lookback_days,
             start_time=start_time,
@@ -3759,14 +3823,15 @@ class SecOpsEngine:
     def analyze_entity_cardinality(
         self,
         rule_id: str,
-        dimensions: Optional[List[str]] = None,
+        dimensions: Optional[Union[List[str], str]] = None,
         lookback_days: int = 14,
         limit_per_dimension: int = 10,
     ) -> EntityCardinalityReport:
         """Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule."""
+        norm_dims = [dimensions] if isinstance(dimensions, str) else dimensions
         return self._analyze_entity_cardinality_wf.execute(
             rule_id=rule_id,
-            dimensions=dimensions,
+            dimensions=norm_dims,
             lookback_days=lookback_days,
             limit_per_dimension=limit_per_dimension,
         )
@@ -4633,9 +4698,18 @@ class SecOpsEngine:
             include_cases=include_cases,
         )
 
-    def list_capabilities(self, category: Optional[str] = None) -> List[WorkflowCapability]:
+    def list_capabilities(
+        self,
+        category: Optional[str] = None,
+        domain: Optional[str] = None,
+        kind: Optional[str] = None,
+    ) -> List[WorkflowCapability]:
         """Lists capabilities available in this engine instance."""
-        return self.registry.list_capabilities(category=category)
+        return self.registry.list_capabilities(
+            category=category,
+            domain=domain,
+            kind=kind,
+        )
 
     # -------------------------------------------------------------------------
     # Chronicle SIEM Data Tables

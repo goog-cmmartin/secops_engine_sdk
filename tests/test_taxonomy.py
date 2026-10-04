@@ -182,6 +182,109 @@ class CapabilityConstructionTest(unittest.TestCase):
                 kind="primitive", cardinality="single",
             )
 
+    def test_uses_list_coerced_to_tuple(self):
+        cap = WorkflowCapability(
+            capability_id="x.audit_health",
+            name="x",
+            description="d",
+            category="x",
+            handler=lambda: None,
+            composed=True,
+            uses=["x.search", "x.get"],
+        )
+        self.assertIsInstance(cap.uses, tuple)
+        self.assertEqual(cap.uses, ("x.search", "x.get"))
+
+
+class RegistryIndexingAndPolicyTest(unittest.TestCase):
+    def test_duplicate_mcp_tool_name_across_capabilities_rejected(self):
+        reg = WorkflowRegistry()
+        reg.register(
+            WorkflowCapability(
+                capability_id="a.get",
+                name="a",
+                description="d",
+                category="a",
+                handler=lambda: "a",
+                mcp_tool_name="shared_tool",
+            )
+        )
+        with self.assertRaises(ValueError):
+            reg.register(
+                WorkflowCapability(
+                    capability_id="b.get",
+                    name="b",
+                    description="d",
+                    category="b",
+                    handler=lambda: "b",
+                    mcp_tool_name="shared_tool",
+                )
+            )
+
+    def test_reregistering_same_capability_updates_mcp_index(self):
+        reg = WorkflowRegistry()
+        reg.register(
+            WorkflowCapability(
+                capability_id="a.get",
+                name="a",
+                description="d",
+                category="a",
+                handler=lambda: "v1",
+                mcp_tool_name="tool_v1",
+            )
+        )
+        reg.register(
+            WorkflowCapability(
+                capability_id="a.get",
+                name="a",
+                description="d",
+                category="a",
+                handler=lambda: "v2",
+                mcp_tool_name="tool_v2",
+            )
+        )
+        self.assertIsNone(reg.get("tool_v1"))
+        self.assertEqual(reg.execute("tool_v2"), "v2")
+
+    def test_list_capabilities_filters_by_category_domain_and_kind(self):
+        reg = _build_registry()
+        case_queries = reg.list_capabilities(domain="case", kind="query")
+        self.assertGreater(len(case_queries), 0)
+        for c in case_queries:
+            self.assertEqual(c.domain, "case")
+            self.assertEqual(c.kind, "query")
+
+    def test_enforce_agent_policy_rejects_unfiltered_unbounded_query(self):
+        reg = WorkflowRegistry()
+        reg.register(
+            WorkflowCapability(
+                capability_id="item.search",
+                name="Search Items",
+                description="d",
+                category="item",
+                handler=lambda query=None, limit=50: {"query": query, "limit": limit},
+                mcp_tool_name="search_items",
+            )
+        )
+        # Default SDK call without enforce_agent_policy succeeds
+        self.assertEqual(reg.execute("item.search"), {"query": None, "limit": 50})
+
+        # Autonomous agent call without filter is rejected
+        with self.assertRaises(ValueError):
+            reg.execute("item.search", enforce_agent_policy=True)
+        with self.assertRaises(ValueError):
+            reg.execute("item.search", limit=10, enforce_agent_policy=True)
+        with self.assertRaises(ValueError):
+            reg.execute("item.search", query="   ", enforce_agent_policy=True)
+
+        # Autonomous agent call with a non-empty filter succeeds
+        res = reg.execute("item.search", query="severity:high", enforce_agent_policy=True)
+        self.assertEqual(res["query"], "severity:high")
+
+        # Positional non-empty filter also satisfies the policy
+        res_pos = reg.execute("item.search", "severity:low", enforce_agent_policy=True)
+        self.assertEqual(res_pos["query"], "severity:low")
+
 
 class LiveRegistryTaxonomyTest(unittest.TestCase):
     def setUp(self):

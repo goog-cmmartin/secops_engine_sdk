@@ -76,28 +76,27 @@ class GoogleSecOpsAdapter:
         self,
         method: str,
         path: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[Any] = None,
         body: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
-        token = self._get_auth_token()
-        encoded_path = urllib.parse.quote(path, safe="/:@&=+$,?#")
+        encoded_path = urllib.parse.quote(path, safe="/:@&=+$,?%#")
         url = f"{self.api_base}{encoded_path}"
         if params:
             query_string = urllib.parse.urlencode(params)
             url = f"{url}?{query_string}"
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
         data = json.dumps(body).encode("utf-8") if body is not None else None
         effective_timeout = timeout if timeout is not None else getattr(self, "default_timeout", 35.0)
         max_retries = 5
         for attempt in range(1, max_retries + 1):
+            token = self._get_auth_token()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
@@ -106,6 +105,9 @@ class GoogleSecOpsAdapter:
                         return {}
                     return json.loads(resp_data)
             except urllib.error.HTTPError as e:
+                if e.code == 401 and attempt == 1 and hasattr(self._credential_provider, "invalidate"):
+                    self._credential_provider.invalidate()
+                    continue
                 if e.code in [429, 502, 503, 504] and attempt < max_retries:
                     time.sleep(2.5 * attempt)
                     continue
@@ -143,6 +145,8 @@ class GoogleSecOpsAdapter:
                 raw_query_type=query_type,
                 error_message=err_text if not is_valid else None,
             )
+        except SecOpsConfigurationError:
+            raise
         except Exception as e:
             return ValidationResult(
                 valid=False,
@@ -784,9 +788,8 @@ class GoogleSecOpsAdapter:
         if page_token:
             query_params["pageToken"] = page_token
 
-        encoded_params = urllib.parse.urlencode(query_params)
-        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseWallRecords?{encoded_params}"
-        res = self._request("GET", path)
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseWallRecords"
+        res = self._request("GET", path, params=query_params)
         if isinstance(res, dict):
             return res
         return {"caseWallRecords": []}
@@ -1007,39 +1010,6 @@ class GoogleSecOpsAdapter:
         if isinstance(res, dict):
             return res
         return {}
-
-    def list_remote_agents(
-        self,
-        state_filter: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Lists remote proxy execution agents."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/remoteAgents"
-        params: Dict[str, Any] = {"pageSize": 100}
-        if state_filter:
-            params["filter"] = f'agentState = "{state_filter}"'
-        res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "remoteAgents" in res and isinstance(res["remoteAgents"], list):
-            return res["remoteAgents"]
-        elif isinstance(res, list):
-            return res
-        return []
-
-    def get_marketplace_integration(
-        self,
-        identifier: str,
-    ) -> Optional[Dict[str, Any]]:
-        """Retrieves marketplace metadata and documentation for an integration."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations"
-        params = {
-            "filter": f"identifier = '{identifier}'",
-            "pageSize": 50,
-        }
-        res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "marketplaceIntegrations" in res:
-            mp_list = res.get("marketplaceIntegrations", [])
-            if mp_list and isinstance(mp_list, list):
-                return mp_list[0]
-        return None
 
     # =========================================================================
     # Milestone 5.5: SOAR Scheduled Jobs, Instances & Execution Logs
@@ -1600,7 +1570,34 @@ class GoogleSecOpsAdapter:
             }
         """
         results = raw_response.get('results', [])
-        
+
+        def _extract_dashboard_val(val_obj: Any) -> Any:
+            if not isinstance(val_obj, dict):
+                return val_obj
+            if "stringVal" in val_obj and val_obj["stringVal"] is not None:
+                return val_obj["stringVal"]
+            if "stringValue" in val_obj and val_obj["stringValue"] is not None:
+                return val_obj["stringValue"]
+            for int_key in ("int64Val", "int64Value"):
+                if int_key in val_obj and val_obj[int_key] is not None:
+                    try:
+                        return int(val_obj[int_key])
+                    except (ValueError, TypeError):
+                        return val_obj[int_key]
+            for float_key in ("doubleVal", "doubleValue"):
+                if float_key in val_obj and val_obj[float_key] is not None:
+                    try:
+                        return float(val_obj[float_key])
+                    except (ValueError, TypeError):
+                        return val_obj[float_key]
+            for bool_key in ("boolVal", "boolValue"):
+                if bool_key in val_obj and val_obj[bool_key] is not None:
+                    return bool(val_obj[bool_key])
+            for ts_key in ("timestampVal", "timestampValue"):
+                if ts_key in val_obj and val_obj[ts_key] is not None:
+                    return val_obj[ts_key]
+            return None
+
         # Extract column names
         columns = [r.get('column', f'col_{i}') for i, r in enumerate(results)]
         
@@ -1617,16 +1614,7 @@ class GoogleSecOpsAdapter:
                 
                 if row_idx < len(values):
                     val_obj = values[row_idx].get('value', {})
-                    # Extract typed value (stringVal, int64Val, doubleVal, boolVal)
-                    # Try each type in order - first non-None wins
-                    actual_val = (
-                        val_obj.get('stringVal') if val_obj.get('stringVal') is not None else
-                        val_obj.get('int64Val') if val_obj.get('int64Val') is not None else
-                        val_obj.get('doubleVal') if val_obj.get('doubleVal') is not None else
-                        val_obj.get('boolVal') if val_obj.get('boolVal') is not None else
-                        None
-                    )
-                    row[col_name] = actual_val
+                    row[col_name] = _extract_dashboard_val(val_obj)
             
             rows.append(row)
         
@@ -1665,6 +1653,8 @@ class GoogleSecOpsAdapter:
                 raw_query_type=query_type,
                 error_message=err_text if not is_valid else None,
             )
+        except SecOpsConfigurationError:
+            raise
         except Exception as e:
             return ValidationResult(
                 valid=False,
@@ -1797,14 +1787,19 @@ class GoogleSecOpsAdapter:
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}/parsers/{clean_id}"
         try:
             return self._request("GET", path, params={"view": view})
-        except Exception:
+        except SecOpsConfigurationError:
+            raise
+        except RuntimeError as e:
+            err_msg = str(e)
+            if not any(code in err_msg for code in ("[400]", "[404]", "[405]", "[501]")):
+                raise
             # Fallback to list with FULL_VIEW and matching ID
             res = self.list_parsers(log_type=clean_lt, view=view, page_size=1000)
             for p in res.get("parsers", []):
                 p_name = p.get("name", "")
                 if p_name.endswith(clean_id) or p_name.split("/")[-1] == clean_id:
                     return p
-            raise ValueError(f"Parser '{clean_id}' not found for log type '{clean_lt}'")
+            raise ValueError(f"Parser '{clean_id}' not found for log type '{clean_lt}'") from e
 
     def run_parser(
         self,
@@ -2171,13 +2166,14 @@ class GoogleSecOpsAdapter:
         self,
         page_size: int = 1000,
         page_token: Optional[str] = None,
+        fields: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Discovers multi-tenancy environments in the SOAR tenant."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/environments"
-        params: Dict[str, Any] = {"pageSize": page_size}
-        if page_token:
-            params["pageToken"] = page_token
-        return self._request("GET", path, params=params)
+        return self.list_soar_environments(
+            fields=fields,
+            page_size=page_size,
+            page_token=page_token,
+        )
 
     def get_environment(self, env_id: str) -> Dict[str, Any]:
         """Retrieves deep configuration of a single multi-tenancy environment."""

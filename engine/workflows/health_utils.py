@@ -71,7 +71,7 @@ def fetch_deep_dive_telemetry(adapter: GoogleSecOpsAdapter) -> DeepDiveTelemetry
         exec_wf = ExecuteDashboardQueryWorkflow(adapter)
 
         for chart in dash_detail.charts:
-            q_name = chart.raw.get("chartDatasource", {}).get("dashboardQuery")
+            q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
             if not q_name:
                 continue
 

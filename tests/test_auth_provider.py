@@ -135,6 +135,70 @@ class TestCredentialProvider(unittest.TestCase):
                 self.assertIn("adc boom", msg)
                 self.assertIn("gcloud boom", msg)
 
+    def test_gcloud_token_cached_across_calls_and_invalidated(self):
+        c1 = subprocess.CompletedProcess(args=[], returncode=0, stdout="tok-1\n", stderr="")
+        c2 = subprocess.CompletedProcess(args=[], returncode=0, stdout="tok-2\n", stderr="")
+        with patch.dict(os.environ, {}, clear=True):
+            prov = CredentialProvider(mode="gcloud", gcloud_cache_ttl=3000.0)
+            with patch("subprocess.run", side_effect=[c1, c2]) as run:
+                self.assertEqual(prov.get_token(), "tok-1")
+                self.assertEqual(prov.get_token(), "tok-1")
+                self.assertEqual(run.call_count, 1)
+
+                prov.invalidate()
+                self.assertEqual(prov.get_token(), "tok-2")
+                self.assertEqual(run.call_count, 2)
+
+    def test_gcloud_concurrent_threads_spawn_single_subprocess(self):
+        import threading
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="tok-shared\n", stderr="")
+        with patch.dict(os.environ, {}, clear=True):
+            prov = CredentialProvider(mode="gcloud", gcloud_cache_ttl=3000.0)
+            with patch("subprocess.run", return_value=completed) as run:
+                results = []
+                threads = [
+                    threading.Thread(target=lambda: results.append(prov.get_token()))
+                    for _ in range(8)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+                self.assertEqual(results, ["tok-shared"] * 8)
+                self.assertEqual(run.call_count, 1)
+
+    def test_adapter_retries_once_on_401_after_invalidating_token(self):
+        import io
+        import urllib.error
+        from adapters.google_secops import GoogleSecOpsAdapter
+        from engine.config import SecOpsConfig
+
+        c1 = subprocess.CompletedProcess(args=[], returncode=0, stdout="expired-tok\n", stderr="")
+        c2 = subprocess.CompletedProcess(args=[], returncode=0, stdout="fresh-tok\n", stderr="")
+        with patch.dict(os.environ, {}, clear=True):
+            prov = CredentialProvider(mode="gcloud", gcloud_cache_ttl=3000.0)
+            cfg = SecOpsConfig(project_id="p", customer_id="c", project_number="123")
+            adapter = GoogleSecOpsAdapter(config=cfg, credential_provider=prov)
+
+            http_401 = urllib.error.HTTPError(
+                url="https://us-chronicle.googleapis.com/v1alpha/test",
+                code=401,
+                msg="Unauthorized",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error": {"message": "Token expired"}}'),
+            )
+            ok_resp = MagicMock()
+            ok_resp.read.return_value = b'{"ok": true}'
+            ok_resp.__enter__.return_value = ok_resp
+            ok_resp.__exit__.return_value = False
+
+            with patch("subprocess.run", side_effect=[c1, c2]) as run, \
+                 patch("urllib.request.urlopen", side_effect=[http_401, ok_resp]) as uopen:
+                res = adapter._request("GET", "/v1alpha/test")
+                self.assertEqual(res, {"ok": True})
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(uopen.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

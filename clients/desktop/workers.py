@@ -71,7 +71,7 @@ class SearchWorker(QThread):
                     request=self.search_request,
                     on_batch=on_batch,
                     on_state_change=on_state_change,
-                    cancel_token=self.cancel_token,
+                    cancel_token=self.cancel_token.is_set,
                 )
             elif self.mode == "refine":
                 if not self.base_query:
@@ -83,7 +83,7 @@ class SearchWorker(QThread):
                     batch_size=self.search_request.batch_size if self.search_request else 500,
                     on_batch=on_batch,
                     on_state_change=on_state_change,
-                    cancel_token=self.cancel_token,
+                    cancel_token=self.cancel_token.is_set,
                 )
             elif self.mode == "entity":
                 if not self.entity_type or not self.entity_value:
@@ -95,10 +95,14 @@ class SearchWorker(QThread):
                     batch_size=self.search_request.batch_size if self.search_request else 500,
                     on_batch=on_batch,
                     on_state_change=on_state_change,
-                    cancel_token=self.cancel_token,
+                    cancel_token=self.cancel_token.is_set,
                 )
             else:
                 raise ValueError(f"Unknown worker mode: {self.mode}")
+
+            if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                self.search_failed.emit(session.error or "UDM search failed")
+                return
 
             self.search_completed.emit(session)
         except Exception as e:
@@ -171,8 +175,8 @@ class EnrichedEventWorker(QThread):
 
     def run(self):
         try:
-            enriched = self.engine.adapter.fetch_enriched_event(self.event_id)
-            self.enriched_event_loaded.emit(enriched)
+            inv = self.engine.investigate_event(self.event_id, eager_load_raw_log=False)
+            self.enriched_event_loaded.emit(dict(inv.event))
         except Exception as e:
             self.enriched_event_failed.emit(str(e))
 
@@ -218,7 +222,7 @@ class CaseSearchWorker(QThread):
             assigned_users = [self.assignee] if self.assignee else None
 
             batch = self.engine.search_cases(
-                query=self.query,
+                query=self.query or "",
                 priorities=priorities,
                 stages=stages,
                 assigned_users=assigned_users,
@@ -226,6 +230,11 @@ class CaseSearchWorker(QThread):
                 end_time=self.end_time,
                 page_size=self.limit,
             )
+            if self.status and self.status.upper() in ("OPEN", "CLOSED"):
+                want_closed = self.status.upper() == "CLOSED"
+                batch.results = [
+                    r for r in batch.results if bool(getattr(r, "is_closed", False)) == want_closed
+                ]
             self.cases_loaded.emit(batch)
         except Exception as e:
             self.search_failed.emit(str(e))
@@ -299,7 +308,7 @@ class PlaybookSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_playbooks(
-                query=self.query,
+                query=self.query or None,
                 category=self.category,
                 is_enabled=self.is_enabled,
                 limit=self.limit,
@@ -355,8 +364,7 @@ class IntegrationSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_integrations(
-                query=self.query,
-                category=self.category,
+                query=self.query or None,
                 limit=self.limit,
             )
             self.integrations_loaded.emit(batch)
@@ -387,8 +395,8 @@ class JobSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_jobs(
-                query=self.query,
-                is_enabled=self.is_enabled,
+                query=self.query or None,
+                enabled=self.is_enabled,
                 limit=self.limit,
             )
             self.jobs_loaded.emit(batch)
@@ -423,8 +431,8 @@ class CuratedDetectionSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_curated_rulesets(
-                query=self.query,
-                category=self.category,
+                query=self.query or None,
+                category=self.category or None,
                 limit=self.limit,
             )
             self.rulesets_loaded.emit(batch)
@@ -480,9 +488,9 @@ class FeedSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_feeds(
-                query=self.query,
-                log_type=self.log_type,
-                source_type=self.source_type,
+                query=self.query or None,
+                log_type=self.log_type or None,
+                feed_source_type=self.source_type or None,
                 limit=self.limit,
             )
             self.feeds_loaded.emit(batch)
@@ -512,9 +520,10 @@ class ParserSearchWorker(QThread):
 
     def run(self):
         try:
+            creator = self.parser_type if self.parser_type and self.parser_type != "ALL" else None
             batch = self.engine.search_parsers(
-                query=self.query,
-                parser_type=self.parser_type,
+                query=self.query or None,
+                creator=creator,
                 limit=self.limit,
             )
             self.parsers_loaded.emit(batch)
@@ -549,8 +558,8 @@ class DashboardSearchWorker(QThread):
     def run(self):
         try:
             batch = self.engine.search_dashboards(
-                query=self.query,
-                dashboard_type=self.dashboard_type,
+                query=self.query or None,
+                dashboard_type=self.dashboard_type or None,
                 limit=self.limit,
             )
             self.dashboards_loaded.emit(batch)
@@ -580,13 +589,9 @@ class DashboardQueryWorker(QThread):
 
     def run(self):
         try:
-            from engine.domain import DashboardQuery
-            req = DashboardQuery(
+            result = self.engine.execute_dashboard_query(
                 query_text=self.query,
-                start_time=self.start_time,
-                end_time=self.end_time,
             )
-            result = self.engine.execute_dashboard_query(req)
             self.query_executed.emit(result)
         except Exception as e:
             self.query_failed.emit(str(e))

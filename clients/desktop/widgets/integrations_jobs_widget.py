@@ -163,11 +163,11 @@ class IntegrationsJobsWidget(QWidget):
             return
 
         lines = [
-            f"Identifier:     {getattr(item, 'identifier', '-')}",
-            f"Display Name:   {getattr(item, 'display_name', '-')}",
-            f"Category:       {getattr(item, 'category', '-')}",
-            f"Instances:      {getattr(item, 'instance_count', 0)}",
-            f"Certified:      {getattr(item, 'is_certified', False)}",
+            f"Identifier:     {getattr(item, 'identifier', getattr(item, 'id', '-'))}",
+            f"Display Name:   {getattr(item, 'display_name', getattr(item, 'name', '-'))}",
+            f"Category:       {getattr(item, 'integration_type', getattr(item, 'category', '-'))}",
+            f"Instances:      {getattr(item, 'instances_count', getattr(item, 'instance_count', 0))}",
+            f"Certified:      {getattr(item, 'certified', getattr(item, 'is_certified', False))}",
             f"Description:    {getattr(item, 'description', 'None')}",
         ]
         self.int_detail_text.setText("\n".join(lines))
@@ -211,12 +211,12 @@ class IntegrationsJobsWidget(QWidget):
             return
 
         lines = [
-            f"Job Identifier: {getattr(item, 'identifier', '-')}",
-            f"Display Name:   {getattr(item, 'display_name', '-')}",
-            f"Interval (s):   {getattr(item, 'interval_seconds', '-')}",
-            f"Enabled:        {getattr(item, 'is_enabled', False)}",
-            f"Running Status: {getattr(item, 'running_status', '-')}",
-            f"Modified Time:  {getattr(item, 'modified_time', '-')}",
+            f"Job Identifier: {getattr(item, 'id', getattr(item, 'identifier', '-'))}",
+            f"Display Name:   {getattr(item, 'display_name', getattr(item, 'name', '-'))}",
+            f"Interval (s):   {getattr(item, 'interval', getattr(item, 'interval_seconds', '-'))}",
+            f"Enabled:        {getattr(item, 'enabled', getattr(item, 'is_enabled', False))}",
+            f"Integration:    {getattr(item, 'integration', getattr(item, 'running_status', '-'))}",
+            f"Modified Time:  {getattr(item, 'modification_time', getattr(item, 'modified_time', '-'))}",
             f"Description:    {getattr(item, 'description', 'None')}",
         ]
         self.job_detail_text.setText("\n".join(lines))

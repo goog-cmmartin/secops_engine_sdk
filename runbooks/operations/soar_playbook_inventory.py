@@ -217,7 +217,10 @@ def main() -> None:
     elif args.disabled:
         is_enabled = False
 
-    print("\n[+] Collecting Google SecOps SOAR Playbooks, Blocks, Priorities, and Environment Mappings...")
+    print(
+        "\n[+] Collecting Google SecOps SOAR Playbooks, Blocks, Priorities, and Environment Mappings...",
+        file=sys.stderr,
+    )
     report = generate_playbook_inventory_report(
         engine=engine,
         category=args.category,
@@ -235,7 +238,7 @@ def main() -> None:
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, default=str)
-        print(f"\n[+] Playbook inventory report written to: {args.out}")
+        print(f"\n[+] Playbook inventory report written to: {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,75 @@ class TestConfigAndParsing(unittest.TestCase):
         self.assertIn("_search_udm_wf", engine._wf_cache)
         self.assertIs(engine._search_udm_wf, wf)
 
+    def test_project_number_falls_back_to_project_id(self):
+        from pathlib import Path
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = load_config(
+                project_id="my-gcp-project",
+                customer_id="cust-uuid",
+                env_file=Path("/tmp/nonexistent.env"),
+            )
+            self.assertEqual(cfg.project_number, "my-gcp-project")
+
+    def test_env_file_handles_export_and_inline_comments(self):
+        import tempfile
+        from pathlib import Path
+        content = (
+            "export GCP_PROJECT_ID=proj-from-export # inline comment\n"
+            "SECOPS_CUSTOMER_ID='cust-quoted#1'\n"
+            "SECOPS_REGION=europe-west2   # region comment\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False, encoding="utf-8") as tf:
+            tf.write(content)
+            env_path = Path(tf.name)
+        try:
+            with patch.dict(os.environ, {}, clear=True):
+                cfg = load_config(env_file=env_path)
+                self.assertEqual(cfg.project_id, "proj-from-export")
+                self.assertEqual(cfg.customer_id, "cust-quoted#1")
+                self.assertEqual(cfg.location, "europe-west2")
+        finally:
+            env_path.unlink(missing_ok=True)
+
+    def test_adapter_has_no_duplicate_method_definitions(self):
+        import ast
+        adapter_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "adapters", "google_secops.py")
+        )
+        with open(adapter_path, "r", encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), adapter_path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                seen = set()
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        self.assertNotIn(
+                            item.name,
+                            seen,
+                            f"Duplicate method '{item.name}' in {node.name}",
+                        )
+                        seen.add(item.name)
+
+    def test_adapter_request_preserves_pre_encoded_percent_sequences(self):
+        from unittest.mock import MagicMock
+        from adapters.google_secops import GoogleSecOpsAdapter
+        from engine.auth import CredentialProvider
+
+        cfg = SecOpsConfig(project_id="p", customer_id="c", project_number="123")
+        prov = CredentialProvider(static_token="tok")
+        adapter = GoogleSecOpsAdapter(config=cfg, credential_provider=prov)
+
+        ok_resp = MagicMock()
+        ok_resp.read.return_value = b'{"name": "projects/p/locations/us/instances/c/cases/100"}'
+        ok_resp.__enter__.return_value = ok_resp
+        ok_resp.__exit__.return_value = False
+
+        with patch("urllib.request.urlopen", return_value=ok_resp) as uopen:
+            adapter.update_case("case id/with space", {"displayName": "test"})
+            req_obj = uopen.call_args.args[0]
+            self.assertIn("with%20space", req_obj.full_url)
+            self.assertNotIn("with%2520space", req_obj.full_url)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,9 @@ from engine.domain import (
 )
 
 
+from engine.schema import canonicalize_udm_field
+
+
 def translate_to_udm_refinement(field_name: str, value: str, is_regex: bool = True) -> str:
     """Helper that formats a UDM field and value into findings refinement syntax.
     
@@ -30,13 +33,15 @@ def translate_to_udm_refinement(field_name: str, value: str, is_regex: bool = Tr
         >>> translate_to_udm_refinement("target.hostname", "byeserver.com", is_regex=True)
         '(target.hostname = /byeserver.com/)'
     """
-    clean_field = field_name.strip().lstrip("$e.").lstrip("$")
+    stripped = re.sub(r"^\$[a-zA-Z0-9_]*\.", "", field_name.strip()).lstrip("$")
+    clean_field = canonicalize_udm_field(stripped)
     clean_val = value.strip()
     if is_regex:
         # Escape slashes
         escaped = clean_val.replace("/", "\\/")
         return f"({clean_field} = /{escaped}/)"
-    return f'({clean_field} = "{clean_val}")'
+    escaped_exact = clean_val.replace("\\", "\\\\").replace('"', '\\"')
+    return f'({clean_field} = "{escaped_exact}")'
 
 
 class FindTopNoisyRulesWorkflow:
@@ -523,11 +528,26 @@ class DiagnoseAndTuneDetectionWorkflow:
                     if "event." in dim.subfield_path:
                         top_field = dim.subfield_path.split("event.")[-1]
                     elif "_ip" in dim.dimension or dim.dimension.endswith("ip"):
-                        top_field = "principal.ip" if "principal" in dim.dimension else "target.ip"
+                        if "principal" in dim.dimension:
+                            top_field = "principal.ip"
+                        elif "src" in dim.dimension:
+                            top_field = "src.ip"
+                        else:
+                            top_field = "target.ip"
                     elif "hostname" in dim.dimension:
-                        top_field = "principal.hostname" if "principal" in dim.dimension else "target.hostname"
+                        if "principal" in dim.dimension:
+                            top_field = "principal.hostname"
+                        elif "src" in dim.dimension:
+                            top_field = "src.hostname"
+                        else:
+                            top_field = "target.hostname"
                     elif "user" in dim.dimension:
-                        top_field = "principal.user.userid"
+                        if "target" in dim.dimension:
+                            top_field = "target.user.userid"
+                        elif "src" in dim.dimension:
+                            top_field = "src.user.userid"
+                        else:
+                            top_field = "principal.user.userid"
                     elif "dns" in dim.dimension:
                         top_field = "network.dns.questions.name"
                     elif "process" in dim.dimension:

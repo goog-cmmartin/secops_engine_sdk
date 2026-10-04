@@ -98,6 +98,56 @@ class TestEntityDetector(unittest.TestCase):
         self.assertEqual(res_host.category, EntityCategory.ASSET)
         self.assertEqual(res_host.ioc_value_type, "HOSTNAME")
 
+    def test_windows_path_and_domain_user_udm_escaping(self):
+        win_path = r"C:\Users\alice\payload.exe"
+        res_file = detect_entity(win_path)
+        self.assertEqual(res_file.entity_type, EntityType.FILE)
+        self.assertEqual(res_file.raw_value, win_path)
+        self.assertEqual(
+            res_file.graph_query,
+            r'graph.entity.file.full_path = "C:\\Users\\alice\\payload.exe" nocase',
+        )
+        self.assertIn(r'"C:\\Users\\alice\\payload.exe"', res_file.event_query)
+
+        user_domain = r"CORP\john.doe"
+        res_user = detect_entity(user_domain)
+        self.assertEqual(
+            res_user.graph_query,
+            r'graph.entity.user.userid = "CORP\\john.doe" nocase',
+        )
+
+    def test_hint_resolution(self):
+        # EntityType enum hint and underscore string hints (e.g. WINDOWS_SID)
+        res_sid_enum = detect_entity("S-1-5-18", hint=EntityType.WINDOWS_SID)
+        self.assertEqual(res_sid_enum.entity_type, EntityType.WINDOWS_SID)
+
+        res_sid_str = detect_entity("S-1-5-18", hint="WINDOWS_SID")
+        self.assertEqual(res_sid_str.entity_type, EntityType.WINDOWS_SID)
+
+        res_sid_alias = detect_entity("S-1-5-18", hint="sid")
+        self.assertEqual(res_sid_alias.entity_type, EntityType.WINDOWS_SID)
+
+        # SOAR multi-field hints
+        res_uniq = detect_entity("alice", hint="USERUNIQNAME")
+        self.assertEqual(res_uniq.entity_type, EntityType.USER)
+        self.assertEqual(
+            res_uniq.graph_fields,
+            ("graph.entity.user.userid", "graph.entity.user.email_addresses"),
+        )
+
+        res_dom = detect_entity("internal-host", hint="DOMAIN")
+        self.assertEqual(res_dom.entity_type, EntityType.DOMAIN)
+        self.assertEqual(
+            res_dom.graph_fields,
+            ("graph.entity.domain.name", "graph.entity.hostname"),
+        )
+
+        # FILEHASH hint resolves by length, or falls back to regex if not hex
+        md5_val = "f01a9a2d1e31332ed36c1a4d2839f412"
+        self.assertEqual(detect_entity(md5_val, hint="FILEHASH").entity_type, EntityType.MD5)
+        self.assertEqual(detect_entity("payload.exe", hint="FILEHASH").entity_type, EntityType.FILE)
+
 
 if __name__ == "__main__":
     unittest.main()
+

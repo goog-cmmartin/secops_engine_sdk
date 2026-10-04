@@ -105,19 +105,42 @@ class EventTableModel(QAbstractTableModel):
         return None
 
 
+def _resolve_model_attr(item: Any, attr_spec: Any) -> str:
+    """Resolves a single attribute name or a tuple of candidate attribute names on a domain object or dict."""
+    candidates = (attr_spec,) if isinstance(attr_spec, str) else tuple(attr_spec)
+    for attr in candidates:
+        val = None
+        found = False
+        if hasattr(item, attr):
+            val = getattr(item, attr)
+            found = True
+        elif isinstance(item, dict) and attr in item:
+            val = item[attr]
+            found = True
+        if found and val is not None and val != "":
+            if attr == "is_closed" and isinstance(val, bool):
+                return "CLOSED" if val else "OPEN"
+            if hasattr(val, "value"):
+                return str(val.value)
+            if isinstance(val, (list, tuple)):
+                return ", ".join(str(v) for v in val) if val else "-"
+            return str(val)
+    return "-"
+
+
 class CaseTableModel(QAbstractTableModel):
     """Table model for SOAR Cases."""
 
     COLUMNS = [
-        ("Case ID", "case_id"),
-        ("Title", "title"),
-        ("Priority", "priority"),
-        ("Status", "status"),
-        ("Stage", "stage"),
-        ("Assignee", "assignee"),
-        ("Alerts", "alert_count"),
-        ("Created", "created_time"),
-        ("Environment", "environment"),
+        ("Case ID", ("case_id", "id")),
+        ("Title", ("title", "display_name")),
+        ("Priority", ("priority",)),
+        ("Status", ("status", "is_closed")),
+        ("Stage", ("stage",)),
+        ("Assignee", ("user_assigned", "assignee")),
+        ("Alerts", ("alerts_count", "alert_count")),
+        ("Created", ("create_time", "created_time")),
+        ("Environment", ("environment",)),
     ]
 
     def __init__(self, parent=None):
@@ -148,14 +171,7 @@ class CaseTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            if hasattr(item, attr_name):
-                val = getattr(item, attr_name)
-            elif isinstance(item, dict):
-                val = item.get(attr_name, "-")
-            else:
-                val = "-"
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -182,12 +198,12 @@ class PlaybookTableModel(QAbstractTableModel):
     """Table model for SOAR Playbooks."""
 
     COLUMNS = [
-        ("Playbook ID", "playbook_id"),
-        ("Name", "name"),
-        ("Category", "category"),
-        ("Trigger Type", "trigger_type"),
-        ("Enabled", "is_enabled"),
-        ("Modified Time", "modified_time"),
+        ("Playbook ID", ("id", "identifier", "playbook_id")),
+        ("Name", ("name", "display_name")),
+        ("Category", ("category_name", "category", "category_id")),
+        ("Trigger Type", ("playbook_type", "trigger_type")),
+        ("Enabled", ("is_enabled", "enabled")),
+        ("Modified Time", ("modification_time", "modified_time")),
     ]
 
     def __init__(self, parent=None):
@@ -218,9 +234,7 @@ class PlaybookTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -247,11 +261,11 @@ class IntegrationTableModel(QAbstractTableModel):
     """Table model for SOAR Integrations."""
 
     COLUMNS = [
-        ("Identifier", "identifier"),
-        ("Display Name", "display_name"),
-        ("Category", "category"),
-        ("Instances", "instance_count"),
-        ("Certified", "is_certified"),
+        ("Identifier", ("identifier", "id")),
+        ("Display Name", ("display_name", "name")),
+        ("Category", ("integration_type", "category")),
+        ("Instances", ("instances_count", "instance_count")),
+        ("Certified", ("certified", "is_certified")),
     ]
 
     def __init__(self, parent=None):
@@ -282,9 +296,7 @@ class IntegrationTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 
@@ -308,12 +320,12 @@ class JobTableModel(QAbstractTableModel):
     """Table model for SOAR Scheduled Jobs."""
 
     COLUMNS = [
-        ("Job Identifier", "identifier"),
-        ("Display Name", "display_name"),
-        ("Interval (s)", "interval_seconds"),
-        ("Enabled", "is_enabled"),
-        ("Status", "running_status"),
-        ("Modified", "modified_time"),
+        ("Job Identifier", ("id", "identifier")),
+        ("Display Name", ("display_name", "name")),
+        ("Interval (s)", ("interval", "interval_seconds")),
+        ("Enabled", ("enabled", "is_enabled")),
+        ("Integration", ("integration", "running_status")),
+        ("Modified", ("modification_time", "modified_time")),
     ]
 
     def __init__(self, parent=None):
@@ -344,9 +356,7 @@ class JobTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 
@@ -370,11 +380,11 @@ class CuratedRulesetTableModel(QAbstractTableModel):
     """Table model for Curated Detections Rulesets."""
 
     COLUMNS = [
-        ("Ruleset ID", "ruleset_id"),
-        ("Display Name", "display_name"),
-        ("Category", "category"),
-        ("Rule Count", "rule_count"),
-        ("Precision", "precision"),
+        ("Ruleset ID", ("id", "ruleset_id")),
+        ("Display Name", ("title", "display_name")),
+        ("Category", ("category_name", "category", "category_id")),
+        ("Detections", ("detection_count", "rule_count")),
+        ("Quota Size", ("quota_size", "precision")),
     ]
 
     def __init__(self, parent=None):
@@ -405,9 +415,7 @@ class CuratedRulesetTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 
@@ -431,11 +439,11 @@ class FeedTableModel(QAbstractTableModel):
     """Table model for SIEM Ingestion Feeds."""
 
     COLUMNS = [
-        ("Feed ID", "feed_id"),
-        ("Display Name", "display_name"),
-        ("Log Type", "log_type"),
-        ("Source Type", "source_type"),
-        ("State", "state"),
+        ("Feed ID", ("id", "feed_id")),
+        ("Display Name", ("display_name", "name")),
+        ("Log Type", ("log_type",)),
+        ("Source Type", ("feed_source_type", "source_type")),
+        ("State", ("state",)),
     ]
 
     def __init__(self, parent=None):
@@ -466,9 +474,7 @@ class FeedTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 
@@ -492,10 +498,10 @@ class ParserTableModel(QAbstractTableModel):
     """Table model for SIEM Parsers."""
 
     COLUMNS = [
-        ("Log Type", "log_type"),
-        ("State", "state"),
-        ("Type", "parser_type"),
-        ("Author", "author"),
+        ("Log Type", ("log_type",)),
+        ("State", ("state",)),
+        ("Type", ("type", "parser_type")),
+        ("Author", ("creator_source", "author")),
     ]
 
     def __init__(self, parent=None):
@@ -526,9 +532,7 @@ class ParserTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 
@@ -552,11 +556,11 @@ class DashboardTableModel(QAbstractTableModel):
     """Table model for SIEM Dashboards."""
 
     COLUMNS = [
-        ("Dashboard ID", "dashboard_id"),
-        ("Display Name", "display_name"),
-        ("Type", "dashboard_type"),
-        ("Charts", "chart_count"),
-        ("Updated", "modified_time"),
+        ("Dashboard ID", ("id", "dashboard_id")),
+        ("Display Name", ("display_name", "name")),
+        ("Type", ("type", "dashboard_type")),
+        ("Charts", ("charts_count", "chart_count")),
+        ("Updated", ("update_time", "modified_time")),
     ]
 
     def __init__(self, parent=None):
@@ -587,9 +591,7 @@ class DashboardTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.DisplayRole:
             item = self._items[index.row()]
-            attr_name = self.COLUMNS[index.column()][1]
-            val = getattr(item, attr_name, "-") if hasattr(item, attr_name) else (item.get(attr_name, "-") if isinstance(item, dict) else "-")
-            return str(val) if val is not None else "-"
+            return _resolve_model_attr(item, self.COLUMNS[index.column()][1])
 
         return None
 

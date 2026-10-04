@@ -126,3 +126,26 @@ class TestDashboardHealthCheckUnit(unittest.TestCase):
         self.assertEqual(self.mock_adapter.execute_dashboard_query.call_count, 2)
         self.mock_adapter.batch_get_dashboard_charts.assert_called_once_with(["chart-1", "chart-2"])
         self.assertEqual(self.mock_adapter.get_dashboard_query.call_count, 2)
+
+    def test_health_check_restores_none_tenant_attributes(self):
+        """Verify tenant overrides restore original None values in finally block."""
+        self.mock_adapter.project_id = None
+        self.mock_adapter.customer_id = None
+        self.mock_adapter.region = None
+        self.mock_adapter.list_native_dashboards = Mock(
+            return_value={"nativeDashboards": [self.other_dashboard_raw]}
+        )
+
+        with self.assertRaises(ValueError):
+            run_dashboard_health_check(
+                self.mock_adapter,
+                "My Dashboard",
+                project_id="override-proj",
+                customer_id="override-cust",
+                region="eu",
+            )
+
+        self.assertIsNone(self.mock_adapter.project_id)
+        self.assertIsNone(self.mock_adapter.customer_id)
+        self.assertIsNone(self.mock_adapter.region)
+

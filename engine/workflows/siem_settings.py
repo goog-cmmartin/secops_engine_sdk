@@ -122,7 +122,7 @@ class GetLogProcessingPipelineDetailWorkflow:
     def execute(self, identifier_or_title: str) -> LogProcessingPipelineDetail:
         # Check if caller passed display name
         clean_id = identifier_or_title.split("/")[-1]
-        if not clean_id.startswith("projects/") and len(clean_id.split("-")) < 4:
+        if not identifier_or_title.startswith("projects/") and len(clean_id.split("-")) < 4:
             # Might be display name, search first
             search_wf = SearchLogProcessingPipelinesWorkflow(self.adapter)
             batch = search_wf.execute(query=identifier_or_title, limit=10)

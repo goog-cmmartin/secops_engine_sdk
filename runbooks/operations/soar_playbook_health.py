@@ -90,11 +90,8 @@ def generate_soar_playbook_health_report(
     now_utc = datetime.now(timezone.utc)
 
     # 1. Fetch Structural Inventory via SDK
-    try:
-        batch: PlaybookBatch = engine.search_playbooks(limit=1000)
-        playbook_summaries: List[PlaybookSummary] = batch.results
-    except Exception as ex:
-        playbook_summaries = []
+    batch: PlaybookBatch = engine.search_playbooks(limit=1000)
+    playbook_summaries: List[PlaybookSummary] = batch.results
 
     total_playbooks = len(playbook_summaries)
     enabled_count = sum(1 for p in playbook_summaries if p.is_enabled)
@@ -352,6 +349,15 @@ def generate_soar_playbook_health_report(
             "recommendation": "Archive or clean up unmaintained playbooks to reduce configuration clutter.",
         })
 
+    if query_errors:
+        findings.append({
+            "severity": "MEDIUM",
+            "code": "TELEMETRY_QUERY_ERRORS",
+            "title": f"{len(query_errors)} SOAR Dashboard Telemetry Queries Failed",
+            "message": f"Failed to execute {len(query_errors)} of {len(SOAR_DASHBOARD_QUERIES)} native SOAR dashboard queries.",
+            "recommendation": "Verify dashboard query permissions and native Playbook Dashboard availability.",
+        })
+
     summary_dict = {
         "total_playbooks": total_playbooks,
         "regular_playbooks_count": len(regular_playbooks),
@@ -394,6 +400,7 @@ def generate_soar_playbook_health_report(
         "slowest_playbooks": runtime_benchmarks,
         "categories_distribution": dict(category_counter.most_common()),
         "environments_distribution": dict(env_counter.most_common()),
+        "query_errors": query_errors,
     }
 
 

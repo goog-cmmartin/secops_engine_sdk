@@ -5,7 +5,7 @@ Implements SEC-SPEC-SRCH-002:
 - search.from_entity.v1: Executes canonical multi-field entity pivot searches.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, List, Optional, Union
 
 from engine.domain import (
@@ -17,6 +17,7 @@ from engine.domain import (
     SearchRequest,
     SearchSession,
 )
+from engine.entity_detector import coerce_entity_type
 from engine.workflows.search_udm import SearchUDMWorkflow
 
 
@@ -110,6 +111,7 @@ class SearchFromEntityWorkflow:
         EntityType.URL: 'target.url = "{value}" OR network.http.referral_url = "{value}"',
         EntityType.WINDOWS_SID: 'principal.user.windows_sid = "{value}" OR target.user.windows_sid = "{value}"',
         EntityType.RESOURCE: 'target.resource.name = "{value}"',
+        EntityType.FILE: 'target.file.full_path = "{value}" OR principal.process.file.full_path = "{value}" OR target.process.file.full_path = "{value}"',
     }
 
     STRATEGY_DESCRIPTIONS = {
@@ -125,32 +127,34 @@ class SearchFromEntityWorkflow:
         EntityType.URL: "Searches across target.url and network referral url.",
         EntityType.WINDOWS_SID: "Searches across principal and target windows SID.",
         EntityType.RESOURCE: "Searches across target resource name.",
+        EntityType.FILE: "Searches across target file full_path and process file full_path (principal & target).",
     }
 
     def __init__(self, search_workflow: SearchUDMWorkflow):
         self.search_workflow = search_workflow
 
     @classmethod
-    def get_strategy_description(cls, entity_type: EntityType) -> str:
+    def get_strategy_description(cls, entity_type: Union[EntityType, str]) -> str:
         """Returns human- and AI-readable explanation of the search strategy for an entity type."""
-        return cls.STRATEGY_DESCRIPTIONS.get(entity_type, f"Canonical search for {entity_type.value}")
+        resolved_type = coerce_entity_type(entity_type)
+        return cls.STRATEGY_DESCRIPTIONS.get(resolved_type, f"Canonical search for {resolved_type.value}")
 
     @classmethod
-    def build_entity_query(cls, entity_type: EntityType, entity_value: str) -> str:
+    def build_entity_query(cls, entity_type: Union[EntityType, str], entity_value: str) -> str:
         """Generates standard canonical multi-field UDM query for an entity identifier."""
-        template = cls.ENTITY_TEMPLATES.get(entity_type)
+        resolved_type = coerce_entity_type(entity_type)
+        template = cls.ENTITY_TEMPLATES.get(resolved_type)
         if not template:
             raise ValueError(f"Unsupported entity type: {entity_type}")
-        val_clean = entity_value.replace('"', '\\"')
+        val_clean = entity_value.replace("\\", "\\\\").replace('"', '\\"')
         return template.format(value=val_clean)
-
 
     def execute(
         self,
-        entity_type: EntityType,
+        entity_type: Union[EntityType, str],
         entity_value: str,
-        start_time: str,
-        end_time: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
         receive_limit: int = 10000,
         batch_size: int = 2000,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
@@ -159,6 +163,13 @@ class SearchFromEntityWorkflow:
     ) -> SearchSession:
         """Executes a canonical entity pivot search."""
         query = self.build_entity_query(entity_type, entity_value)
+
+        if not start_time or not end_time:
+            now = datetime.now(timezone.utc)
+            if not end_time:
+                end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if not start_time:
+                start_time = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         request = SearchRequest(
             query=query,

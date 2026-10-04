@@ -169,6 +169,51 @@ class TestParserHealthAudit(unittest.TestCase):
         self.assertTrue(finding.has_extension)
         self.assertEqual(finding.opted_fields_count, 2)
 
+    def test_collect_health_hub_parser_telemetry_executes_query_by_name(self):
+        """Verifies _collect_health_hub_parser_telemetry uses q_name when chart.query is None."""
+        from datetime import datetime, timezone
+        from engine.domain import DashboardQueryResult
+
+        adapter = MagicMock()
+        adapter.get_native_dashboard.return_value = {
+            "name": "projects/123/locations/us/instances/abc/dashboards/1b0cb92f-c162-424a-9d31-05b35180c8a5",
+            "displayName": "Health Hub",
+            "definition": {
+                "charts": [{"dashboardChart": "chart_parser_1"}],
+            },
+        }
+        adapter.batch_get_dashboard_charts.return_value = {
+            "dashboardCharts": [
+                {
+                    "name": "chart_parser_1",
+                    "displayName": "Health Status by Parser",
+                    "chartDatasource": {"dashboardQuery": "q_parser_health_1"},
+                }
+            ]
+        }
+        adapter.execute_dashboard_query.return_value = DashboardQueryResult(
+            query_name="q_parser_health_1",
+            dialect="DIALECT_STATS",
+            data_sources=[],
+            time_window={},
+            columns=["log_type", "status", "latest_drop_reason_code"],
+            rows=[
+                {
+                    "log_type": "WINDOWS_SYSMON",
+                    "status": "Critical",
+                    "latest_drop_reason_code": "PARSE_FAILURE",
+                }
+            ],
+            total_rows=1,
+            retrieved_at=datetime.now(timezone.utc),
+        )
+
+        wf = AuditParserHealthWorkflow(adapter)
+        telem = wf._collect_health_hub_parser_telemetry()
+        self.assertIn("WINDOWS_SYSMON", telem)
+        self.assertEqual(telem["WINDOWS_SYSMON"]["status"], "Critical")
+        self.assertEqual(telem["WINDOWS_SYSMON"]["latest_drop_reason_code"], "PARSE_FAILURE")
+
 
 if __name__ == "__main__":
     unittest.main()

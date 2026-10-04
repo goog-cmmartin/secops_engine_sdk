@@ -64,9 +64,9 @@ class AuditRuleHealthWorkflow:
         # Map errors by rule id or name
         errors_by_rule: Dict[str, List[RuleExecutionError]] = {}
         for err in errors:
-            r_key = (err.rule_resource_name or "").split("/")[-1].lower()
+            r_key = (err.rule_resource_name or "").split("/")[-1].split("@")[0].lower()
             if not r_key and err.curated_rule:
-                r_key = err.curated_rule.split("/")[-1].lower()
+                r_key = err.curated_rule.split("/")[-1].split("@")[0].lower()
             if r_key:
                 errors_by_rule.setdefault(r_key, []).append(err)
 
@@ -143,7 +143,7 @@ class AuditRuleHealthWorkflow:
         latency_threshold_min: float,
     ) -> RuleHealthFinding:
         """Evaluates health status, latency, detection volume, and error diagnostics for a rule."""
-        rule_id = rule.name.split("/")[-1] if rule.name else ""
+        rule_id = rule.name.split("/")[-1].split("@")[0] if rule.name else ""
         rule_id_lower = rule_id.lower()
         rule_display_lower = (rule.display_name or "").lower()
 
@@ -177,7 +177,15 @@ class AuditRuleHealthWorkflow:
         details = "Rule is operating normally."
 
         # Deployment & enabled status
-        is_enabled = bool(rule.run_frequency in ("LIVE", "HOURLY", "DAILY") or rule.raw.get("enabled", True))
+        if "enabled" in rule.raw:
+            is_enabled = bool(rule.raw["enabled"])
+        elif rule.raw.get("executionState") in ("PAUSED", "DISABLED"):
+            is_enabled = False
+        else:
+            is_enabled = bool(
+                rule.run_frequency in ("LIVE", "HOURLY", "DAILY")
+                or rule.raw.get("executionState") == "ACTIVE"
+            )
         is_alerting = bool(rule.raw.get("alerting", True))
 
         if not is_enabled:

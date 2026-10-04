@@ -169,10 +169,10 @@ class FeedsParsersWidget(QWidget):
             return
 
         lines = [
-            f"Feed ID:        {getattr(item, 'feed_id', '-')}",
+            f"Feed ID:        {getattr(item, 'id', None) or getattr(item, 'feed_id', '-')}",
             f"Display Name:   {getattr(item, 'display_name', '-')}",
             f"Log Type:       {getattr(item, 'log_type', '-')}",
-            f"Source Type:    {getattr(item, 'source_type', '-')}",
+            f"Source Type:    {getattr(item, 'feed_source_type', None) or getattr(item, 'source_type', '-')}",
             f"State:          {getattr(item, 'state', '-')}",
         ]
         self.feed_detail_text.setText("\n".join(lines))
@@ -220,7 +220,7 @@ class FeedsParsersWidget(QWidget):
         lines = [
             f"Log Type:       {getattr(item, 'log_type', '-')}",
             f"State:          {getattr(item, 'state', '-')}",
-            f"Parser Type:    {getattr(item, 'parser_type', '-')}",
-            f"Author:         {getattr(item, 'author', '-')}",
+            f"Parser Type:    {getattr(item, 'type', None) or getattr(item, 'parser_type', '-')}",
+            f"Author:         {getattr(item, 'creator_source', None) or getattr(item, 'author', '-')}",
         ]
         self.parser_detail_text.setText("\n".join(lines))

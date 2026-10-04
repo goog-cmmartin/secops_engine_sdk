@@ -105,7 +105,9 @@ def print_data_table_inventory_console(report: Dict[str, Any]) -> None:
         for col in dt.get("columns", []):
             key_flag = " [KEY]" if col.get("is_key_column") else ""
             rep_flag = " [REPEATED]" if col.get("repeated_values") else ""
-            print(f"      - {col['column_name']:28s} {col['data_type']:15s}{key_flag}{rep_flag}")
+            col_name = str(col.get("column_name") or "")
+            col_type = str(col.get("data_type") or "UNKNOWN")
+            print(f"      - {col_name:28s} {col_type:15s}{key_flag}{rep_flag}")
 
     print("\n" + "=" * 95)
 

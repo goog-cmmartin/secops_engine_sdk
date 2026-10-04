@@ -177,7 +177,7 @@ class GetContentPackDetailWorkflow:
         identifier = pack_id_or_title.strip()
 
         # 1. Try direct fetch if it looks like a UUID or resource path
-        is_uuid_or_path = "/" in identifier or "-" in identifier and len(identifier) > 30
+        is_uuid_or_path = ("/" in identifier) or ("-" in identifier and len(identifier) > 30)
         if is_uuid_or_path:
             clean_id = identifier.split("/")[-1]
             try:
@@ -187,21 +187,26 @@ class GetContentPackDetailWorkflow:
             except Exception:
                 pass
 
-        # 2. Fallback: Search all catalog packs by title or identifier
+        # 2. Fallback: Search all catalog packs by exact title/identifier first, then substring
         raw_res = self.adapter.list_content_packs(page_size=100)
         raw_packs = raw_res.get("contentPacks", []) if isinstance(raw_res, dict) else []
 
+        target_lower = identifier.lower()
         for p in raw_packs:
             p_id = p.get("identifier", "")
             p_name = p.get("name", "")
             p_title = p.get("title", "")
 
             if (
-                identifier.lower() == p_id.lower()
-                or identifier.lower() == p_name.lower()
-                or identifier.lower() == p_title.lower()
-                or identifier.lower() in p_title.lower()
+                target_lower == p_id.lower()
+                or target_lower == p_name.lower()
+                or target_lower == p_title.lower()
             ):
+                return _map_content_pack_detail(p)
+
+        for p in raw_packs:
+            p_title = p.get("title", "")
+            if target_lower in p_title.lower():
                 return _map_content_pack_detail(p)
 
         raise ValueError(f"Content Pack not found: '{pack_id_or_title}'")

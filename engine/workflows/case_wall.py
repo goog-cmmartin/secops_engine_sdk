@@ -88,8 +88,14 @@ class ListCaseCommentsWorkflow:
         records = [parse_case_comment_record(c) for c in raw_comments]
 
         # Sort chronologically descending (newest first)
+        def _comment_ts(cm: CaseCommentRecord) -> datetime:
+            dt = cm.create_time
+            if dt is None:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
         records.sort(
-            key=lambda x: x.create_time or datetime.min.replace(tzinfo=timezone.utc),
+            key=_comment_ts,
             reverse=True,
         )
         return records

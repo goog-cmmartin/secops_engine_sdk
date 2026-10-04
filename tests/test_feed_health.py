@@ -133,12 +133,14 @@ class TestFeedHealthWorkflow(unittest.TestCase):
         )
 
         deep_dive = DeepDiveTelemetry(
+            collector_by_log_type={"SYSLOG": "BindPlane Enterprise Google"},
             quota_rejected_volume_mb={"SYSLOG": 25.4},
             quota_limit_mb_per_sec={"SYSLOG": 10.0},
             volume_funnel_by_log_type={"SYSLOG": {"total_logs": 1000, "normalized_events": 900, "parsing_error_events": 100}},
         )
 
         finding = wf._evaluate_feed(feed, telemetry_map={}, deep_dive_telemetry=deep_dive)
+        self.assertEqual(finding.collector_name, "BindPlane Enterprise Google")
         self.assertEqual(finding.quota_rejected_volume_mb, 25.4)
         self.assertEqual(finding.quota_limit_mb_per_sec, 10.0)
         self.assertEqual(finding.volume_funnel.get("total_logs"), 1000)

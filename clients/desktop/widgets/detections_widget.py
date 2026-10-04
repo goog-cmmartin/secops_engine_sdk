@@ -138,11 +138,11 @@ class DetectionsWidget(QWidget):
             return
 
         lines = [
-            f"Ruleset ID:     {getattr(item, 'ruleset_id', '-')}",
-            f"Display Name:   {getattr(item, 'display_name', '-')}",
-            f"Category:       {getattr(item, 'category', '-')}",
-            f"Rule Count:     {getattr(item, 'rule_count', 0)}",
-            f"Precision:      {getattr(item, 'precision', '-')}",
+            f"Ruleset ID:     {getattr(item, 'id', getattr(item, 'ruleset_id', '-'))}",
+            f"Display Name:   {getattr(item, 'title', getattr(item, 'display_name', '-'))}",
+            f"Category:       {getattr(item, 'category_name', getattr(item, 'category', getattr(item, 'category_id', '-')))}",
+            f"Detections:     {getattr(item, 'detection_count', getattr(item, 'rule_count', 0))}",
+            f"Quota Size:     {getattr(item, 'quota_size', getattr(item, 'precision', '-'))}",
             f"Description:    {getattr(item, 'description', 'None')}",
         ]
         self.detail_text.setText("\n".join(lines))

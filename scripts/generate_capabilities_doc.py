@@ -14,6 +14,7 @@ The --check mode lets CI enforce that the committed doc matches the registry.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date
@@ -49,6 +50,10 @@ def build_registry() -> WorkflowRegistry:
 
 def _fmt_card(card: str | None) -> str:
     return f"`{card}`" if card else "—"
+
+
+def _strip_generated_date(text: str) -> str:
+    return re.sub(r"(?m)^_Generated \d{4}-\d{2}-\d{2} ", "_Generated <DATE> ", text)
 
 
 def render(caps) -> str:
@@ -148,7 +153,7 @@ def main() -> int:
 
     if args.check:
         current = OUTPUT_PATH.read_text() if OUTPUT_PATH.exists() else ""
-        if current != content:
+        if _strip_generated_date(current) != _strip_generated_date(content):
             print("docs/CAPABILITIES.md is STALE. Run: "
                   "python scripts/generate_capabilities_doc.py", file=sys.stderr)
             return 1

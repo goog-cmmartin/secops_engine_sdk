@@ -333,7 +333,7 @@ class SearchEnvironmentsWorkflow:
                     continue
 
             environments.append(summary)
-            if len(environments) >= limit:
+            if limit > 0 and len(environments) >= limit:
                 break
 
         return EnvironmentBatch(
@@ -405,7 +405,7 @@ class SearchEnvironmentGroupsWorkflow:
                     raw=item,
                 )
             )
-            if len(groups) >= limit:
+            if limit > 0 and len(groups) >= limit:
                 break
 
         return EnvironmentGroupBatch(
@@ -486,7 +486,7 @@ class SearchRemoteAgentsWorkflow:
                 continue
 
             remote_agents.append(summary)
-            if len(remote_agents) >= limit:
+            if limit > 0 and len(remote_agents) >= limit:
                 break
 
         return RemoteAgentBatch(
@@ -666,7 +666,7 @@ class SearchSoarNetworksWorkflow:
                     continue
 
             networks.append(summary)
-            if len(networks) >= limit:
+            if limit > 0 and len(networks) >= limit:
                 break
 
         return SoarNetworkBatch(
@@ -756,7 +756,7 @@ class SearchSoarDomainsWorkflow:
                     continue
 
             domains.append(summary)
-            if len(domains) >= limit:
+            if limit > 0 and len(domains) >= limit:
                 break
 
         return SoarDomainBatch(
@@ -853,7 +853,7 @@ class SearchSoarCustomListsWorkflow:
                     continue
 
             custom_lists.append(summary)
-            if len(custom_lists) >= limit:
+            if limit > 0 and len(custom_lists) >= limit:
                 break
 
         return SoarCustomListBatch(
@@ -951,7 +951,7 @@ class SearchEmailTemplatesWorkflow:
                     continue
 
             templates.append(summary)
-            if len(templates) >= limit:
+            if limit > 0 and len(templates) >= limit:
                 break
 
         return EmailTemplateBatch(
@@ -1050,7 +1050,7 @@ class SearchEntitiesBlocklistsWorkflow:
                     continue
 
             entries.append(summary)
-            if len(entries) >= limit:
+            if limit > 0 and len(entries) >= limit:
                 break
 
         return EntitiesBlocklistBatch(
@@ -1163,7 +1163,7 @@ class SearchSlaDefinitionsWorkflow:
                     continue
 
             slas.append(summary)
-            if len(slas) >= limit:
+            if limit > 0 and len(slas) >= limit:
                 break
 
         return SlaDefinitionBatch(
@@ -1260,7 +1260,7 @@ class SearchRequestTemplatesWorkflow:
                     continue
 
             templates.append(summary)
-            if len(templates) >= limit:
+            if limit > 0 and len(templates) >= limit:
                 break
 
         return RequestTemplateBatch(
@@ -1376,7 +1376,7 @@ class SearchSoarIngestionConnectorsWorkflow:
                     continue
 
             connectors.append(summary)
-            if len(connectors) >= limit:
+            if limit > 0 and len(connectors) >= limit:
                 break
 
         return SoarIngestionConnectorBatch(
@@ -1480,7 +1480,7 @@ class SearchSoarWebhooksWorkflow:
                     continue
 
             webhooks.append(summary)
-            if len(webhooks) >= limit:
+            if limit > 0 and len(webhooks) >= limit:
                 break
 
         return SoarWebhookBatch(

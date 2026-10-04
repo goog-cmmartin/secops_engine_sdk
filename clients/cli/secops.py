@@ -5135,7 +5135,9 @@ def run_data_table_cli(args):
             print("\n  Columns:")
             for col in dt.column_info:
                 key_marker = " [KEY]" if col.is_key_column else ""
-                print(f"    - {col.column_name:25s} {col.data_type:15s}{key_marker}")
+                col_name = col.column_name or "-"
+                data_type = col.data_type or "UNKNOWN"
+                print(f"    - {col_name:25s} {data_type:15s}{key_marker}")
             print()
         except Exception as e:
             print(f"Error fetching data table: {e}", file=sys.stderr)
@@ -5270,7 +5272,10 @@ def run_rule_cli(args):
                 print("  " + "-" * 120)
                 for r in res.rules:
                     freq = r.run_frequency or (r.allowed_run_frequencies[0] if r.allowed_run_frequencies else "-")
-                    print(f"  {r.rule_id:45s} {r.display_name[:33]:35s} {r.severity:10s} {r.rule_type:15s} {freq:10s}")
+                    sev = r.severity or "N/A"
+                    rtype = r.rule_type or "N/A"
+                    dname = (r.display_name or r.rule_id or "-")[:33]
+                    print(f"  {(r.rule_id or '-'):45s} {dname:35s} {sev:10s} {rtype:15s} {freq:10s}")
             print()
         except Exception as e:
             print(f"Error listing detection rules: {e}", file=sys.stderr)
@@ -5381,7 +5386,9 @@ def run_rule_cli(args):
                 print(f"  {'REVISION ID':35s} {'COMPILATION':15s} {'REVISION TIME':30s} {'AUTHOR':20s}")
                 print("  " + "-" * 105)
                 for rev in res.revisions:
-                    print(f"  {rev.revision_id:35s} {rev.compilation_state:15s} {rev.revision_create_time[:28]:30s} {rev.author or '-':20s}")
+                    comp_state = rev.compilation_state or "UNKNOWN"
+                    rev_time = (rev.revision_create_time or "-")[:28]
+                    print(f"  {(rev.revision_id or '-'):35s} {comp_state:15s} {rev_time:30s} {rev.author or '-':20s}")
             print()
         except Exception as e:
             print(f"Error listing rule revisions: {e}", file=sys.stderr)

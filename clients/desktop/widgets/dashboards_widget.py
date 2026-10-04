@@ -158,12 +158,15 @@ class DashboardsWidget(QWidget):
         if not item:
             return
 
+        charts = getattr(item, "charts_count", None)
+        if charts is None:
+            charts = getattr(item, "chart_count", 0)
         lines = [
-            f"Dashboard ID:   {getattr(item, 'dashboard_id', '-')}",
+            f"Dashboard ID:   {getattr(item, 'id', None) or getattr(item, 'dashboard_id', '-')}",
             f"Display Name:   {getattr(item, 'display_name', '-')}",
-            f"Type:           {getattr(item, 'dashboard_type', '-')}",
-            f"Charts:         {getattr(item, 'chart_count', 0)}",
-            f"Modified Time:  {getattr(item, 'modified_time', '-')}",
+            f"Type:           {getattr(item, 'type', None) or getattr(item, 'dashboard_type', '-')}",
+            f"Charts:         {charts}",
+            f"Modified Time:  {getattr(item, 'update_time', None) or getattr(item, 'modified_time', '-')}",
             f"Description:    {getattr(item, 'description', 'None')}",
         ]
         self.output_text.setText("\n".join(lines))

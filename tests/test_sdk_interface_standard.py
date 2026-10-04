@@ -355,6 +355,320 @@ class TestFacadePolymorphicSignatures(unittest.TestCase):
         self.engine.investigate_case(104984)
         mock_wf.execute.assert_called_with(case_id="104984")
 
+    def test_default_24h_time_window_in_search_methods(self):
+        mock_udm_wf = MagicMock()
+        mock_stats_wf = MagicMock()
+        mock_pivot_wf = MagicMock()
+        self.engine._wf_cache["_search_udm_wf"] = mock_udm_wf
+        self.engine._wf_cache["_search_udm_stats_wf"] = mock_stats_wf
+        self.engine._wf_cache["_search_from_entity_wf"] = mock_pivot_wf
+
+        self.engine.search_udm(query='principal.ip = "10.0.0.1"')
+        req = mock_udm_wf.execute.call_args[1]["request"]
+        self.assertTrue(req.start_time.endswith("Z"))
+        self.assertTrue(req.end_time.endswith("Z"))
+
+        self.engine.search_udm_stats(query='metadata.event_type = "USER_LOGIN" | count()')
+        stats_req = mock_stats_wf.execute.call_args[1]["request"]
+        self.assertTrue(stats_req.start_time.endswith("Z"))
+        self.assertTrue(stats_req.end_time.endswith("Z"))
+
+        self.engine.search_from_entity(entity_type="ip", entity_value="10.0.0.1")
+        pivot_kwargs = mock_pivot_wf.execute.call_args[1]
+        self.assertTrue(pivot_kwargs["start_time"].endswith("Z"))
+        self.assertTrue(pivot_kwargs["end_time"].endswith("Z"))
+
+    def test_case_priority_coercion_in_search_and_triage(self):
+        mock_search_wf = MagicMock()
+        mock_triage_wf = MagicMock()
+        self.engine._wf_cache["_search_cases_wf"] = mock_search_wf
+        self.engine._wf_cache["_orchestrate_case_triage_wf"] = mock_triage_wf
+
+        self.engine.search_cases(priorities="high")
+        q_passed = mock_search_wf.execute.call_args[0][0]
+        self.assertEqual(q_passed.priorities, ["HIGH"])
+
+        self.engine.orchestrate_case_triage(priorities=["critical", CasePriority.LOW])
+        triage_kwargs = mock_triage_wf.execute.call_args[1]
+        self.assertEqual(triage_kwargs["priorities"], ["CRITICAL", "LOW"])
+
+    def test_scalar_to_list_normalization_in_facade_methods(self):
+        mock_manage_ref_wf = MagicMock()
+        mock_test_ref_wf = MagicMock()
+        mock_card_wf = MagicMock()
+        mock_search_cases_wf = MagicMock()
+        self.engine._wf_cache["_manage_findings_refinements_wf"] = mock_manage_ref_wf
+        self.engine._wf_cache["_test_findings_refinement_wf"] = mock_test_ref_wf
+        self.engine._wf_cache["_analyze_entity_cardinality_wf"] = mock_card_wf
+        self.engine._wf_cache["_search_cases_wf"] = mock_search_cases_wf
+
+        self.engine.create_findings_refinement(
+            display_name="Exclude scanner",
+            query='principal.ip = "10.0.0.1"',
+            curated_rule_ids="ur_123",
+        )
+        self.assertEqual(
+            mock_manage_ref_wf.create_refinement.call_args[1]["curated_rule_ids"],
+            ["ur_123"],
+        )
+
+        self.engine.test_findings_refinement(
+            curated_rule_ids="ur_123",
+            query='principal.ip = "10.0.0.1"',
+        )
+        self.assertEqual(
+            mock_test_ref_wf.execute.call_args[1]["curated_rule_ids"],
+            ["ur_123"],
+        )
+
+        self.engine.analyze_entity_cardinality(
+            rule_id="ru_123",
+            dimensions="principal.ip",
+        )
+        self.assertEqual(
+            mock_card_wf.execute.call_args[1]["dimensions"],
+            ["principal.ip"],
+        )
+
+        self.engine.search_cases_by_entity(
+            entity_value="10.0.0.1",
+            environments="Default Environment",
+        )
+        q_passed = mock_search_cases_wf.execute.call_args[0][0]
+        self.assertEqual(q_passed.environments, ["Default Environment"])
+
+    def test_get_case_timeline_uses_cached_workflow_map(self):
+        mock_timeline_wf = MagicMock()
+        self.engine._wf_cache["_get_case_timeline_wf"] = mock_timeline_wf
+
+        self.engine.get_case_timeline("cases/104984")
+        mock_timeline_wf.execute.assert_called_once_with(case_id="104984")
+
+    def test_per_instance_registry_isolation(self):
+        adapter_a = MagicMock()
+        adapter_b = MagicMock()
+        engine_a = SecOpsEngine(adapter=adapter_a)
+        engine_b = SecOpsEngine(adapter=adapter_b)
+
+        self.assertIsNot(engine_a.registry, engine_b.registry)
+        cap_a = engine_a.registry.get("case.investigate")
+        cap_b = engine_b.registry.get("case.investigate")
+        self.assertIs(cap_a.handler.__self__, engine_a)
+        self.assertIs(cap_b.handler.__self__, engine_b)
+
+
+class TestPackageExports(unittest.TestCase):
+    """Verifies that engine.__init__ exports all public symbols cleanly."""
+
+    def test_all_exports_exist_and_wildcard_import_succeeds(self):
+        import engine
+
+        missing = [name for name in engine.__all__ if not hasattr(engine, name)]
+        self.assertEqual(missing, [], f"Phantom symbols in engine.__all__: {missing}")
+
+        ns: Dict[str, Any] = {}
+        exec("from engine import *", ns)  # noqa: S102
+        for name in engine.__all__:
+            self.assertIn(name, ns)
+
+
+class TestDomainAndSchemaLayer3(unittest.TestCase):
+    """Verifies Layer 3 domain models, mixins, and schema canonicalization."""
+
+    def test_udm_event_bidirectional_snake_and_camel_case(self):
+        ev = UDMEvent(
+            {
+                "event": {
+                    "metadata": {
+                        "event_timestamp": "2026-09-04T12:00:00Z",
+                        "event_type": "USER_LOGIN",
+                    },
+                    "principal": {
+                        "user": {
+                            "user_display_name": "Alice Smith",
+                        }
+                    },
+                }
+            }
+        )
+        self.assertEqual(ev.metadata.eventTimestamp, "2026-09-04T12:00:00Z")
+        self.assertEqual(ev.metadata.eventType, "USER_LOGIN")
+        self.assertEqual(ev.get_field("metadata.eventType"), "USER_LOGIN")
+        self.assertEqual(ev.get_field("principal.user.userDisplayName"), "Alice Smith")
+        self.assertTrue("eventType" in ev.metadata)
+
+    def test_event_investigation_envelope_and_case_resolution(self):
+        from engine.domain import EventInvestigation
+
+        inv = EventInvestigation(
+            event_id="ev-123",
+            event={
+                "event": {
+                    "metadata": {"eventType": "PROCESS_LAUNCH", "productName": "Sysmon"},
+                    "principal": {"user": {"windowsSid": "S-1-5-18"}},
+                }
+            },
+        )
+        self.assertEqual(inv.event_type, "PROCESS_LAUNCH")
+        self.assertEqual(inv.product_name, "Sysmon")
+        self.assertEqual(inv.get_field("metadata.event_type"), "PROCESS_LAUNCH")
+        self.assertEqual(inv.get_field("principal.user.windows_sid"), "S-1-5-18")
+        self.assertEqual(
+            inv.build_pivot_filter("principal.user.windowsSid").to_udm_clause(),
+            'principal.user.windows_sid = "S-1-5-18"',
+        )
+
+    def test_field_filter_udm_escaping_and_schema_canonicalization(self):
+        from engine.schema import canonicalize_udm_field
+
+        self.assertEqual(
+            canonicalize_udm_field("udm.principal.user.windowsSid"),
+            "principal.user.windows_sid",
+        )
+        self.assertEqual(
+            canonicalize_udm_field("event.network.http.referralUrl"),
+            "network.http.referral_url",
+        )
+
+        f_eq = FieldFilter(
+            field_path="target.file.fullPath",
+            operator=FilterOperator.EQUALS,
+            value=r'C:\Users\alice\file"1".exe',
+        )
+        self.assertEqual(
+            f_eq.to_udm_clause(),
+            r'target.file.full_path = "C:\\Users\\alice\\file\"1\".exe"',
+        )
+
+        f_regex = FieldFilter(
+            field_path="principal.hostname",
+            operator=FilterOperator.REGEX_MATCH,
+            value=r"^srv-\d+\.corp$",
+        )
+        self.assertEqual(
+            f_regex.to_udm_clause(),
+            r'principal.hostname =~ "^srv-\d+\.corp$"',
+        )
+
+    def test_dashboard_detail_dashboard_type_alias(self):
+        from engine.domain import DashboardDetail, DashboardSummary
+
+        summary = DashboardSummary(
+            id="db-1",
+            name="projects/p/locations/us/instances/i/nativeDashboards/db-1",
+            display_name="SOC Overview",
+            description="Main dashboard",
+            type="CUSTOM",
+            create_time="2026-09-01T00:00:00Z",
+            update_time="2026-09-02T00:00:00Z",
+        )
+        detail = DashboardDetail(summary=summary, charts=[])
+        self.assertEqual(summary.dashboard_type, "CUSTOM")
+        self.assertEqual(detail.dashboard_type, "CUSTOM")
+
+    def test_playbook_instance_executed_path_mixed_naive_and_aware_datetimes(self):
+        from datetime import datetime, timezone
+        from engine.domain import PlaybookInstanceRun, PlaybookInstanceStep
+
+        s1 = PlaybookInstanceStep(
+            identifier="step_a",
+            name="Step A",
+            action_name="ActA",
+            status="COMPLETED",
+            start_time=datetime(2026, 9, 1, 12, 0, 0),  # naive
+        )
+        s2 = PlaybookInstanceStep(
+            identifier="step_b",
+            name="Step B",
+            action_name="ActB",
+            status="COMPLETED",
+            start_time=datetime(2026, 9, 1, 11, 0, 0, tzinfo=timezone.utc),  # aware
+        )
+        run = PlaybookInstanceRun(
+            instance_id="inst-1",
+            identifier="pb-1",
+            name="PB",
+            case_id="100",
+            alert_identifier="ag-1",
+            status="FINISHED",
+            steps=[s1, s2],
+            relations=[],
+        )
+        path = run.executed_path()
+        self.assertEqual([s.identifier for s in path], ["step_b", "step_a"])
+
+    def test_universal_dict_mixin_post_init_and_mutation_sync(self):
+        from dataclasses import dataclass
+        from engine.domain import UniversalDictMixin
+
+        @dataclass
+        class SampleDictModel(UniversalDictMixin):
+            raw_id: str
+            normalized_id: str = ""
+
+            def __post_init__(self):
+                self.normalized_id = self.raw_id.strip().upper()
+
+        m = SampleDictModel(raw_id="  abc  ")
+        self.assertEqual(m.normalized_id, "ABC")
+        self.assertEqual(dict(m)["normalized_id"], "ABC")
+        self.assertEqual(json.loads(json.dumps(m))["normalized_id"], "ABC")
+
+        m.normalized_id = "XYZ"
+        self.assertEqual(dict(m)["normalized_id"], "XYZ")
+
+    def test_universal_batch_mixin_on_list_results_and_health_reports(self):
+        from engine.domain import (
+            DashboardHealthReport,
+            DataTable,
+            DataTableHealthReport,
+            DataTableListResult,
+            RuleListResult,
+            RuleSummary,
+        )
+
+        dt_res = DataTableListResult(
+            tables=[DataTable(name="n", id="t1", display_name="T1")]
+        )
+        self.assertEqual(len(dt_res), 1)
+        self.assertEqual(list(dt_res)[0].id, "t1")
+
+        rule_res = RuleListResult(
+            rules=[RuleSummary(name="rules/ru_1", display_name="R1")]
+        )
+        self.assertEqual(len(rule_res), 1)
+        self.assertEqual(rule_res[0].rule_id, "ru_1")
+
+        db_rep = DashboardHealthReport(
+            total_dashboards_audited=0,
+            healthy_count=0,
+            recently_created_count=0,
+            recently_modified_count=0,
+            broken_query_count=0,
+            empty_dashboard_count=0,
+            stale_count=0,
+            custom_count=0,
+            curated_count=0,
+            findings=[],
+        )
+        self.assertEqual(len(db_rep), 0)
+        self.assertEqual(db_rep.items, [])
+
+        dt_rep = DataTableHealthReport(
+            total_tables_audited=0,
+            healthy_count=0,
+            empty_referenced_count=0,
+            orphan_count=0,
+            recently_created_count=0,
+            recently_modified_count=0,
+            stale_count=0,
+            schema_issue_count=0,
+            findings=[],
+        )
+        self.assertEqual(len(dt_rep), 0)
+        self.assertEqual(dt_rep.items, [])
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -140,7 +140,9 @@ class UniversalBatchMixin:
             "controls", "users", "roles", "settings", "tags", "stages", "reasons",
             "parameters", "views", "fields", "rules", "environments", "groups",
             "agents", "networks", "domains", "custom_lists", "templates", "blocklists",
-            "definitions", "connectors", "webhooks", "events"
+            "definitions", "connectors", "webhooks", "events", "findings", "matches",
+            "tables", "rows", "errors", "revisions", "dimensions", "cases", "refinements",
+            "stats",
         ):
             val = getattr(self, attr, None)
             if isinstance(val, list):
@@ -172,14 +174,22 @@ class UniversalDictMixin(dict):
         orig_post_init = getattr(cls, "__post_init__", None)
 
         def __post_init__(self, *args, **post_kwargs):
+            if orig_post_init:
+                orig_post_init(self, *args, **post_kwargs)
             try:
                 dict.__init__(self, {f.name: getattr(self, f.name) for f in dc_fields(self)})
             except Exception:
                 pass
-            if orig_post_init:
-                orig_post_init(self, *args, **post_kwargs)
 
         cls.__post_init__ = __post_init__
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        if not name.startswith("_"):
+            try:
+                super().__setitem__(name, value)
+            except Exception:
+                pass
 
     def __getitem__(self, key: str) -> Any:
         if hasattr(self, key):
@@ -216,20 +226,21 @@ class FieldFilter:
     def to_udm_clause(self) -> str:
         """Renders filter into valid Google SecOps UDM query syntax."""
         canonical_path = canonicalize_udm_field(self.field_path)
-        val_str = str(self.value).replace('"', '\\"')
+        literal_str = str(self.value).replace("\\", "\\\\").replace('"', '\\"')
         if self.operator == FilterOperator.EQUALS:
-            return f'{canonical_path} = "{val_str}"'
+            return f'{canonical_path} = "{literal_str}"'
         elif self.operator == FilterOperator.NOT_EQUALS:
-            return f'{canonical_path} != "{val_str}"'
+            return f'{canonical_path} != "{literal_str}"'
         elif self.operator == FilterOperator.NOCASE_EQUALS:
-            return f'{canonical_path} = "{val_str}" nocase'
+            return f'{canonical_path} = "{literal_str}" nocase'
         elif self.operator == FilterOperator.REGEX_MATCH:
-            return f'{canonical_path} =~ "{val_str}"'
+            regex_str = str(self.value).replace('"', '\\"')
+            return f'{canonical_path} =~ "{regex_str}"'
         elif self.operator == FilterOperator.CONTAINS:
             escaped_val = re.escape(str(self.value)).replace('"', '\\"')
             return f'{canonical_path} =~ ".*{escaped_val}.*"'
         else:
-            return f'{canonical_path} = "{val_str}"'
+            return f'{canonical_path} = "{literal_str}"'
 
 
 _OPERATOR_ALIASES: Dict[str, FilterOperator] = {
@@ -340,6 +351,10 @@ def _to_camel_case(s: str) -> str:
     return components[0] + "".join(x.title() for x in components[1:])
 
 
+def _to_snake_case(s: str) -> str:
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
+
+
 class UDMEvent(dict):
     """Smart dictionary wrapper for UDM events supporting both dict indexing and attribute dot-notation.
 
@@ -360,10 +375,15 @@ class UDMEvent(dict):
             val = super().__getitem__("event")[key]
         elif isinstance(key, str):
             camel = _to_camel_case(key)
+            snake = _to_snake_case(key)
             if super().__contains__(camel):
                 val = super().__getitem__(camel)
             elif has_inner_event and camel in super().__getitem__("event"):
                 val = super().__getitem__("event")[camel]
+            elif super().__contains__(snake):
+                val = super().__getitem__(snake)
+            elif has_inner_event and snake in super().__getitem__("event"):
+                val = super().__getitem__("event")[snake]
             else:
                 raise KeyError(key)
         else:
@@ -387,9 +407,10 @@ class UDMEvent(dict):
             return True
         if isinstance(key, str):
             camel = _to_camel_case(key)
-            if super().__contains__(camel):
+            snake = _to_snake_case(key)
+            if super().__contains__(camel) or super().__contains__(snake):
                 return True
-            if has_inner_event and camel in super().__getitem__("event"):
+            if has_inner_event and (camel in super().__getitem__("event") or snake in super().__getitem__("event")):
                 return True
         return False
 
@@ -755,7 +776,7 @@ class ProductSourceStat:
 
 
 @dataclass
-class ProductSourceStatsBatch:
+class ProductSourceStatsBatch(UniversalBatchMixin):
     """Represents a collection of product source statistics over an evaluation time window."""
     stats: List[ProductSourceStat] = field(default_factory=list)
     start_time: str = ""
@@ -787,7 +808,7 @@ class RawLogSnippet:
 
 
 @dataclass
-class RawLogSearchResult:
+class RawLogSearchResult(UniversalBatchMixin):
     """Represents the paginated results of an enterprise raw log search."""
     matches: List[RawLogSnippet] = field(default_factory=list)
     total_matches: int = 0
@@ -872,7 +893,7 @@ class EventInvestigation:
 
     def get_field(self, path: str, default: Any = None) -> Any:
         """Retrieves a nested field from the UDM event structure using dot notation (e.g. 'principal.hostname')."""
-        curr = self.event
+        curr: Any = self.event
         # Support optional leading "udm." or "event." prefix if requested by callers
         if path.startswith("udm."):
             path = path[4:]
@@ -880,9 +901,28 @@ class EventInvestigation:
             path = path[6:]
 
         parts = path.split(".")
+        if (
+            isinstance(curr, dict)
+            and parts
+            and parts[0] not in curr
+            and "event" in curr
+            and isinstance(curr["event"], dict)
+        ):
+            curr = curr["event"]
+
         for part in parts:
-            if isinstance(curr, dict) and part in curr:
-                curr = curr[part]
+            if isinstance(curr, dict):
+                if part in curr:
+                    curr = curr[part]
+                else:
+                    camel = _to_camel_case(part)
+                    snake = _to_snake_case(part)
+                    if camel in curr:
+                        curr = curr[camel]
+                    elif snake in curr:
+                        curr = curr[snake]
+                    else:
+                        return default
             elif isinstance(curr, list) and part.isdigit() and int(part) < len(curr):
                 curr = curr[int(part)]
             else:
@@ -1683,6 +1723,8 @@ class PlaybookInstanceRun:
 
         def _sort_key(sid: str):
             st = by_id[sid].start_time
+            if st is not None and st.tzinfo is None:
+                st = st.replace(tzinfo=timezone.utc)
             # None start_times sort last but stably.
             return (st is None, st or datetime.max.replace(tzinfo=timezone.utc))
 
@@ -2265,6 +2307,11 @@ class DashboardSummary:
     access: str = ""
     charts_count: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def dashboard_type(self) -> str:
+        """Alias for type."""
+        return self.type
 
 
 @dataclass
@@ -4033,7 +4080,7 @@ class DataTable:
 
 
 @dataclass
-class DataTableListResult:
+class DataTableListResult(UniversalBatchMixin):
     """Result container for listed Chronicle SIEM Data Tables."""
     tables: List[DataTable]
     next_page_token: Optional[str] = None
@@ -4052,7 +4099,7 @@ class DataTableListResult:
 
 
 @dataclass
-class DataTableRowListResult:
+class DataTableRowListResult(UniversalBatchMixin):
     """Result container for listed rows within a Chronicle SIEM Data Table."""
     table_name: str
     rows: List[DataTableRow]
@@ -4125,7 +4172,7 @@ class RuleExecutionError:
 
 
 @dataclass
-class RuleExecutionErrorListResult:
+class RuleExecutionErrorListResult(UniversalBatchMixin):
     """Result container for rule execution errors."""
     errors: List[RuleExecutionError] = field(default_factory=list)
     next_page_token: Optional[str] = None
@@ -4192,7 +4239,7 @@ class RuleDetail:
 
 
 @dataclass
-class RuleListResult:
+class RuleListResult(UniversalBatchMixin):
     """Result container for listed Chronicle SIEM detection rules."""
     rules: List[RuleSummary] = field(default_factory=list)
     next_page_token: Optional[str] = None
@@ -4204,7 +4251,7 @@ class RuleListResult:
 
 
 @dataclass
-class RuleRevisionListResult:
+class RuleRevisionListResult(UniversalBatchMixin):
     """Result container for listed revisions of a detection rule."""
     rule_id: str
     revisions: List[RuleDetail] = field(default_factory=list)
@@ -4248,7 +4295,7 @@ class DashboardHealthFinding:
 
 
 @dataclass
-class DashboardHealthReport:
+class DashboardHealthReport(UniversalBatchMixin):
     """Comprehensive health and lifecycle audit report for Google SecOps dashboards."""
     total_dashboards_audited: int
     healthy_count: int
@@ -4261,6 +4308,10 @@ class DashboardHealthReport:
     curated_count: int
     findings: List[DashboardHealthFinding] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[DashboardHealthFinding]:
+        return self.findings
 
 
 class DataTableHealthStatus(str, Enum):
@@ -4297,7 +4348,7 @@ class DataTableHealthFinding:
 
 
 @dataclass
-class DataTableHealthReport:
+class DataTableHealthReport(UniversalBatchMixin):
     """Comprehensive health, lineage, and governance audit report for Data Tables."""
     total_tables_audited: int
     healthy_count: int
@@ -4309,6 +4360,10 @@ class DataTableHealthReport:
     schema_issue_count: int
     findings: List[DataTableHealthFinding] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def items(self) -> List[DataTableHealthFinding]:
+        return self.findings
 
 
 # --- Detection Tuning & UDM Findings Refinements Models ---
@@ -4328,7 +4383,6 @@ class NoisyRuleRecord:
     @property
     def is_curated(self) -> bool:
         return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
-
 
 
 @dataclass
@@ -4463,27 +4517,3 @@ class DetectionTuningReport:
     @property
     def is_curated(self) -> bool:
         return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

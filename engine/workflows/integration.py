@@ -37,6 +37,20 @@ def _parse_environments_list(raw_envs: Any) -> List[str]:
     return []
 
 
+def _extract_integration_id_from_instance(inst: Dict[str, Any], default: str = "") -> str:
+    """Extracts parent integration identifier from an integration instance dict."""
+    explicit_id = inst.get("integrationIdentifier")
+    if explicit_id:
+        return str(explicit_id)
+    name = str(inst.get("name", ""))
+    parts = [p for p in name.split("/") if p]
+    if "integrations" in parts:
+        idx = parts.index("integrations")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return default
+
+
 class SearchIntegrationsWorkflow:
     """Executes search and multi-facet filtering across SOAR integrations."""
 
@@ -57,7 +71,7 @@ class SearchIntegrationsWorkflow:
         envs_by_integration: Dict[str, set] = {}
 
         for inst in raw_instances:
-            int_id = inst.get("integrationIdentifier") or inst.get("name", "").split("/")[7] if "/integrations/" in inst.get("name", "") else ""
+            int_id = _extract_integration_id_from_instance(inst)
             if not int_id:
                 continue
             instance_count_by_integration[int_id] = instance_count_by_integration.get(int_id, 0) + 1
@@ -142,12 +156,22 @@ class GetIntegrationDetailWorkflow:
 
     def execute(self, identifier: str) -> IntegrationDetail:
         ident_clean = identifier.strip()
+        if not ident_clean:
+            raise ValueError("Integration identifier must not be empty.")
 
         # 1. Fetch base integration
         raw_integrations = self.adapter.list_integrations(page_size=1000)
-        raw_int = next((i for i in raw_integrations if (i.get("identifier") or i.get("name", "").split("/")[-1]).lower() == ident_clean.lower()), None)
+        raw_int = next(
+            (
+                i
+                for i in raw_integrations
+                if (i.get("identifier") or i.get("name", "").split("/")[-1]).lower() == ident_clean.lower()
+                or str(i.get("displayName", "")).lower() == ident_clean.lower()
+            ),
+            None,
+        )
+        found_in_catalog = raw_int is not None
         if not raw_int:
-            # Fallback direct query or construct
             raw_int = {
                 "identifier": ident_clean,
                 "displayName": ident_clean,
@@ -192,6 +216,7 @@ class GetIntegrationDetailWorkflow:
         # 3. Fetch marketplace documentation and categories
         doc_uri = None
         categories: List[str] = []
+        mp_data = None
         try:
             mp_data = self.adapter.get_marketplace_integration(canonical_ident)
             if mp_data:
@@ -204,31 +229,34 @@ class GetIntegrationDetailWorkflow:
         except Exception:
             pass
 
+        if not found_in_catalog and not instances and not (mp_data and mp_data.get("name")):
+            raise ValueError(f"Integration '{identifier}' not found in live SOAR catalog.")
+
         # 4. Correlate remote agents supporting the environments of these instances
         remote_agents: List[RemoteAgent] = []
-        try:
-            raw_agents = self.adapter.list_remote_agents()
-            inst_envs = set(inst.environment for inst in instances)
-            for a in raw_agents:
-                agent_id = a.get("name", "").split("/")[-1]
-                agent_ident = a.get("identifier") or agent_id
-                agent_envs = _parse_environments_list(a.get("environments"))
-                # If agent supports any environment of this integration's instances
-                if "*" in inst_envs or any(env in inst_envs for env in agent_envs):
-                    remote_agents.append(
-                        RemoteAgent(
-                            id=agent_id,
-                            identifier=agent_ident,
-                            display_name=a.get("displayName") or agent_ident,
-                            agent_state=a.get("agentState", "ACTIVE"),
-                            environments=agent_envs,
-                            logging_level=a.get("loggingLevel", "ERROR"),
-                            installer_link=a.get("installerLink"),
-                            raw=a,
-                        )
+        raw_res = self.adapter.list_remote_agents()
+        raw_agents = raw_res.get("remoteAgents", []) if isinstance(raw_res, dict) else raw_res
+        inst_envs = set(inst.environment for inst in instances)
+        for a in raw_agents:
+            if not isinstance(a, dict):
+                continue
+            agent_id = a.get("name", "").split("/")[-1]
+            agent_ident = a.get("identifier") or agent_id
+            agent_envs = _parse_environments_list(a.get("environments"))
+            # If agent supports any environment of this integration's instances
+            if "*" in inst_envs or any(env in inst_envs for env in agent_envs):
+                remote_agents.append(
+                    RemoteAgent(
+                        id=agent_id,
+                        identifier=agent_ident,
+                        display_name=a.get("displayName") or agent_ident,
+                        agent_state=a.get("agentState", "ACTIVE"),
+                        environments=agent_envs,
+                        logging_level=a.get("loggingLevel", "ERROR"),
+                        installer_link=a.get("installerLink"),
+                        raw=a,
                     )
-        except Exception:
-            pass
+                )
 
         return IntegrationDetail(
             identifier=canonical_ident,
@@ -266,7 +294,7 @@ class ListIntegrationInstancesWorkflow:
         instances: List[IntegrationInstance] = []
         for inst in raw_instances:
             inst_ident = inst.get("identifier") or inst.get("name", "").split("/")[-1]
-            int_id = inst.get("integrationIdentifier") or inst.get("name", "").split("/")[7] if "/integrations/" in inst.get("name", "") else (integration_id or "")
+            int_id = _extract_integration_id_from_instance(inst, default=integration_id or "")
             instances.append(
                 IntegrationInstance(
                     identifier=inst_ident,

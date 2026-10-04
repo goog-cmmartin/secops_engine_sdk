@@ -159,7 +159,7 @@ class AuditParserHealthWorkflow:
                     continue
 
                 try:
-                    res = exec_wf.execute(query_name_or_id=chart.query.name)
+                    res = exec_wf.execute(query_name_or_id=q_name)
                     for row in res.rows:
                         lt = row.get("log_type") or row.get("logType") or ""
                         if not lt:

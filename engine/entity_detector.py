@@ -13,9 +13,14 @@ from dataclasses import dataclass
 from enum import Enum
 import ipaddress
 import re
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
-from engine.domain import EntityType
+from engine.domain import EntityType, coerce_entity_type
+
+
+def _escape_udm_literal(val: str) -> str:
+    """Escapes backslashes and double quotes for UDM double-quoted string literals."""
+    return val.replace("\\", "\\\\").replace('"', '\\"')
 
 
 class EntityCategory(str, Enum):
@@ -64,19 +69,20 @@ class DetectedEntity:
 # ---------------------------------------------------------------------------
 
 def _build_ip(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.IP,
         category=EntityCategory.ASSET,
         graph_field="graph.entity.ip",
-        graph_query=f'graph.entity.ip = "{val}"',
-        event_query=f'principal.ip = "{val}" OR target.ip = "{val}" OR src.ip = "{val}"',
+        graph_query=f'graph.entity.ip = "{ev}"',
+        event_query=f'principal.ip = "{ev}" OR target.ip = "{ev}" OR src.ip = "{ev}"',
         ioc_value_type="IP_ADDRESS",
     )
 
 
 def _build_md5(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.MD5,
@@ -89,7 +95,7 @@ def _build_md5(val: str) -> DetectedEntity:
 
 
 def _build_sha1(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.SHA1,
@@ -102,7 +108,7 @@ def _build_sha1(val: str) -> DetectedEntity:
 
 
 def _build_sha256(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.SHA256,
@@ -115,7 +121,7 @@ def _build_sha256(val: str) -> DetectedEntity:
 
 
 def _build_mac(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.MAC,
@@ -128,7 +134,7 @@ def _build_mac(val: str) -> DetectedEntity:
 
 
 def _build_email(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.EMAIL,
@@ -141,43 +147,46 @@ def _build_email(val: str) -> DetectedEntity:
 
 
 def _build_url(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.URL,
         category=EntityCategory.URL,
         graph_field="graph.entity.url",
-        graph_query=f'graph.entity.url = "{val}"',
-        event_query=f'target.url = "{val}" OR network.http.referral_url = "{val}"',
+        graph_query=f'graph.entity.url = "{ev}"',
+        event_query=f'target.url = "{ev}" OR network.http.referral_url = "{ev}"',
         ioc_value_type="URL",
     )
 
 
 def _build_sid(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.WINDOWS_SID,
         category=EntityCategory.USER,
         graph_field="graph.entity.user.windows_sid",
-        graph_query=f'graph.entity.user.windows_sid = "{val}"',
-        event_query=f'principal.user.windows_sid = "{val}" OR target.user.windows_sid = "{val}"',
+        graph_query=f'graph.entity.user.windows_sid = "{ev}"',
+        event_query=f'principal.user.windows_sid = "{ev}" OR target.user.windows_sid = "{ev}"',
         ioc_value_type=None,
     )
 
 
 def _build_resource(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.RESOURCE,
         category=EntityCategory.RESOURCE,
         graph_field="graph.entity.resource.name",
-        graph_query=f'graph.entity.resource.name = "{val}"',
-        event_query=f'target.resource.name = "{val}"',
+        graph_query=f'graph.entity.resource.name = "{ev}"',
+        event_query=f'target.resource.name = "{ev}"',
         ioc_value_type=None,
     )
 
 
 def _build_domain(val: str) -> DetectedEntity:
-    v = val.lower()
+    v = _escape_udm_literal(val.lower())
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.DOMAIN,
@@ -190,40 +199,43 @@ def _build_domain(val: str) -> DetectedEntity:
 
 
 def _build_hostname(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.HOSTNAME,
         category=EntityCategory.ASSET,
         graph_field="graph.entity.hostname",
-        graph_query=f'graph.entity.hostname = "{val}" nocase',
-        event_query=f'principal.hostname = "{val}" nocase OR target.hostname = "{val}" nocase',
+        graph_query=f'graph.entity.hostname = "{ev}" nocase',
+        event_query=f'principal.hostname = "{ev}" nocase OR target.hostname = "{ev}" nocase',
         ioc_value_type="HOSTNAME",
     )
 
 
 def _build_user(val: str) -> DetectedEntity:
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.USER,
         category=EntityCategory.USER,
         graph_field="graph.entity.user.userid",
-        graph_query=f'graph.entity.user.userid = "{val}" nocase',
-        event_query=f'principal.user.userid = "{val}" nocase OR target.user.userid = "{val}" nocase',
+        graph_query=f'graph.entity.user.userid = "{ev}" nocase',
+        event_query=f'principal.user.userid = "{ev}" nocase OR target.user.userid = "{ev}" nocase',
         ioc_value_type="USER_ID",
     )
 
 
 def _build_file_name(val: str) -> DetectedEntity:
     """A file *name*/path (not a hash). Routes to file.full_path, not userid."""
+    ev = _escape_udm_literal(val)
     return DetectedEntity(
         raw_value=val,
         entity_type=EntityType.FILE,
         category=EntityCategory.FILE,
         graph_field="graph.entity.file.full_path",
-        graph_query=f'graph.entity.file.full_path = "{val}" nocase',
+        graph_query=f'graph.entity.file.full_path = "{ev}" nocase',
         event_query=(
-            f'target.file.full_path = "{val}" nocase '
-            f'OR principal.process.file.full_path = "{val}" nocase'
+            f'target.file.full_path = "{ev}" nocase '
+            f'OR principal.process.file.full_path = "{ev}" nocase'
         ),
         ioc_value_type=None,
     )
@@ -233,11 +245,13 @@ def _compose_graph_or(pairs, nocase: bool = False) -> str:
     """Compose an OR expression across multiple graph fields.
 
     ``pairs`` is an iterable of ``(field, value)``. Each clause is rendered as
-    ``field = "value"`` with an optional trailing ``nocase``. Values are assumed
-    already normalised by the caller.
+    ``field = "value"`` with an optional trailing ``nocase``. Values are escaped
+    for UDM string literals.
     """
     suffix = " nocase" if nocase else ""
-    return " OR ".join(f'{field} = "{value}"{suffix}' for field, value in pairs)
+    return " OR ".join(
+        f'{field} = "{_escape_udm_literal(value)}"{suffix}' for field, value in pairs
+    )
 
 
 def _build_user_or_email(val: str) -> DetectedEntity:
@@ -248,15 +262,17 @@ def _build_user_or_email(val: str) -> DetectedEntity:
     matching is case-insensitive via ``nocase``.
     """
     v = val.lower()
+    ev = _escape_udm_literal(val)
+    ev_lower = _escape_udm_literal(v)
     fields = ("graph.entity.user.userid", "graph.entity.user.email_addresses")
     graph_query = _compose_graph_or(
         ((fields[0], val), (fields[1], v)), nocase=True
     )
     event_query = (
-        f'principal.user.userid = "{val}" nocase '
-        f'OR target.user.userid = "{val}" nocase '
-        f'OR principal.user.email_addresses = "{v}" '
-        f'OR target.user.email_addresses = "{v}"'
+        f'principal.user.userid = "{ev}" nocase '
+        f'OR target.user.userid = "{ev}" nocase '
+        f'OR principal.user.email_addresses = "{ev_lower}" '
+        f'OR target.user.email_addresses = "{ev_lower}"'
     )
     return DetectedEntity(
         raw_value=val,
@@ -276,12 +292,14 @@ def _build_domain_or_hostname(val: str) -> DetectedEntity:
     Emits an OR across ``domain.name`` and ``hostname`` (both case-insensitive).
     """
     v = val.lower()
+    ev = _escape_udm_literal(val)
+    ev_lower = _escape_udm_literal(v)
     fields = ("graph.entity.domain.name", "graph.entity.hostname")
     graph_query = _compose_graph_or(((fields[0], v), (fields[1], val)), nocase=True)
     event_query = (
-        f'network.dns.questions.name = "{v}" nocase '
-        f'OR target.hostname = "{val}" nocase '
-        f'OR principal.hostname = "{val}" nocase'
+        f'network.dns.questions.name = "{ev_lower}" nocase '
+        f'OR target.hostname = "{ev}" nocase '
+        f'OR principal.hostname = "{ev}" nocase'
     )
     return DetectedEntity(
         raw_value=val,
@@ -323,6 +341,8 @@ if hasattr(EntityType, "FILE"):
 _SOAR_TYPE_MAP: Dict[str, EntityType] = {
     "ADDRESS": EntityType.IP,
     "IP": EntityType.IP,
+    "IPV4": EntityType.IP,
+    "IPV6": EntityType.IP,
     "IPADDRESS": EntityType.IP,
     "HOSTNAME": EntityType.HOSTNAME,
     "HOST": EntityType.HOSTNAME,
@@ -331,9 +351,19 @@ _SOAR_TYPE_MAP: Dict[str, EntityType] = {
     "USER": EntityType.USER,
     "USERUNIQNAME": EntityType.USER,
     "USERNAME": EntityType.USER,
+    "USERID": EntityType.USER,
+    "EMAIL": EntityType.EMAIL,
+    "EMAILADDRESS": EntityType.EMAIL,
     "DESTINATIONURL": EntityType.URL,
     "URL": EntityType.URL,
     "DOMAIN": EntityType.DOMAIN,
+    "DOMAINNAME": EntityType.DOMAIN,
+    "WINDOWSSID": EntityType.WINDOWS_SID,
+    "SID": EntityType.WINDOWS_SID,
+    "SHA256": EntityType.SHA256,
+    "MD5": EntityType.MD5,
+    "SHA1": EntityType.SHA1,
+    "RESOURCE": EntityType.RESOURCE,
     "EMAILSUBJECT": EntityType.USER,  # subjects aren't graph indicators; best-effort
     "CVE": EntityType.RESOURCE,
 }
@@ -484,7 +514,7 @@ def _detect_by_regex(val: str) -> DetectedEntity:
     return _build_user(val)
 
 
-def detect_entity(value: str, hint: Optional[str] = None) -> DetectedEntity:
+def detect_entity(value: str, hint: Optional[Union[EntityType, str]] = None) -> DetectedEntity:
     """Detects indicator type from a string and produces canonical graph & event queries.
 
     Args:
@@ -502,32 +532,36 @@ def detect_entity(value: str, hint: Optional[str] = None) -> DetectedEntity:
     if not val:
         raise ValueError("Cannot detect entity type from an empty string.")
 
-    if hint:
-        norm = _normalise_hint(hint)
-
-        # File hashes: SOAR only says "FILEHASH"; pick MD5/SHA1/SHA256 by length.
-        if norm in ("FILEHASH", "HASH"):
-            hashed = _resolve_hash(val)
-            if hashed is not None:
-                return hashed
-            # Not hex/expected length -> fall through to regex.
-
-        multi = _SOAR_MULTI.get(norm)
-        if multi is not None:
-            return multi(val)
-
-        mapped = _SOAR_TYPE_MAP.get(norm)
-        if mapped is None:
-            # Maybe the caller passed one of our own EntityType names directly.
-            try:
-                mapped = EntityType[norm]
-            except KeyError:
-                mapped = None
-
-        if mapped is not None:
-            builder = _BUILDERS.get(mapped)
+    if hint is not None:
+        if isinstance(hint, EntityType):
+            builder = _BUILDERS.get(hint)
             if builder is not None:
                 return builder(val)
-        # Unknown hint (e.g. PHONENUMBER with no graph field) -> regex fallback.
+        elif str(hint).strip():
+            norm = _normalise_hint(str(hint))
+
+            # File hashes: SOAR only says "FILEHASH"; pick MD5/SHA1/SHA256 by length.
+            if norm in ("FILEHASH", "HASH"):
+                hashed = _resolve_hash(val)
+                if hashed is not None:
+                    return hashed
+                return _detect_by_regex(val)
+
+            multi = _SOAR_MULTI.get(norm)
+            if multi is not None:
+                return multi(val)
+
+            mapped = _SOAR_TYPE_MAP.get(norm)
+            if mapped is None:
+                try:
+                    mapped = coerce_entity_type(hint)
+                except (ValueError, TypeError):
+                    mapped = None
+
+            if mapped is not None:
+                builder = _BUILDERS.get(mapped)
+                if builder is not None:
+                    return builder(val)
+            # Unknown hint (e.g. PHONENUMBER with no graph field) -> regex fallback.
 
     return _detect_by_regex(val)

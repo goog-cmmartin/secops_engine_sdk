@@ -89,3 +89,32 @@ class TestDashboardParsing(unittest.TestCase):
         self.assertEqual(result.total_rows, 0)
         self.assertEqual(result.row_count, 0)
         self.assertEqual(result.column_count, 0)
+
+    def test_dashboard_result_protobuf_string_coercion(self):
+        """Test that string-serialized int64Val, doubleValue, boolVal, and timestampVal are coerced."""
+        from engine.config import SecOpsConfig
+        from engine.auth import CredentialProvider
+
+        cfg = SecOpsConfig(project_id="p", customer_id="c", project_number="123")
+        adapter = GoogleSecOpsAdapter(config=cfg, credential_provider=CredentialProvider(static_token="t"))
+
+        raw_response = {
+            "results": [
+                {"column": "ts", "values": [{"value": {"timestampVal": "2026-09-01T00:00:00Z"}}]},
+                {"column": "total", "values": [{"value": {"int64Val": "98765"}}]},
+                {"column": "ratio", "values": [{"value": {"doubleValue": "0.875"}}]},
+                {"column": "active", "values": [{"value": {"boolVal": True}}]},
+            ],
+            "dialect": "YL2",
+        }
+        result = adapter._parse_dashboard_result(raw_response, "coercion_query")
+        self.assertEqual(len(result.rows), 1)
+        self.assertEqual(
+            result.rows[0],
+            {
+                "ts": "2026-09-01T00:00:00Z",
+                "total": 98765,
+                "ratio": 0.875,
+                "active": True,
+            },
+        )

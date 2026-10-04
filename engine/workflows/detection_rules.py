@@ -91,11 +91,19 @@ def _map_diagnostic(raw: Dict[str, Any]) -> RuleCompilationDiagnostic:
 
 def _map_rule_deployment(raw: Dict[str, Any]) -> RuleDeployment:
     """Maps raw rule deployment JSON into RuleDeployment dataclass."""
+    enabled = (
+        bool(raw["enabled"])
+        if "enabled" in raw
+        else bool(
+            raw.get("executionState") == "ACTIVE"
+            or raw.get("runFrequency") in ("LIVE", "HOURLY", "DAILY")
+        )
+    )
     return RuleDeployment(
         name=raw.get("name", ""),
         run_frequency=raw.get("runFrequency", "LIVE"),
         execution_state=raw.get("executionState", "DEFAULT"),
-        enabled=bool(raw.get("enabled", False) or raw.get("executionState") == "ACTIVE" or raw.get("runFrequency") in ("LIVE", "HOURLY", "DAILY")),
+        enabled=enabled,
         alerting=bool(raw.get("alerting", False)),
         last_alert_status_change_time=raw.get("lastAlertStatusChangeTime", ""),
         display_name=raw.get("displayName", ""),
@@ -240,7 +248,7 @@ class ListRuleRevisionsWorkflow:
         raw_rules = resp.get("rules", [])
         revisions = [_map_rule_detail(r) for r in raw_rules]
         return RuleRevisionListResult(
-            rule_id=rule_id_or_name.split("/")[-1],
+            rule_id=rule_id_or_name.split("/")[-1].split("@")[0],
             revisions=revisions,
             next_page_token=resp.get("nextPageToken"),
             provenance={"count": len(revisions)},

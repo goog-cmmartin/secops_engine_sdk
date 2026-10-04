@@ -44,7 +44,7 @@ class SearchEntityGraphWorkflow:
         """
         if value is not None:
             field_name = indicator_or_field
-            val_clean = value.replace('"', '\\"')
+            val_clean = value.replace("\\", "\\\\").replace('"', '\\"')
             if not field_name.startswith("graph.entity."):
                 field_name = f"graph.entity.{field_name}"
             query = f'{field_name} = "{val_clean}"'
@@ -214,6 +214,10 @@ class InvestigateEntityWorkflow:
         """Executes a full cross-engine investigation of an indicator."""
         detected = detect_entity(indicator)
 
+        now = datetime.now(timezone.utc)
+        resolved_end = end_time or now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        resolved_start = start_time or (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         # 1. Search Entity Graph
         graph_events: List[Dict[str, Any]] = []
         try:
@@ -234,8 +238,8 @@ class InvestigateEntityWorkflow:
             session_udm = self.search_from_entity_wf.execute(
                 entity_type=detected.entity_type,
                 entity_value=detected.raw_value,
-                start_time=start_time,
-                end_time=end_time,
+                start_time=resolved_start,
+                end_time=resolved_end,
                 receive_limit=max_events,
                 batch_size=max_events,
             )
@@ -271,6 +275,37 @@ class InvestigateEntityWorkflow:
             except Exception:
                 pass
 
+        # 5. Summarize Entity if a graph entity identifier was discovered
+        entity_summary: Optional[EntitySummaryResult] = None
+        if self.summarize_entity_wf and graph_events:
+            entity_id = None
+            for ev in graph_events:
+                if not isinstance(ev, dict):
+                    continue
+                meta = ev.get("metadata") if isinstance(ev.get("metadata"), dict) else {}
+                graph_obj = ev.get("graph") if isinstance(ev.get("graph"), dict) else {}
+                graph_meta = graph_obj.get("metadata") if isinstance(graph_obj.get("metadata"), dict) else {}
+                candidate = (
+                    ev.get("entityId")
+                    or meta.get("entityId")
+                    or graph_meta.get("entityId")
+                    or graph_meta.get("id")
+                    or meta.get("id")
+                    or ev.get("id")
+                )
+                if candidate:
+                    entity_id = str(candidate)
+                    break
+            if entity_id:
+                try:
+                    entity_summary = self.summarize_entity_wf.execute(
+                        entity_id=entity_id,
+                        start_time=resolved_start,
+                        end_time=resolved_end,
+                    )
+                except Exception:
+                    pass
+
         return EntityInvestigationReport(
             indicator=detected.raw_value,
             detected_type=detected.entity_type.value,
@@ -283,4 +318,5 @@ class InvestigateEntityWorkflow:
             udm_events=udm_events,
             ioc_matches=ioc_matches,
             related_cases=related_cases,
+            entity_summary=entity_summary,
         )

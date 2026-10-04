@@ -152,8 +152,12 @@ class InvestigateCaseWithAIWorkflow:
         start_time = (now - timedelta(days=hunt_lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        def _escape_udm(val: str) -> str:
+            return val.replace("\\", "\\\\").replace('"', '\\"')
+
         for ip in ips:
-            query = f'principal.ip = "{ip}" or target.ip = "{ip}"'
+            esc_ip = _escape_udm(ip)
+            query = f'principal.ip = "{esc_ip}" or target.ip = "{esc_ip}"'
             req = SearchRequest(
                 query=query,
                 start_time=start_time,
@@ -167,7 +171,8 @@ class InvestigateCaseWithAIWorkflow:
                 hunt_results[ip] = -1
 
         for user in users:
-            query = f'principal.user.userid = "{user}" or target.user.userid = "{user}"'
+            esc_user = _escape_udm(user)
+            query = f'principal.user.userid = "{esc_user}" or target.user.userid = "{esc_user}"'
             req = SearchRequest(
                 query=query,
                 start_time=start_time,
@@ -179,6 +184,26 @@ class InvestigateCaseWithAIWorkflow:
                 hunt_results[user] = session.received_count
             except Exception:
                 hunt_results[user] = -1
+
+        for file_hash in hashes:
+            esc_hash = _escape_udm(file_hash.lower())
+            if len(file_hash) == 32:
+                query = f'target.process.file.md5 = "{esc_hash}" or target.file.md5 = "{esc_hash}"'
+            elif len(file_hash) == 40:
+                query = f'target.process.file.sha1 = "{esc_hash}" or target.file.sha1 = "{esc_hash}"'
+            else:
+                query = f'target.process.file.sha256 = "{esc_hash}" or target.file.sha256 = "{esc_hash}"'
+            req = SearchRequest(
+                query=query,
+                start_time=start_time,
+                end_time=end_time,
+                receive_limit=hunt_receive_limit,
+            )
+            try:
+                session = self.search_udm_workflow.execute(req)
+                hunt_results[file_hash] = session.received_count
+            except Exception:
+                hunt_results[file_hash] = -1
 
         # Stage 5: Escalations & Audit Logging
         incident_marked = False

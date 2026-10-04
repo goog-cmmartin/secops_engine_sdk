@@ -127,45 +127,79 @@ class SettingsWidget(QWidget):
     def _on_data_loaded(self, category_key: str, data: object):
         if category_key == "preview_features":
             rows = [
-                [getattr(item, "feature_id", "-"), getattr(item, "display_name", "-"), str(getattr(item, "is_enabled", "-")), getattr(item, "state", "-")]
+                [
+                    getattr(item, "id", None) or getattr(item, "feature_id", "-"),
+                    getattr(item, "display_name", "-"),
+                    str(
+                        getattr(item, "enabled", None)
+                        if getattr(item, "enabled", None) is not None
+                        else getattr(item, "is_enabled", "-")
+                    ),
+                    getattr(item, "stage", None) or getattr(item, "state", "-"),
+                ]
                 for item in getattr(data, "items", [])
             ]
             self.preview_model.set_rows(rows)
 
         elif category_key == "data_scopes":
             rows = [
-                [getattr(item, "scope_id", "-"), getattr(item, "display_name", "-"), getattr(item, "description", "-")]
+                [
+                    getattr(item, "id", None) or getattr(item, "scope_id", "-"),
+                    getattr(item, "display_name", "-"),
+                    getattr(item, "description", "-"),
+                ]
                 for item in getattr(data, "items", [])
             ]
             self.scopes_model.set_rows(rows)
 
         elif category_key == "agent_settings":
+            enabled = getattr(data, "auto_investigation_enabled", None)
+            if enabled is None:
+                enabled = getattr(data, "is_enabled", "-")
             lines = [
-                f"Agent Enabled:        {getattr(data, 'is_enabled', '-')}",
-                f"Model Version:        {getattr(data, 'model_version', '-')}",
-                f"Summary Level:        {getattr(data, 'summary_level', '-')}",
-                f"Investigation Assist: {getattr(data, 'investigation_assist_enabled', '-')}",
-                f"Playbook Gen Enabled: {getattr(data, 'playbook_generation_enabled', '-')}",
+                f"Auto Investigation:   {enabled}",
+                f"Alert Filter:         {getattr(data, 'alert_filter', None) or getattr(data, 'model_version', '-')}",
+                f"Investigation Delay:  {getattr(data, 'auto_investigation_delay', None) if getattr(data, 'auto_investigation_delay', None) is not None else getattr(data, 'summary_level', '-')}",
+                f"Auto Quota Limit:     {getattr(data, 'auto_quota_limit', None) if getattr(data, 'auto_quota_limit', None) is not None else getattr(data, 'investigation_assist_enabled', '-')}",
+                f"Manual Quota Limit:   {getattr(data, 'manual_quota_limit', None) if getattr(data, 'manual_quota_limit', None) is not None else getattr(data, 'playbook_generation_enabled', '-')}",
             ]
             self.agent_text.setText("\n".join(lines))
 
         elif category_key == "soar_users":
             rows = [
-                [getattr(item, "user_id", "-"), getattr(item, "name", "-"), getattr(item, "role", "-"), getattr(item, "email", "-"), getattr(item, "status", "-")]
+                [
+                    getattr(item, "id", None) or getattr(item, "user_id", "-"),
+                    getattr(item, "user_full_name", None) or getattr(item, "name", "-"),
+                    ", ".join(getattr(item, "soc_roles", []) or []) or getattr(item, "role", "-"),
+                    getattr(item, "email", "-"),
+                    getattr(item, "account_state", None) or getattr(item, "status", "-"),
+                ]
                 for item in getattr(data, "items", [])
             ]
             self.users_model.set_rows(rows)
 
         elif category_key == "environments":
             rows = [
-                [getattr(item, "environment_id", "-"), getattr(item, "name", "-"), getattr(item, "description", "-")]
+                [
+                    getattr(item, "id", None) or getattr(item, "environment_id", "-"),
+                    getattr(item, "display_name", None) or getattr(item, "name", "-"),
+                    getattr(item, "retention_duration", None) or getattr(item, "description", "-"),
+                ]
                 for item in getattr(data, "items", [])
             ]
             self.env_model.set_rows(rows)
 
         elif category_key == "webhooks":
             rows = [
-                [getattr(item, "webhook_id", "-"), getattr(item, "name", "-"), getattr(item, "state", "-")]
+                [
+                    getattr(item, "id", None) or getattr(item, "webhook_id", "-"),
+                    getattr(item, "display_name", None) or getattr(item, "name", "-"),
+                    str(
+                        getattr(item, "enabled", None)
+                        if getattr(item, "enabled", None) is not None
+                        else getattr(item, "state", "-")
+                    ),
+                ]
                 for item in getattr(data, "items", [])
             ]
             self.webhooks_model.set_rows(rows)

@@ -170,34 +170,54 @@ class PlaybooksWidget(QWidget):
 
     @Slot(object)
     def _on_detail_loaded(self, detail: PlaybookDetail):
+        pb_id = getattr(detail, "id", getattr(detail, "identifier", getattr(detail, "playbook_id", "-")))
+        cat = getattr(detail, "category_name", getattr(detail, "category", getattr(detail, "category_id", "-")))
+        trig = getattr(detail, "trigger", None)
+        trig_type = (
+            getattr(trig, "trigger_type", None)
+            or getattr(detail, "playbook_type", None)
+            or getattr(detail, "trigger_type", "-")
+        )
+        if hasattr(trig_type, "value"):
+            trig_type = trig_type.value
+        c_time = getattr(detail, "creation_time", getattr(detail, "created_time", "-"))
+        m_time = getattr(detail, "modification_time", getattr(detail, "modified_time", "-"))
+        envs = getattr(detail, "environments", None) or (getattr(trig, "environments", None) if trig else None)
+
         lines = [
-            f"Playbook ID:    {detail.playbook_id}",
+            f"Playbook ID:    {pb_id}",
             f"Name:           {detail.name}",
-            f"Category:       {detail.category}",
-            f"Trigger Type:   {detail.trigger_type}",
+            f"Category:       {cat}",
+            f"Trigger Type:   {trig_type}",
             f"Enabled:        {detail.is_enabled}",
-            f"Created Time:   {detail.created_time}",
-            f"Modified Time:  {detail.modified_time}",
+            f"Created Time:   {c_time}",
+            f"Modified Time:  {m_time}",
             f"Description:    {detail.description or 'None'}",
             "",
             f"Total Steps:    {len(detail.steps)}",
         ]
-        if detail.trigger:
-            lines.append(f"Trigger Environments: {', '.join(detail.trigger.environments) if detail.trigger.environments else 'All'}")
-            lines.append(f"Trigger Conditions:   {len(detail.trigger.conditions)} rule(s)")
+        if trig:
+            lines.append(f"Trigger Environments: {', '.join(envs) if envs else 'All'}")
+            lines.append(f"Trigger Conditions:   {len(getattr(trig, 'conditions', []) or [])} rule(s)")
 
         self.overview_text.setText("\n".join(lines))
 
         # Steps table
         step_rows = []
         for s in detail.steps:
-            action_desc = f"{s.integration_name}.{s.action_name}" if s.integration_name else s.action_name
+            integ = getattr(s, "integration", getattr(s, "integration_name", ""))
+            action_name = getattr(s, "action_name", "")
+            action_desc = f"{integ}.{action_name}" if integ else action_name
+            step_id = getattr(s, "identifier", getattr(s, "step_id", "-"))
+            on_fail = getattr(s, "on_failure", None)
+            if on_fail is None:
+                on_fail = "AUTO_SKIP" if getattr(s, "auto_skip_on_failure", False) else "HALT"
             step_rows.append([
-                str(s.step_id),
+                str(step_id),
                 str(s.name),
                 str(action_desc),
                 str(s.step_type),
-                str(s.on_failure or "-"),
+                str(on_fail),
             ])
         self.steps_model.set_rows(step_rows)
         self.status_message_requested.emit(f"Playbook {detail.name} loaded", 3000)

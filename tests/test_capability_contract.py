@@ -302,7 +302,7 @@ class TaxonomyInvariantsTest(unittest.TestCase):
     """
 
     KINDS = {"primitive", "query", "workflow"}
-    CARDINALITIES = {"tiny", "small", "medium", "large", "unbounded"}
+    CARDINALITIES = {"single", "bounded", "unbounded"}
 
     def test_kind_values_are_valid_when_present(self):
         caps = build_registry_capabilities()
@@ -313,6 +313,36 @@ class TaxonomyInvariantsTest(unittest.TestCase):
             and str(getattr(c, "kind")).split(".")[-1].lower() not in self.KINDS
         ]
         self.assertEqual(bad, [], "Invalid kind values:\n" + "\n".join(bad))
+
+    def test_cardinality_values_are_valid_when_present(self):
+        caps = build_registry_capabilities()
+        bad = [
+            f"{cid}: cardinality='{getattr(c, 'cardinality')}'"
+            for cid, c in caps.items()
+            if getattr(c, "cardinality", None) is not None
+            and str(getattr(c, "cardinality")).split(".")[-1].lower()
+            not in self.CARDINALITIES
+        ]
+        self.assertEqual(bad, [], "Invalid cardinality values:\n" + "\n".join(bad))
+
+    def test_mcp_tool_names_are_unique_and_snake_case(self):
+        caps = build_registry_capabilities()
+        seen: Dict[str, str] = {}
+        for cid, c in caps.items():
+            if not c.mcp_tool_name:
+                continue
+            self.assertRegex(
+                c.mcp_tool_name,
+                r"^[a-z0-9_]+$",
+                f"{cid}: mcp_tool_name '{c.mcp_tool_name}' is not snake_case.",
+            )
+            self.assertNotIn(
+                c.mcp_tool_name,
+                seen,
+                f"Duplicate mcp_tool_name '{c.mcp_tool_name}' between "
+                f"{seen.get(c.mcp_tool_name)} and {cid}",
+            )
+            seen[c.mcp_tool_name] = cid
 
     def test_query_kind_has_no_side_effects_when_present(self):
         """Step 2/3 invariant: kind:query => side_effects == []."""
@@ -337,6 +367,11 @@ class TaxonomyInvariantsTest(unittest.TestCase):
         for cid, c in caps.items():
             uses = getattr(c, "uses", None)
             if uses:
+                self.assertIsInstance(
+                    uses,
+                    tuple,
+                    f"{cid}: uses must be normalized to an immutable tuple.",
+                )
                 edges[cid] = list(uses)
 
         dangling = [

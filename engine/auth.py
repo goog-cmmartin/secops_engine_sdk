@@ -39,6 +39,8 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
+import time
 from typing import Optional
 
 from engine.config import SecOpsConfigurationError
@@ -53,13 +55,21 @@ _ENV_MODE = "SECOPS_AUTH_MODE"
 
 _VALID_MODES = ("auto", "adc", "gcloud", "static")
 
+# Default in-memory TTL (seconds) for tokens minted via the gcloud subprocess
+# fallback. Google Cloud OAuth2 access tokens have a 3600s lifetime; caching for
+# 50 minutes (3000s) avoids spawning a subprocess on every REST request while
+# leaving a 10-minute safety buffer before expiration.
+DEFAULT_GCLOUD_CACHE_TTL_SECONDS = 3000.0
+
 
 class CredentialProvider:
     """Acquires Google Cloud access tokens via a prioritized strategy chain.
 
-    A single instance is safe to reuse across many requests: the library-ADC
-    strategy caches the underlying credential object and only performs a network
-    refresh when the token has actually expired.
+    A single instance is safe to reuse across many requests and threads:
+    the library-ADC strategy caches the underlying credential object and only
+    performs a network refresh when the token has expired, and the gcloud
+    subprocess strategy caches its token in memory until ``gcloud_cache_ttl``
+    elapses.
     """
 
     def __init__(
@@ -67,6 +77,7 @@ class CredentialProvider:
         static_token: Optional[str] = None,
         mode: Optional[str] = None,
         scopes: Optional[list] = None,
+        gcloud_cache_ttl: float = DEFAULT_GCLOUD_CACHE_TTL_SECONDS,
     ):
         self._scopes = list(scopes) if scopes else list(AUTH_SCOPES)
         self._static_token = static_token or os.environ.get(_ENV_TOKEN) or None
@@ -77,11 +88,24 @@ class CredentialProvider:
                 f"Invalid {_ENV_MODE}={raw_mode!r}; expected one of {_VALID_MODES}."
             )
         self._mode = raw_mode
+        self._gcloud_cache_ttl = float(gcloud_cache_ttl)
 
+        self._lock = threading.Lock()
         # Lazily-initialized google-auth credential object (library ADC strategy).
         self._adc_credentials = None
+        # Cached token and monotonic expiry timestamp for gcloud subprocess strategy.
+        self._gcloud_cached_token: Optional[str] = None
+        self._gcloud_token_expiry: float = 0.0
 
     # ------------------------------------------------------------------ public
+
+    def invalidate(self) -> None:
+        """Clears cached tokens so the next get_token() call forces a refresh."""
+        with self._lock:
+            self._gcloud_cached_token = None
+            self._gcloud_token_expiry = 0.0
+            if self._adc_credentials is not None:
+                self._adc_credentials = None
 
     def get_token(self) -> str:
         """Returns a valid bearer token, honoring the configured mode.
@@ -142,43 +166,59 @@ class CredentialProvider:
                 "google-auth is not installed; cannot use library ADC strategy."
             ) from e
 
-        if self._adc_credentials is None:
-            self._adc_credentials, _ = google.auth.default(scopes=self._scopes)
+        with self._lock:
+            if self._adc_credentials is None:
+                self._adc_credentials, _ = google.auth.default(scopes=self._scopes)
 
-        if not self._adc_credentials.valid:
-            self._adc_credentials.refresh(GoogleAuthRequest())
+            if not self._adc_credentials.valid:
+                self._adc_credentials.refresh(GoogleAuthRequest())
 
-        return self._adc_credentials.token or None
+            return self._adc_credentials.token or None
 
     def _from_gcloud_adc(self) -> Optional[str]:
         """Strategy 3: `gcloud auth application-default print-access-token`.
 
         Uses the application-default credential store (scoped), NOT the bare
-        `print-access-token` (unscoped -> HTTP 401).
+        `print-access-token` (unscoped -> HTTP 401). Caches the acquired token
+        in memory for ``gcloud_cache_ttl`` seconds to avoid spawning a new
+        subprocess on every API call.
         """
-        try:
-            result = subprocess.run(
-                ["gcloud", "auth", "application-default", "print-access-token"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
-        except FileNotFoundError as e:
-            raise SecOpsConfigurationError(
-                "`gcloud` executable not found on PATH."
-            ) from e
-        except subprocess.TimeoutExpired as e:
-            raise SecOpsConfigurationError(
-                "`gcloud auth application-default print-access-token` timed out."
-            ) from e
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or "").strip()
-            raise SecOpsConfigurationError(
-                f"gcloud token command failed: {stderr}"
-            ) from e
+        with self._lock:
+            now = time.monotonic()
+            if (
+                self._gcloud_cached_token
+                and self._gcloud_cache_ttl > 0
+                and now < self._gcloud_token_expiry
+            ):
+                return self._gcloud_cached_token
 
-        return result.stdout.strip() or None
+            try:
+                result = subprocess.run(
+                    ["gcloud", "auth", "application-default", "print-access-token"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
+            except FileNotFoundError as e:
+                raise SecOpsConfigurationError(
+                    "`gcloud` executable not found on PATH."
+                ) from e
+            except subprocess.TimeoutExpired as e:
+                raise SecOpsConfigurationError(
+                    "`gcloud auth application-default print-access-token` timed out."
+                ) from e
+            except subprocess.CalledProcessError as e:
+                stderr = (e.stderr or "").strip()
+                raise SecOpsConfigurationError(
+                    f"gcloud token command failed: {stderr}"
+                ) from e
+
+            token = result.stdout.strip() or None
+            if token and self._gcloud_cache_ttl > 0:
+                self._gcloud_cached_token = token
+                self._gcloud_token_expiry = time.monotonic() + self._gcloud_cache_ttl
+            return token
 
     # ------------------------------------------------------------------ helpers
 

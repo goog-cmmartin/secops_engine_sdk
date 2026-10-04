@@ -310,18 +310,17 @@ def run_dashboard_health_check(
         RuntimeError: If query execution fails critically
     """
     # Override tenant if specified
-    if project_id or customer_id or region:
-        orig_pid = adapter.project_id
-        orig_cid = adapter.customer_id
-        orig_reg = adapter.region
+    has_override = bool(project_id or customer_id or region)
+    orig_pid = adapter.project_id
+    orig_cid = adapter.customer_id
+    orig_reg = adapter.region
+    if has_override:
         if project_id:
             adapter.project_id = project_id
         if customer_id:
             adapter.customer_id = customer_id
         if region:
             adapter.region = region
-    else:
-        orig_pid = orig_cid = orig_reg = None
     
     try:
         # Step 1: Search for dashboard
@@ -352,8 +351,8 @@ def run_dashboard_health_check(
         errors = []
         
         for chart in dashboard_detail.charts:
-            if chart.query:
-                query_name = chart.query.name
+            query_name = chart.query.name if chart.query else chart.query_name
+            if query_name:
                 try:
                     result = exec_wf.execute(query_name_or_id=query_name)
                     query_results.append({
@@ -402,9 +401,7 @@ def run_dashboard_health_check(
     
     finally:
         # Restore original tenant config
-        if orig_pid is not None:
+        if has_override:
             adapter.project_id = orig_pid
-        if orig_cid is not None:
             adapter.customer_id = orig_cid
-        if orig_reg is not None:
             adapter.region = orig_reg

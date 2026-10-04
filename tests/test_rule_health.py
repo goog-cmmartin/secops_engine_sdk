@@ -243,6 +243,50 @@ class TestRuleHealthWorkflow(unittest.TestCase):
         self.assertEqual(finding.status, RuleHealthStatus.SILENT_DECAY)
         self.assertIn("Verify if upstream log sources", finding.remediation_steps[0])
 
+    def test_revision_qualified_error_and_disabled_rule(self):
+        """Verifies @v_... revision suffixes match rule errors and explicit enabled=False overrides runFrequency."""
+        self.mock_adapter.list_rules.return_value = {
+            "rules": [
+                {
+                    "name": "projects/123/locations/us/instances/abc/rules/ru_rev",
+                    "displayName": "Versioned Error Rule",
+                    "severity": "HIGH",
+                    "runFrequency": "LIVE",
+                    "enabled": True,
+                    "alerting": True,
+                },
+                {
+                    "name": "projects/123/locations/us/instances/abc/rules/ru_disabled",
+                    "displayName": "Disabled Live Rule",
+                    "severity": "MEDIUM",
+                    "runFrequency": "LIVE",
+                    "enabled": False,
+                    "alerting": False,
+                },
+            ]
+        }
+        self.mock_adapter.list_rule_execution_errors.return_value = {
+            "ruleExecutionErrors": [
+                {
+                    "name": "err_rev",
+                    "rule": "projects/123/locations/us/instances/abc/rules/ru_rev@v_1700000000_000000000",
+                    "error": {"code": 3, "message": "Regex timeout in revision"},
+                }
+            ]
+        }
+        self.mock_adapter.get_native_dashboard.return_value = {"name": "test_dash", "definition": {"charts": []}}
+        self.mock_adapter.get_dashboard.return_value = {"name": "test_dash", "definition": {"charts": []}}
+        self.mock_adapter.batch_get_dashboard_charts.return_value = {"dashboardCharts": []}
+        self.mock_adapter.list_curated_rulesets.return_value = {"curatedRuleSets": []}
+
+        report = self.workflow.execute(include_curated=False)
+        self.assertEqual(report.total_rules_audited, 2)
+        self.assertEqual(report.failing_count, 1)
+        self.assertEqual(report.disabled_count, 1)
+        by_id = {f.rule_id: f for f in report.findings}
+        self.assertEqual(by_id["ru_rev"].status, RuleHealthStatus.EXECUTION_ERROR)
+        self.assertEqual(by_id["ru_disabled"].status, RuleHealthStatus.DISABLED)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -175,8 +175,8 @@ class AuditFeedHealthWorkflow:
 
         # Deep dive correlation
         collector_name = (
-            resolve_collector_name(feed.feed_source_type, feed.log_type)
-            or deep_dive_telemetry.collector_by_log_type.get(feed.log_type)
+            deep_dive_telemetry.collector_by_log_type.get(feed.log_type)
+            or resolve_collector_name(feed.feed_source_type, feed.log_type)
         )
         funnel = deep_dive_telemetry.volume_funnel_by_log_type.get(feed.log_type, {})
         quota_rejected = deep_dive_telemetry.quota_rejected_volume_mb.get(feed.log_type, 0.0)

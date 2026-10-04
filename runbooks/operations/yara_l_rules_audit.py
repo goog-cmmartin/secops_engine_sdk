@@ -61,6 +61,7 @@ def generate_yara_l_rules_audit_report(
 
     for rule in rules_res.rules:
         # Query deployment settings for the rule
+        deployment_error: Optional[str] = None
         try:
             dep = engine.get_rule_deployment(rule.rule_id)
             is_enabled = dep.enabled
@@ -68,7 +69,8 @@ def generate_yara_l_rules_audit_report(
             run_frequency = dep.run_frequency
             execution_state = dep.execution_state
             last_alert_status_change_time = dep.last_alert_status_change_time
-        except Exception:
+        except Exception as exc:
+            deployment_error = str(exc)
             is_enabled = False
             is_alerting = False
             run_frequency = rule.run_frequency or "UNKNOWN"
@@ -79,21 +81,22 @@ def generate_yara_l_rules_audit_report(
         has_runtime_errors = len(rule_errors) > 0
         compilation_state = getattr(rule, "compilation_state", None) or rule.raw.get("compilationState", "SUCCEEDED")
         has_compilation_errors = (compilation_state or "").upper() != "SUCCEEDED"
+        has_deployment_error = bool(deployment_error)
         revision_create_time = getattr(rule, "revision_create_time", None) or rule.raw.get("revisionCreateTime", rule.create_time)
         metadata = getattr(rule, "metadata", None) or rule.raw.get("metadata", {})
 
         if is_enabled:
             total_enabled += 1
-        else:
+        elif not has_deployment_error:
             total_disabled += 1
 
         if is_alerting:
             total_alerting += 1
 
-        if has_runtime_errors or has_compilation_errors:
+        if has_runtime_errors or has_compilation_errors or has_deployment_error:
             total_errors += 1
 
-        health_status = "ERROR" if (has_runtime_errors or has_compilation_errors) else "HEALTHY"
+        health_status = "ERROR" if (has_runtime_errors or has_compilation_errors or has_deployment_error) else "HEALTHY"
 
         rule_item: Dict[str, Any] = {
             "rule_id": rule.rule_id,
@@ -111,6 +114,7 @@ def generate_yara_l_rules_audit_report(
             "alerting": is_alerting,
             "execution_state": execution_state,
             "last_alert_status_change_time": last_alert_status_change_time,
+            "deployment_error": deployment_error,
             "health_status": health_status,
             "has_runtime_errors": has_runtime_errors,
             "runtime_errors_count": len(rule_errors),
@@ -158,13 +162,18 @@ def print_yara_l_rules_audit_console(report: Dict[str, Any]) -> None:
         status_tag = "[HEALTHY]" if r["health_status"] == "HEALTHY" else "[ERROR]"
         enabled_tag = "[ENABLED]" if r["enabled"] else "[DISABLED]"
         alert_tag = "[ALERTING]" if r["alerting"] else "[NO ALERT]"
+        author_str = str(r.get("author") or "Unknown")
+        sev_str = str(r.get("severity") or "N/A")
+        type_str = str(r.get("rule_type") or "N/A")
 
         print(f"\n[{idx:02d}] {r['display_name']} (ID: {r['rule_id']}) {status_tag}")
-        print(f"     Author       : {r['author']:25s} | Severity : {r['severity']:10s} | Type: {r['rule_type']}")
+        print(f"     Author       : {author_str:25s} | Severity : {sev_str:10s} | Type: {type_str}")
         print(f"     Created At   : {r['create_time'] or 'N/A'}")
         print(f"     Last Modified: {r['revision_create_time'] or 'N/A'}")
         print(f"     Deployment   : {enabled_tag} {alert_tag} | Frequency: {r['run_frequency']}")
         print(f"     Compilation  : {r['compilation_state']}")
+        if r.get("deployment_error"):
+            print(f"     Deployment Error: {r['deployment_error']}")
 
         if r.get("runtime_errors"):
             print(f"     ⚠️ Runtime Execution Errors ({r['runtime_errors_count']} events recorded):")
@@ -203,7 +212,10 @@ def main() -> None:
     args = parser.parse_args()
     engine = SecOpsEngine()
 
-    print("\n[+] Collecting Chronicle SIEM YARA-L detection rules, deployments, and execution errors...")
+    print(
+        "\n[+] Collecting Chronicle SIEM YARA-L detection rules, deployments, and execution errors...",
+        file=sys.stderr,
+    )
     report = generate_yara_l_rules_audit_report(
         engine=engine,
         page_size=args.page_size,
@@ -218,7 +230,7 @@ def main() -> None:
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, default=str)
-        print(f"\n[+] Audit report written to: {args.out}")
+        print(f"\n[+] Audit report written to: {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

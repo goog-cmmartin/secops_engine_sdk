@@ -31,13 +31,13 @@ def _parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
     if not ts_str:
         return None
     try:
-        clean = ts_str.rstrip("Z")
-        if "." in clean:
-            dt_part, frac = clean.split(".")
-            frac = (frac + "000000")[:6]
-            clean = f"{dt_part}.{frac}"
-            return datetime.fromisoformat(clean).replace(tzinfo=timezone.utc)
-        return datetime.fromisoformat(clean).replace(tzinfo=timezone.utc)
+        s = str(ts_str).strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
 

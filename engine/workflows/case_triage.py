@@ -146,8 +146,15 @@ def build_case_timeline(
                 )
             )
 
+    def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
     # 5. Case state update
-    if inv.update_time and (not inv.create_time or inv.update_time > inv.create_time):
+    norm_update = _as_utc(inv.update_time)
+    norm_create = _as_utc(inv.create_time)
+    if norm_update and (not norm_create or norm_update > norm_create):
         status_label = inv.status.value if hasattr(inv.status, "value") else str(inv.status)
         events.append(
             CaseTimelineEvent(
@@ -163,14 +170,10 @@ def build_case_timeline(
     # Sort events chronologically
     min_dt = datetime.min.replace(tzinfo=timezone.utc)
     def _sort_key(ev: CaseTimelineEvent):
-        if ev.timestamp is None:
-            return min_dt
-        if ev.timestamp.tzinfo is None:
-            return ev.timestamp.replace(tzinfo=timezone.utc)
-        return ev.timestamp
+        return _as_utc(ev.timestamp) or min_dt
 
     sorted_events = sorted(events, key=_sort_key)
-    valid_times = [ev.timestamp for ev in sorted_events if ev.timestamp is not None]
+    valid_times = [_as_utc(ev.timestamp) for ev in sorted_events if ev.timestamp is not None]
     earliest_time = min(valid_times) if valid_times else None
     latest_time = max(valid_times) if valid_times else None
 
@@ -610,9 +613,15 @@ class CaseTriageWorkflow:
         comments = inv.comments or []
         latest_comment_text: Optional[str] = None
         if comments:
+            def _comment_ts(cm: Any) -> datetime:
+                dt = cm.create_time
+                if dt is None:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
             sorted_comments = sorted(
                 [cm for cm in comments if not cm.is_deleted],
-                key=lambda x: x.create_time or datetime.min.replace(tzinfo=timezone.utc),
+                key=_comment_ts,
                 reverse=True,
             )
             if sorted_comments:
@@ -676,7 +685,11 @@ class CaseTriageWorkflow:
         # Step 6 & 7: Apply stage update and/or post triage comment if requested
         if apply_stage_update and suggested_stage and not is_closed and suggested_stage != inv.stage:
             try:
-                self.adapter.update_case(case_id=clean_case_id, stage=suggested_stage)
+                self.adapter.update_case(
+                    case_id=clean_case_id,
+                    updates={"stage": suggested_stage},
+                    update_mask="stage",
+                )
                 inv.stage = suggested_stage
             except Exception:
                 pass
@@ -812,6 +825,7 @@ class OrchestrateCaseTriageWorkflow:
         if case_ids:
             clean_ids = [str(cid).strip().split("/")[-1] for cid in case_ids if str(cid).strip()]
             assessments: List[CaseTriageAssessment] = []
+            batch_errors: Dict[str, str] = {}
             with ThreadPoolExecutor(max_workers=min(8, len(clean_ids))) as executor:
                 future_map = {
                     executor.submit(
@@ -823,10 +837,11 @@ class OrchestrateCaseTriageWorkflow:
                     for cid in clean_ids
                 }
                 for future in as_completed(future_map):
+                    cid = future_map[future]
                     try:
                         assessments.append(future.result())
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        batch_errors[cid] = str(exc)
 
             # Maintain input ordering
             assessment_dict = {a.case_id: a for a in assessments}
@@ -843,12 +858,14 @@ class OrchestrateCaseTriageWorkflow:
                 )
             )
 
-            provenance = {
+            provenance: Dict[str, Any] = {
                 "workflow": "case.orchestrate_triage",
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "mode": "explicit_case_ids",
                 "total_triaged": len(ordered_assessments),
             }
+            if batch_errors:
+                provenance["errors"] = batch_errors
 
             return CaseTriageBatch(
                 results=ordered_assessments,
@@ -887,6 +904,7 @@ class OrchestrateCaseTriageWorkflow:
                 break
 
         assessments_batch: List[CaseTriageAssessment] = []
+        search_batch_errors: Dict[str, str] = {}
 
         if candidates:
             with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as executor:
@@ -905,8 +923,8 @@ class OrchestrateCaseTriageWorkflow:
                     c = future_map[future]
                     try:
                         cand_dict[c.case_id] = future.result()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        search_batch_errors[c.case_id] = str(exc)
 
                 for c in candidates:
                     if c.case_id in cand_dict:
@@ -931,6 +949,8 @@ class OrchestrateCaseTriageWorkflow:
             "total_candidates_searched": len(search_batch.results),
             "total_triaged": len(assessments_batch),
         }
+        if search_batch_errors:
+            provenance["errors"] = search_batch_errors
 
         return CaseTriageBatch(
             results=assessments_batch,

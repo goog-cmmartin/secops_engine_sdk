@@ -107,21 +107,24 @@ def generate_curated_detections_health_report(
 
     # Pre-fetch deployments concurrently if scan_deployments is True
     deployments_cache: Dict[str, List[Dict[str, Any]]] = {}
+    deployment_errors: Dict[str, str] = {}
     if scan_deployments:
         import concurrent.futures
 
         def _fetch_dep(rs_n: str):
             try:
                 dres = adapter.get_curated_ruleset_deployments(rs_n)
-                return rs_n, dres.get("curatedRuleSetDeployments", []) if isinstance(dres, dict) else []
-            except Exception:
-                return rs_n, []
+                return rs_n, dres.get("curatedRuleSetDeployments", []) if isinstance(dres, dict) else [], None
+            except Exception as exc:
+                return rs_n, [], str(exc)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             fut_to_rs = {executor.submit(_fetch_dep, rs.get("name", "")): rs.get("name", "") for rs in raw_rulesets if rs.get("name")}
             for fut in concurrent.futures.as_completed(fut_to_rs):
-                rs_k, rdeps = fut.result()
+                rs_k, rdeps, dep_err = fut.result()
                 deployments_cache[rs_k] = rdeps
+                if dep_err:
+                    deployment_errors[rs_k] = dep_err
 
     for rs in raw_rulesets:
         rs_name = rs.get("name", "")
@@ -199,6 +202,18 @@ def generate_curated_detections_health_report(
                     log_source_stats[lt]["active_rulesets"] += 1
 
         # --- Health Findings & Misconfiguration Evaluation ---
+        dep_error = deployment_errors.get(rs_name)
+        if dep_error:
+            health_findings.append({
+                "severity": "MEDIUM",
+                "code": "DEPLOYMENT_FETCH_FAILED",
+                "ruleset_id": rs_id,
+                "ruleset_title": rs_title,
+                "category": cat_display,
+                "message": f"Failed to retrieve deployment state for rule set '{rs_title}': {dep_error}",
+                "recommendation": f"Verify API permissions and retry deployment inspection: secops curated get {rs_id}",
+            })
+
         # 1. Critical Misconfiguration: BROAD set to Alerting ON
         if broad_enabled and broad_alerting:
             health_findings.append({
@@ -265,6 +280,7 @@ def generate_curated_detections_health_report(
             "precise_enabled": precise_enabled,
             "precise_alerting": precise_alerting,
             "deployments": deployments,
+            "deployment_error": dep_error,
         })
 
     # 5. Content Freshness: Rank Rules by updateTime
@@ -274,10 +290,16 @@ def generate_curated_detections_health_report(
         r_id = r_name.split("/")[-1] if r_name else ""
         up_time = r.get("updateTime", "")
         techs = [t.get("id", "") for t in r.get("techniques", []) if isinstance(t, dict)]
+        raw_sev = r.get("severity")
+        sev_str = (
+            raw_sev.get("displayName", "MEDIUM")
+            if isinstance(raw_sev, dict)
+            else (str(raw_sev) if raw_sev else "MEDIUM")
+        )
         valid_rules.append({
             "rule_id": r_id,
             "title": r.get("displayName", "") or r_id,
-            "severity": (r.get("severity", {}) or {}).get("displayName", "MEDIUM"),
+            "severity": sev_str,
             "precision": r.get("precision", "PRECISE"),
             "rule_type": r.get("type", "SINGLE_EVENT"),
             "update_time": up_time,
@@ -294,7 +316,8 @@ def generate_curated_detections_health_report(
 
     # Calculate overall health summary
     total_detections_period = sum(f.get("count", 0) for f in top_firing)
-    healthy_count = len(raw_rulesets) - len(health_findings)
+    unhealthy_ids = {f["ruleset_id"] for f in health_findings if f.get("ruleset_id")}
+    healthy_count = len(raw_rulesets) - len(unhealthy_ids)
 
     res_dict = {
         "evaluation_period": {
@@ -372,8 +395,11 @@ def print_curated_detections_health_console(report: Any, json_output: bool = Fal
         for idx, f in enumerate(findings, 1):
             sev = f.get("severity", "INFO")
             badge = f"[{sev}]"
-            print(f"\n {idx:2d}. {badge:<8s} {f.get('code')}: {f.get('ruleset_title')} ({f.get('category')})")
-            print(f"     Ruleset ID : {f.get('ruleset_id')}")
+            title = f.get("ruleset_title") or "Tenant Telemetry"
+            cat = f.get("category") or "System"
+            print(f"\n {idx:2d}. {badge:<8s} {f.get('code')}: {title} ({cat})")
+            if f.get("ruleset_id"):
+                print(f"     Ruleset ID : {f.get('ruleset_id')}")
             print(f"     Issue      : {f.get('message')}")
             print(f"     Action     : {f.get('recommendation')}")
     else:

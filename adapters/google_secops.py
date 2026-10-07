@@ -686,6 +686,53 @@ class GoogleSecOpsAdapter:
             return res.get("caseAlerts", [])
         return []
 
+    def list_cases(
+        self,
+        filter: str = "",
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        order_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists cases from the native ``cases`` collection (one page).
+
+        ``GET /v1alpha/projects/{project}/locations/{loc}/instances/{customer}/cases``.
+        Returns the raw response dict: ``cases`` (list), ``nextPageToken`` and
+        ``totalSize``. The server rejects ``pageSize`` > 1000 with HTTP 400 and
+        defaults to 50 when it is omitted. ``filter`` uses quoted string literals
+        (``status="OPENED" AND environment="Demoverse"``); invalid filters raise
+        :class:`SecOpsApiError`. See
+        ``discovery/observations/04_case_list_native_collection.md``.
+        """
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases"
+        params: Dict[str, Any] = {}
+        if page_size:
+            params["pageSize"] = int(page_size)
+        if filter:
+            params["filter"] = filter
+        if page_token:
+            params["pageToken"] = page_token
+        if order_by:
+            params["orderBy"] = order_by
+        # The endpoint intermittently answers valid requests with HTTP 500
+        # "Internal error encountered" (~3 in 110 live calls; each identical
+        # request succeeded on retry). _request does not retry 500, so this
+        # idempotent GET retries a bounded number of times, then re-raises.
+        max_500_retries = 2
+        attempt = 0
+        while True:
+            try:
+                res = self._request("GET", path, params=params if params else None)
+                break
+            except SecOpsApiError as e:
+                if e.status != 500 or attempt >= max_500_retries:
+                    raise
+                attempt += 1
+                logger.warning("list_cases: transient HTTP 500, retry %d/%d", attempt, max_500_retries)
+                time.sleep(1.0 * attempt)
+        if not isinstance(res, dict):
+            raise RuntimeError("Failed to list cases: invalid provider response (expected JSON object).")
+        return res
+
     def get_case_alert(self, alert_name: str) -> Dict[str, Any]:
         """Fetches specific alert details by resource name."""
         clean_name = alert_name.lstrip("/")

@@ -116,6 +116,27 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_search_cmd.add_argument("--limit", type=int, default=20, help="Results page size (default: 20)")
     case_search_cmd.add_argument("--page", type=int, default=0, help="Page number (default: 0)")
 
+    case_list_cmd = case_sub.add_parser(
+        "list",
+        help="List cases with exact status/environment/priority filters (native cases collection, no time window)",
+        description=(
+            "List cases from the native cases collection. Unlike 'case search', this filters "
+            "on exact open/closed status and has no time window, so long-lived open cases are included. "
+            "Repeat a flag to OR values (e.g. -p CRITICAL -p HIGH); different flags are AND-ed."
+        ),
+    )
+    case_list_cmd.add_argument("--status", type=str.upper, choices=["OPENED", "OPEN", "CLOSED"], default=None, help="Exact case status: OPENED (alias OPEN) or CLOSED")
+    case_list_cmd.add_argument("--environment", "-env", action="append", default=[], help="Filter by environment (repeatable)")
+    case_list_cmd.add_argument("--priority", "-p", action="append", default=[], help="Filter by priority: INFO, LOW, MEDIUM, HIGH, CRITICAL (repeatable)")
+    case_list_cmd.add_argument("--stage", "-s", action="append", default=[], help="Filter by stage, e.g. Triage (repeatable)")
+    case_list_cmd.add_argument("--assignee", "-u", action="append", default=[], help="Filter by assignee, e.g. @Tier1 (repeatable)")
+    case_list_cmd.add_argument("--important", action="store_true", default=None, help="Only important cases")
+    case_list_cmd.add_argument("--incident", action="store_true", default=None, help="Only cases marked as incidents")
+    case_list_cmd.add_argument("--filter", default=None, help="Raw server filter AND-ed with the flags, e.g. 'createTime > 1791000000000'")
+    case_list_cmd.add_argument("--order-by", default="createTime desc", help="Sort order (default: 'createTime desc'; also updateTime, priority)")
+    case_list_cmd.add_argument("--limit", type=int, default=50, help="Maximum cases to fetch across pages (default: 50)")
+    case_list_cmd.add_argument("--json", action="store_true", help="Output raw JSON")
+
     case_triage_single_cmd = case_sub.add_parser(
         "triage",
         help="End-to-end single case triage: investigation, Gemini AI summary, title/entity precedents, novelty, and updates",
@@ -2168,6 +2189,62 @@ def run_case_cli(args):
             if c.user_assigned:
                 print(f"     Assignee: {c.user_assigned}")
             print()
+
+    elif args.case_action == "list":
+        import json
+        batch = engine.list_cases(
+            status=args.status,
+            environments=args.environment,
+            priorities=args.priority,
+            stages=args.stage,
+            assignees=args.assignee,
+            is_important=True if args.important else None,
+            is_incident=True if args.incident else None,
+            filter=args.filter,
+            order_by=args.order_by,
+            max_results=args.limit,
+        )
+        if args.json:
+            out = {
+                "total_count": batch.total_count,
+                "returned_count": len(batch.cases),
+                "next_page_token": batch.next_page_token,
+                "provenance": batch.provenance,
+                "cases": [
+                    {
+                        "case_id": c.case_id,
+                        "display_name": c.display_name,
+                        "status": c.raw_status,
+                        "priority": c.raw_priority,
+                        "stage": c.stage,
+                        "environment": c.environment,
+                        "assignee": c.assignee,
+                        "alert_count": c.alert_count,
+                        "is_important": c.is_important,
+                        "is_incident": c.is_incident,
+                        "create_time": c.create_time.isoformat() if c.create_time else None,
+                        "update_time": c.update_time.isoformat() if c.update_time else None,
+                    }
+                    for c in batch.cases
+                ],
+            }
+            print(json.dumps(out, indent=2, default=str))
+            return
+        print(f"\n[CLI] Listing Cases (filter='{batch.provenance.get('filter', '')}', limit={args.limit})...")
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE LIST (Total matching: {batch.total_count:,} | Returned: {len(batch.cases)} | Pages: {batch.provenance.get('pages_fetched')})")
+        print(f"==========================================================================================")
+        if not batch.cases:
+            print(" No cases found matching criteria.")
+            return
+        for idx, c in enumerate(batch.cases, 1):
+            imp_badge = "★ " if c.is_important else ""
+            time_str = c.create_time.strftime("%Y-%m-%d %H:%M:%S") if c.create_time else "N/A"
+            print(f" {idx:3d}. {imp_badge}ID: {c.case_id:<8s} | {c.raw_priority:<18s} | {c.raw_status:<7s} | Stage: {c.stage:<14s} | Alerts: {c.alert_count:3d} | Created: {time_str}")
+            print(f"      Title   : {c.display_name}")
+            print(f"      Env     : {c.environment}   Assignee: {c.assignee or '-'}")
+        if batch.truncated:
+            print(f"\n (More cases match; raise --limit to fetch beyond {len(batch.cases)}.)")
 
     elif args.case_action == "triage":
         print(f"\n[CLI] Triaging Case #{args.case_id} (summary={args.summary}, precedents={args.precedents})...")

@@ -10,6 +10,7 @@ from engine.domain import (
     PlaybookInstanceStep,
     CaseCommentRecord,
     CaseInvestigation,
+    CaseListBatch,
     CaseSearchBatch,
     CaseSearchPrefix,
     CaseSearchQuery,
@@ -305,6 +306,7 @@ from engine.workflows.case_investigation import (
     AddCaseCommentWorkflow,
     InvestigateCaseWorkflow,
 )
+from engine.workflows.case_list import ListCasesWorkflow
 from engine.workflows.case_search import SearchCasesWorkflow
 from engine.workflows.case_triage import (
     CaseTriageWorkflow,
@@ -653,6 +655,7 @@ class SecOpsEngine:
         "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
+        "_list_cases_wf": lambda e: ListCasesWorkflow(e.adapter),
         "_case_triage_wf": lambda e: CaseTriageWorkflow(e.adapter),
         "_get_case_timeline_wf": lambda e: GetCaseTimelineWorkflow(e.adapter),
         "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter, triage_workflow=e._case_triage_wf),
@@ -1208,6 +1211,18 @@ class SecOpsEngine:
                 mcp_tool_name="search_cases",
                 composed=False,
                 evidence_path="evidence/case/search",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.list",
+                name="SOAR Case Listing (Exact Status Filter)",
+                description="Lists SOAR cases from the native cases collection with exact open/closed status, environment, priority, stage, assignee, important and incident filters, no time window, paginated up to a caller bound.",
+                category="case",
+                handler=self.list_cases,
+                mcp_tool_name="list_cases",
+                composed=False,
+                evidence_path="discovery/observations/04_case_list_native_collection.md",
             )
         )
         self.registry.register(
@@ -4076,6 +4091,67 @@ class SecOpsEngine:
             environments=environments,
             page_size=page_size,
             page_number=page_number,
+        )
+
+    def list_cases(
+        self,
+        status: Optional[Union[str, CaseStatus]] = None,
+        environments: Optional[Union[List[str], str]] = None,
+        priorities: Optional[Union[List[Union[str, CasePriority]], str, CasePriority]] = None,
+        stages: Optional[Union[List[str], str]] = None,
+        assignees: Optional[Union[List[str], str]] = None,
+        is_important: Optional[bool] = None,
+        is_incident: Optional[bool] = None,
+        filter: Optional[str] = None,
+        order_by: Optional[str] = "createTime desc",
+        max_results: int = 1000,
+        page_size: int = 1000,
+    ) -> CaseListBatch:
+        """Lists cases from the native cases collection with exact server-side filters.
+
+        Prefer this over :meth:`search_cases` when you need an exact open/closed
+        status filter or cases regardless of age: the legacy search has no status
+        filter and is bounded by a time window, so long-lived open cases are
+        invisible to it. Use :meth:`search_cases` for keyword / ``Entity:`` /
+        ``AlertName:`` DSL queries and tag filters, which this endpoint lacks.
+
+        Args:
+            status: ``"OPENED"``/``"OPEN"``/``CaseStatus.OPEN`` or the CLOSED forms.
+            environments, priorities, stages, assignees: one value or a list;
+                values within a facet are OR-ed, facets are AND-ed. Priorities
+                accept ``CasePriority``, ``"HIGH"`` or ``"PRIORITY_HIGH"``
+                (``INFO`` is also valid server-side).
+            is_important / is_incident: exact boolean filters.
+            filter: raw server filter AND-ed with the typed facets, e.g.
+                ``'createTime > 1791000000000'`` (epoch millis, unquoted).
+            order_by: e.g. ``"createTime desc"`` (default), ``"updateTime desc"``,
+                ``"priority desc"``; unknown fields raise HTTP 400.
+            max_results: upper bound on cases fetched across pages.
+            page_size: per-request size, 1..1000 (server maximum is 1000).
+
+        Returns:
+            :class:`CaseListBatch` with ``cases`` (:class:`CaseListItem`),
+            ``total_count`` (server ``totalSize`` for the filter),
+            ``next_page_token`` (set when ``max_results`` cut the listing short)
+            and ``provenance``.
+
+        Example::
+
+            batch = engine.list_cases(status="OPENED", environments="Demoverse", max_results=5000)
+            print(batch.total_count, len(batch.cases))
+        """
+        return self._list_cases_wf.execute(
+            status=status,
+            environments=environments,
+            priorities=priorities,
+            stages=stages,
+            assignees=assignees,
+            is_important=is_important,
+            is_incident=is_incident,
+            raw_filter=filter,
+            order_by=order_by,
+            max_results=max_results,
+            page_size=page_size,
         )
 
     def triage_case(

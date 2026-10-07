@@ -1283,6 +1283,78 @@ class CaseSearchBatch(UniversalBatchMixin):
         return self.results
 
 
+@dataclass
+class CaseListItem:
+    """One case from the native ``.../instances/{id}/cases`` collection (``case.list``).
+
+    Field mapping (verified live, see
+    ``discovery/observations/04_case_list_native_collection.md``):
+    ``name`` -> ``case_id`` (last path segment), ``displayName`` -> ``display_name``,
+    ``createTime``/``updateTime`` (epoch-millis strings) -> UTC datetimes,
+    ``priority`` (``PRIORITY_*``) -> :class:`CasePriority`, ``status``
+    (``OPENED``/``CLOSED``) -> :class:`CaseStatus` plus the raw string in
+    ``raw_status``, ``important``/``incident`` -> ``is_important``/``is_incident``.
+    """
+    case_id: str
+    name: str
+    display_name: str
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    priority: CasePriority
+    status: CaseStatus
+    raw_priority: str = ""
+    raw_status: str = ""
+    stage: str = ""
+    environment: str = ""
+    assignee: Optional[str] = None
+    alert_count: int = 0
+    is_important: bool = False
+    is_incident: bool = False
+    description: str = ""
+    case_type: str = ""
+    workflow_status: str = ""
+    source: str = ""
+    last_modifying_user_id: Optional[str] = None
+    involved_suspicious_entity: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        return self.case_id
+
+    @property
+    def title(self) -> str:
+        return self.display_name
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status == CaseStatus.CLOSED
+
+
+@dataclass
+class CaseListBatch(UniversalBatchMixin):
+    """Result of ``case.list``: cases plus server ``totalSize`` and paging cursor.
+
+    ``total_count`` is the server-reported ``totalSize`` for the filter (all
+    matching cases), which can exceed ``len(cases)`` when ``max_results`` capped
+    the fetch. ``next_page_token`` is non-empty when more pages remain.
+    """
+    cases: List[CaseListItem]
+    total_count: int
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CaseListItem]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.cases
+
+    @property
+    def truncated(self) -> bool:
+        """True when more matching cases exist than were fetched."""
+        return bool(self.next_page_token)
+
+
 class TriageVerdict(str, Enum):
     CRITICAL_ESCALATION = "CRITICAL_ESCALATION"
     HIGH_PRIORITY_INVESTIGATION = "HIGH_PRIORITY_INVESTIGATION"

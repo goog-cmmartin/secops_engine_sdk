@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-26 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-10-07 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**206 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**207 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -18,14 +18,14 @@ _Generated 2026-09-26 from `engine/registry.py` via `scripts/generate_capabiliti
 | :--- | ----: |
 | workflow | 41 |
 | primitive | 29 |
-| query | 136 |
-| **total** | **206** |
+| query | 137 |
+| **total** | **207** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 58 |
 | bounded | 15 |
-| unbounded | 63 |
+| unbounded | 64 |
 | (n/a — workflows/primitive) | 70 |
 
 ## Workflows
@@ -84,7 +84,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (20: workflow=7, primitive=10, query=3)
+### case  (21: workflow=7, primitive=10, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -106,6 +106,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.set_priority` | primitive | — | `set_case_alert_priority` | Updates the priority level of a specific case alert. |
 | `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
 | `case.get_wall` | query | `unbounded` | `get_case_wall` | Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps. |
+| `case.list` | query | `unbounded` | `list_cases` | Lists SOAR cases from the native cases collection with exact open/closed status, environment, priority, stage, assignee, important and incident filters, no time window, paginated up to a caller bound. |
 | `case.list_comments` | query | `unbounded` | `list_case_comments` | Lists all analyst comments and AI assessment notes for a SOAR case. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 

@@ -4890,6 +4890,79 @@ class GcpMonitoringQueryResult(UniversalBatchMixin):
         return self.time_series
 
 
+@dataclass
+class IngestionMetricPoint:
+    """One aligned Cloud Monitoring point: [start, end) interval and its value."""
+    start: str
+    end: str
+    value: Any  # int for INT64 DELTA metrics, float for DOUBLE
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"start": self.start, "end": self.end, "value": self.value}
+
+
+@dataclass
+class LogTypeIngestionSeries:
+    """Aligned points for one log type (``"ALL"`` when not grouped), sorted by start time."""
+    log_type: str
+    points: List[IngestionMetricPoint] = field(default_factory=list)
+
+    @property
+    def total(self) -> float:
+        return sum(p.value for p in self.points if isinstance(p.value, (int, float)))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"log_type": self.log_type, "total": self.total, "points": [p.to_dict() for p in self.points]}
+
+
+@dataclass
+class ChronicleIngestionMetricsResult(UniversalBatchMixin):
+    """Chronicle ingestion metric time series per log type with call provenance.
+
+    ``time_series`` / ``total_series`` keep the raw normalized Cloud Monitoring
+    streams for consumers written against ``GcpMonitoringQueryResult``.
+    """
+    metric_type: str
+    filter_applied: str
+    project_id: str
+    start_time: str
+    end_time: str
+    alignment_period: str
+    per_series_aligner: str
+    cross_series_reducer: Optional[str] = None
+    group_by_fields: List[str] = field(default_factory=list)
+    called_at: str = ""
+    call_duration_s: float = 0.0
+    pages_fetched: int = 0
+    series: List[LogTypeIngestionSeries] = field(default_factory=list)
+    time_series: List[TimeSeriesData] = field(default_factory=list)
+
+    @property
+    def total_series(self) -> int:
+        return len(self.time_series)
+
+    @property
+    def items(self) -> List[LogTypeIngestionSeries]:
+        return self.series
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "metric_type": self.metric_type,
+            "filter_applied": self.filter_applied,
+            "project_id": self.project_id,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "alignment_period": self.alignment_period,
+            "per_series_aligner": self.per_series_aligner,
+            "cross_series_reducer": self.cross_series_reducer,
+            "group_by_fields": list(self.group_by_fields),
+            "called_at": self.called_at,
+            "call_duration_s": self.call_duration_s,
+            "pages_fetched": self.pages_fetched,
+            "series": [s.to_dict() for s in self.series],
+        }
+
+
 class TimestampProgressionState(str, Enum):
     """Classification states for telemetry timestamp and latency progression."""
     NEW = "NEW"

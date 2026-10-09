@@ -123,10 +123,32 @@ The same fix applies to `get_entity_graph_lineage` `first_seen`/`last_seen` (als
   Calls take 0.2–2.4 s. `quota_rejected_bytes_count` returned 0 series (no rejections in 24h).
 - `log_type` is a **resource** label. Group by `resource.label.log_type` (28 series per
   24h page). `metric.label.log_type` does not exist and collapses everything into 1 series.
-- Bug (not fixed here): `get_chronicle_ingestion_metrics` builds
+- Fixed in this branch: `get_chronicle_ingestion_metrics` used to build
   `metric.type = starts_with("chronicle.googleapis.com/")`, which the API rejects with
-  `400 The provided filter matches more than one metric`. Its `log_type` filter also uses
-  `metric.label.log_type`, which should be `resource.label.log_type`.
+  `400 The provided filter matches more than one metric`, and it filtered on
+  `metric.label.log_type`. The legacy workflow method `query_chronicle_ingestion_metrics`
+  is unchanged because `tests/test_gcp_monitoring_workflow.py` pins its filter. The facade now calls
+  `GcpMonitoringQueryWorkflow.query_chronicle_ingestion_series`.
+
+### Verified call (2026-10-09T23:02Z, project `gus-sdl`). Status: VERIFIED
+```
+GET https://monitoring.googleapis.com/v3/projects/gus-sdl/timeSeries
+  filter = metric.type = "chronicle.googleapis.com/ingestion/log/record_count"
+           AND resource.type = "chronicle.googleapis.com/Collector"
+           [AND resource.label.log_type = "X" | one_of("X", "Y")]
+  interval.startTime / interval.endTime = now-24h / now
+  aggregation.alignmentPeriod = 3600s, perSeriesAligner = ALIGN_SUM,
+  aggregation.crossSeriesReducer = REDUCE_SUM, groupByFields = resource.label.log_type
+  pageSize = 1000 (follow nextPageToken)
+```
+- 1 page, 1.5 s, 41 log types. Up to 24 hourly points per log type. Log types with gaps return fewer
+  (SENTINELONE_CF: 10). Points arrive newest-first; the SDK sorts them ascending.
+- Top 5 by 24h records: BRO_JSON 23,777,834; WINEVTLOG 1,675,240; SENTINELONE_CF 1,265,002;
+  SQUID_WEBPROXY 612,256; NIX_SYSTEM 152,016.
+- `ingestion/log/bytes_count` (0.8 s) and `normalizer/log/record_count` (0.5 s) work the same way.
+  Ungrouped (`REDUCE_SUM`, no groupBy) returns 1 series: 27,604,999 records in 24h (0.36 s).
+- With `pageSize=100` the same grouped query returned a `nextPageToken` after 28 series,
+  so pagination must be followed.
 
 ## 6. Status incidents (gcp_status.incidents.query)
 

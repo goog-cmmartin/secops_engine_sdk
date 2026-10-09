@@ -275,6 +275,7 @@ from engine.domain import (
     GcpLogQueryResult,
     MetricPoint,
     TimeSeriesData,
+    ChronicleIngestionMetricsResult,
     GcpMonitoringQueryResult,
     ChronicleCustomRole,
     ChronicleIamMember,
@@ -5871,18 +5872,39 @@ class SecOpsEngine:
 
     def get_chronicle_ingestion_metrics(
         self,
-        hours: int = 24,
-        log_type: Optional[str] = None,
-        alignment_period: str = "3600s",
-        per_series_aligner: str = "ALIGN_SUM",
+        metric: str = "ingestion/log/record_count",
+        lookback_hours: int = 24,
+        log_types: Optional[List[str]] = None,
+        group_by_log_type: bool = True,
+        alignment_period_s: int = 3600,
         project_id: Optional[str] = None,
-    ) -> GcpMonitoringQueryResult:
-        """Queries Chronicle log ingestion volume and count time series."""
-        return self._query_cloud_monitoring_wf.query_chronicle_ingestion_metrics(
-            hours=hours,
-            log_type=log_type,
-            alignment_period=alignment_period,
-            per_series_aligner=per_series_aligner,
+        hours: Optional[int] = None,
+        log_type: Optional[str] = None,
+    ) -> ChronicleIngestionMetricsResult:
+        """Queries one Chronicle ingestion metric from Cloud Monitoring, per log type.
+
+        Args:
+            metric: One of ``ingestion/log/record_count`` (default),
+                ``ingestion/log/bytes_count``, ``normalizer/log/record_count``.
+            lookback_hours: Window ending now.
+            log_types: Optional filter on ``resource.label.log_type``.
+            group_by_log_type: REDUCE_SUM grouped by log type (True) or one
+                ``"ALL"`` series (False).
+            alignment_period_s: ALIGN_SUM alignment period in seconds (default 3600).
+            project_id: Cloud project hosting the Chronicle metrics (default: adapter project).
+            hours: Backward-compatible alias for ``lookback_hours``.
+            log_type: Backward-compatible alias for ``log_types=[log_type]``.
+        """
+        if hours is not None:
+            lookback_hours = hours
+        if log_type:
+            log_types = list(log_types or []) + [log_type]
+        return self._query_cloud_monitoring_wf.query_chronicle_ingestion_series(
+            metric=metric,
+            lookback_hours=lookback_hours,
+            log_types=log_types,
+            group_by_log_type=group_by_log_type,
+            alignment_period_s=alignment_period_s,
             project_id=project_id,
         )
 

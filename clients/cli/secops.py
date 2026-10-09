@@ -1807,17 +1807,17 @@ def run_monitoring_cli(args):
                 "normalizer_series_count": normalizer.total_series,
                 "api_series_count": api.total_series,
                 "ingestion": [s.raw for s in ingestion.time_series],
+                "ingestion_by_log_type": ingestion.to_dict(),
                 "normalizer": [s.raw for s in normalizer.time_series],
                 "api": [s.raw for s in api.time_series],
             }
             print(json.dumps(out, indent=2))
             return
 
-        print(f"Ingestion Streams  : {ingestion.total_series}")
-        for s in ingestion.time_series:
-            latest_val = s.points[0].value if s.points else "N/A"
-            lt = s.metric_labels.get("log_type", "all")
-            print(f"  - {s.metric_type} (log_type={lt}): {latest_val}")
+        print(f"Ingestion ({ingestion.metric_type}, {ingestion.alignment_period} buckets): {len(ingestion.series)} log types")
+        for s in ingestion.series:
+            latest_val = s.points[-1].value if s.points else "N/A"
+            print(f"  - log_type={s.log_type}: total={s.total:,} latest={latest_val} ({len(s.points)} points)")
 
         print(f"\nNormalizer Streams : {normalizer.total_series}")
         for s in normalizer.time_series:

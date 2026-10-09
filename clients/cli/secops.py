@@ -545,6 +545,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     feed_timestamp.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
     feed_timestamp.add_argument("--clear-cache", action="store_true", default=True, help="Bypass cache for live freshness (default: True)")
     feed_timestamp.add_argument("--json", action="store_true", help="Output as JSON")
+    feed_timestamp.add_argument("--no-persist", dest="persist", action="store_false", default=True, help="Do not write the report to the Evidence Fabric store (read-only run)")
 
     # Pipelines command
     pipeline_parser = subparsers.add_parser("pipeline", help="Explore Data Processing Pipelines and Bindplane SaaS integrations")
@@ -4077,7 +4078,7 @@ def run_feed_cli(args):
         clear_cache = args.clear_cache
         print(f"\n[CLI] Auditing Telemetry Timestamp Integrity ({days}-day window, clear_cache={clear_cache})...")
         try:
-            report = engine.audit_timestamp_integrity(days=days, clear_cache=clear_cache)
+            report = engine.audit_timestamp_integrity(days=days, clear_cache=clear_cache, persist=getattr(args, "persist", True))
             if getattr(args, "json", False):
                 print(json.dumps(report.to_dict(), indent=2))
                 return

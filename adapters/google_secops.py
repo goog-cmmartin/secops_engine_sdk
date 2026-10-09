@@ -1709,6 +1709,18 @@ class GoogleSecOpsAdapter:
             for ts_key in ("timestampVal", "timestampValue"):
                 if ts_key in val_obj and val_obj[ts_key] is not None:
                     return val_obj[ts_key]
+            # GoogleSQL DATE columns are returned as {"dateVal": {"year", "month", "day"}}
+            # (observed live 2026-10-09); normalise to ISO "YYYY-MM-DD".
+            for date_key in ("dateVal", "dateValue"):
+                date_obj = val_obj.get(date_key)
+                if isinstance(date_obj, dict) and date_obj.get("year"):
+                    return (
+                        f"{int(date_obj['year']):04d}-"
+                        f"{int(date_obj.get('month') or 0):02d}-"
+                        f"{int(date_obj.get('day') or 0):02d}"
+                    )
+                if isinstance(date_obj, str) and date_obj:
+                    return date_obj
             return None
 
         # Extract column names

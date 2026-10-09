@@ -2563,12 +2563,20 @@ class FeedBatch(UniversalBatchMixin):
 
 
 class FeedHealthStatus(str, Enum):
-    """Health classification status for an ingestion feed."""
+    """Health classification status for an ingestion feed.
+
+    ``INACTIVE`` covers feeds whose Chronicle ``Feed.state`` is ``INACTIVE``
+    (Health Hub reports these as ``Disabled_feed`` / "Feed is disabled"): the
+    feed is intentionally not collecting, so it is neither healthy nor failed.
+    ``UNKNOWN`` is used for ``STATE_UNSPECIFIED`` or any state value not in
+    the documented ``Feed.State`` enum.
+    """
     HEALTHY = "HEALTHY"
     IRREGULAR = "IRREGULAR"
     FAILED = "FAILED"
     HIGH_LATENCY = "HIGH_LATENCY"
     SILENT_PUSH_STOP = "SILENT_PUSH_STOP"
+    INACTIVE = "INACTIVE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -2590,20 +2598,43 @@ class FeedHealthFinding:
     quota_limit_mb_per_sec: float = 0.0
     anomaly_description: str = ""
     remediation_steps: List[str] = field(default_factory=list)
+    # Health Hub "Health Status by Data Source" row status for this feed
+    # (e.g. "Healthy" / "Warning" / "Critical"), None when no row matched.
+    health_hub_status: Optional[str] = None
+    # True when a Health Hub telemetry row was matched to this feed; False
+    # means the classification rests on Feed.state alone.
+    telemetry_observed: bool = False
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class FeedHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all ingestion feeds."""
+    """Comprehensive posture audit report for all ingestion feeds.
+
+    ``health_hub_available`` / ``deep_dive_available`` are False when the
+    corresponding curated dashboard could not be read or none of its target
+    charts executed; ``telemetry_errors`` lists every dashboard/chart failure.
+    A report with ``telemetry_available == False`` is a state-only audit, not
+    evidence that feeds are healthy.
+    """
     findings: List[FeedHealthFinding]
     healthy_count: int = 0
     irregular_count: int = 0
     failed_count: int = 0
     high_latency_count: int = 0
+    inactive_count: int = 0
+    unknown_count: int = 0
     quota_rejections_detected: int = 0
     total_feeds_audited: int = 0
+    health_hub_available: bool = False
+    deep_dive_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when both dashboards were read and no chart failed."""
+        return self.health_hub_available and self.deep_dive_available and not self.telemetry_errors
 
     @property
     def items(self) -> List[FeedHealthFinding]:
@@ -2653,7 +2684,11 @@ class ParserHealthFinding:
 
 @dataclass
 class ParserHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all SIEM parsers and extensions."""
+    """Comprehensive posture audit report for all SIEM parsers and extensions.
+
+    See ``FeedHealthReport`` for the meaning of the telemetry availability
+    fields; they are populated the same way for the parser charts.
+    """
     findings: List[ParserHealthFinding]
     healthy_count: int = 0
     irregular_count: int = 0
@@ -2662,7 +2697,15 @@ class ParserHealthReport(UniversalBatchMixin):
     extension_conflict_count: int = 0
     quota_rejections_detected: int = 0
     total_parsers_audited: int = 0
+    health_hub_available: bool = False
+    deep_dive_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when both dashboards were read and no chart failed."""
+        return self.health_hub_available and self.deep_dive_available and not self.telemetry_errors
 
     @property
     def items(self) -> List[ParserHealthFinding]:
@@ -4902,6 +4945,13 @@ class TimestampIntegrityReport(UniversalBatchMixin):
     top_skewed_log_types: List[TimestampMetricRow] = field(default_factory=list)
     narrative: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+    # Run metadata (not part of the persisted Evidence Fabric document).
+    persist_requested: bool = False
+    persisted: bool = False
+    persisted_snapshot_id: Optional[str] = None
+    persistence_error: Optional[str] = None
+    baseline_available: bool = False
+    baseline_error: Optional[str] = None
 
     def __post_init__(self):
         if not self.metrics and self.log_types:
@@ -4920,8 +4970,8 @@ class TimestampIntegrityReport(UniversalBatchMixin):
     def items(self) -> List[TimestampMetricRow]:
         return self.log_types
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    def to_dict(self, include_run_metadata: bool = True) -> Dict[str, Any]:
+        data = {
             "timestamp": self.timestamp,
             "days": self.days,
             "total_log_types_audited": self.total_log_types_audited,
@@ -4938,6 +4988,16 @@ class TimestampIntegrityReport(UniversalBatchMixin):
             "top_skewed_log_types": [lt.to_dict() for lt in self.top_skewed_log_types],
             "narrative": self.narrative,
         }
+        if include_run_metadata:
+            data["run_metadata"] = {
+                "persist_requested": self.persist_requested,
+                "persisted": self.persisted,
+                "persisted_snapshot_id": self.persisted_snapshot_id,
+                "persistence_error": self.persistence_error,
+                "baseline_available": self.baseline_available,
+                "baseline_error": self.baseline_error,
+            }
+        return data
 
 
 @dataclass

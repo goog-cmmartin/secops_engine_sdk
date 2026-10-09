@@ -7,6 +7,7 @@ Connects to Google SecOps curated dashboards:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -17,6 +18,8 @@ from engine.workflows.dashboards import (
     ExecuteDashboardQueryWorkflow,
     GetDashboardDetailWorkflow,
 )
+
+logger = logging.getLogger(__name__)
 
 # Dashboard UUIDs
 HEALTH_HUB_DASHBOARD_ID = "1b0cb92f-c162-424a-9d31-05b35180c8a5"
@@ -54,109 +57,176 @@ def resolve_collector_name(collector_id: str, log_type: str = "") -> str:
 
 @dataclass
 class DeepDiveTelemetry:
-    """Aggregated telemetry from Data Health Deep Dive and Health Hub dashboards."""
+    """Aggregated telemetry from Data Health Deep Dive and Health Hub dashboards.
+
+    ``available`` is True only when the dashboard was read and at least one
+    target chart executed. ``errors`` records every dashboard/chart failure so
+    callers can distinguish "no anomalies" from "no telemetry".
+    """
     collector_by_log_type: Dict[str, str] = field(default_factory=dict)
     parser_errors_by_log_type: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     volume_funnel_by_log_type: Dict[str, Dict[str, int]] = field(default_factory=dict)
     quota_rejected_volume_mb: Dict[str, float] = field(default_factory=dict)
     quota_limit_mb_per_sec: Dict[str, float] = field(default_factory=dict)
+    available: bool = False
+    errors: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DashboardChartRows:
+    """Rows of the target charts of one curated dashboard, plus failures."""
+    dashboard_id: str
+    dashboard_label: str
+    rows_by_key: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    available: bool = False
+
+
+def _num(value: Any) -> float:
+    """Converts a dashboard cell (int/float/numeric string/None) to float."""
+    if value is None or value == "":
+        return 0.0
+    return float(value)
+
+
+def collect_dashboard_chart_rows(
+    adapter: GoogleSecOpsAdapter,
+    dashboard_id: str,
+    dashboard_label: str,
+    chart_keys: List[str],
+) -> DashboardChartRows:
+    """Executes the dashboard charts whose display name contains one of ``chart_keys``.
+
+    Never raises for a single failed chart: each failure (dashboard unreadable,
+    expected chart missing, chart query error) is appended to ``errors`` and
+    logged. ``available`` is True when the dashboard was read and at least one
+    target chart executed successfully.
+    """
+    out = DashboardChartRows(dashboard_id=dashboard_id, dashboard_label=dashboard_label)
+    try:
+        dash_detail = GetDashboardDetailWorkflow(adapter).execute(dashboard_id, include_queries=False)
+    except Exception as e:
+        msg = f"{dashboard_label} ({dashboard_id}): dashboard unavailable: {type(e).__name__}: {e}"
+        logger.warning(msg)
+        out.errors.append(msg)
+        return out
+
+    exec_wf = ExecuteDashboardQueryWorkflow(adapter)
+    matched: Dict[str, bool] = {k: False for k in chart_keys}
+    for chart in dash_detail.charts:
+        c_name = (chart.display_name or "").lower().strip()
+        key = next((k for k in chart_keys if k in c_name), None)
+        if key is None or matched[key]:
+            continue
+        q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
+        matched[key] = True
+        if not q_name:
+            msg = f"{dashboard_label} chart '{chart.display_name}': no dashboardQuery bound to chart"
+            logger.warning(msg)
+            out.errors.append(msg)
+            continue
+        try:
+            res = exec_wf.execute(query_name_or_id=q_name)
+            out.rows_by_key[key] = list(res.rows)
+        except Exception as e:
+            msg = f"{dashboard_label} chart '{chart.display_name}' query failed: {type(e).__name__}: {e}"
+            logger.warning(msg)
+            out.errors.append(msg)
+
+    for key, found in matched.items():
+        if not found:
+            msg = f"{dashboard_label} ({dashboard_id}): expected chart matching '{key}' not found"
+            logger.warning(msg)
+            out.errors.append(msg)
+
+    out.available = bool(out.rows_by_key)
+    return out
+
+
+DEEP_DIVE_CHART_KEYS = [
+    "log count by collector id",
+    "parser error history",
+    "ingestion - events by status",
+    "burst rejection",
+    "burst limit graph",
+]
 
 
 def fetch_deep_dive_telemetry(adapter: GoogleSecOpsAdapter) -> DeepDiveTelemetry:
-    """Queries Data Health Deep Dive dashboard and returns structured telemetry."""
+    """Queries Data Health Deep Dive dashboard and returns structured telemetry.
+
+    Chart/dashboard failures are recorded in ``DeepDiveTelemetry.errors``.
+    """
     telemetry = DeepDiveTelemetry()
-    try:
-        get_dash_wf = GetDashboardDetailWorkflow(adapter)
-        dash_detail = get_dash_wf.execute(DATA_HEALTH_DEEP_DIVE_DASHBOARD_ID, include_queries=False)
-        exec_wf = ExecuteDashboardQueryWorkflow(adapter)
+    charts = collect_dashboard_chart_rows(
+        adapter, DATA_HEALTH_DEEP_DIVE_DASHBOARD_ID, "Data Health Deep Dive", DEEP_DIVE_CHART_KEYS
+    )
+    telemetry.errors.extend(charts.errors)
+    telemetry.available = charts.available
 
-        for chart in dash_detail.charts:
-            q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
-            if not q_name:
-                continue
+    def _map_rows(key: str, mapper) -> None:
+        rows = charts.rows_by_key.get(key)
+        if rows is None:
+            return
+        try:
+            for row in rows:
+                mapper(row)
+        except (TypeError, ValueError) as e:
+            msg = f"Data Health Deep Dive chart '{key}': unexpected row schema: {type(e).__name__}: {e}"
+            logger.warning(msg)
+            telemetry.errors.append(msg)
 
-            c_name = (chart.display_name or "").lower().strip()
+    # 1. Log Count By Collector Id & Log Type
+    def _collector(row: Dict[str, Any]) -> None:
+        lt = row.get("Log_Type") or row.get("log_type") or ""
+        c_name_val = row.get("collector_name") or ""
+        if lt and c_name_val and _num(row.get("total_logs")) > 0:
+            telemetry.collector_by_log_type[lt] = resolve_collector_name(c_name_val, lt)
 
-            # 1. Log Count By Collector Id & Log Type
-            if "log count by collector id" in c_name:
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("Log_Type") or row.get("log_type") or ""
-                        c_name_val = row.get("collector_name") or ""
-                        total_logs = int(row.get("total_logs") or 0)
-                        if lt and c_name_val and total_logs > 0:
-                            # Map collector
-                            telemetry.collector_by_log_type[lt] = resolve_collector_name(c_name_val, lt)
-                except Exception:
-                    pass
+    # 2. Parser Error History (Last 200 Errors)
+    def _parser_errors(row: Dict[str, Any]) -> None:
+        lt = row.get("log") or row.get("log_type") or ""
+        if lt:
+            telemetry.parser_errors_by_log_type.setdefault(lt, []).append(row)
 
-            # 2. Parser Error History (Last 200 Errors)
-            elif "parser error history" in c_name:
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("log") or row.get("log_type") or ""
-                        if lt:
-                            telemetry.parser_errors_by_log_type.setdefault(lt, []).append(row)
-                except Exception:
-                    pass
+    # 3. Ingestion - Events by Status (Funnel)
+    def _funnel(row: Dict[str, Any]) -> None:
+        lt = row.get("log_type") or ""
+        if not lt:
+            return
+        funnel = telemetry.volume_funnel_by_log_type.setdefault(lt, {
+            "total_logs": 0,
+            "validated_events": 0,
+            "normalized_events": 0,
+            "parsing_error_events": 0,
+            "validation_error_events": 0,
+            "indexing_error_events": 0,
+        })
+        funnel["total_logs"] += int(_num(row.get("Total_Logs")))
+        funnel["validated_events"] += int(_num(row.get("Total_Validated_Events")))
+        funnel["normalized_events"] += int(_num(row.get("Total_Normalized_Events")))
+        funnel["parsing_error_events"] += int(_num(row.get("Total_Parsing_Error_Events")))
+        funnel["validation_error_events"] += int(_num(row.get("Total_Validation_Error_Events")))
+        funnel["indexing_error_events"] += int(_num(row.get("Total_Indexing_Error_Events")))
 
-            # 3. Ingestion - Events by Status (Funnel)
-            elif "ingestion - events by status" in c_name:
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("log_type") or ""
-                        if not lt:
-                            continue
-                        if lt not in telemetry.volume_funnel_by_log_type:
-                            telemetry.volume_funnel_by_log_type[lt] = {
-                                "total_logs": 0,
-                                "validated_events": 0,
-                                "normalized_events": 0,
-                                "parsing_error_events": 0,
-                                "validation_error_events": 0,
-                                "indexing_error_events": 0,
-                            }
-                        funnel = telemetry.volume_funnel_by_log_type[lt]
-                        funnel["total_logs"] += int(row.get("Total_Logs") or 0)
-                        funnel["validated_events"] += int(row.get("Total_Validated_Events") or 0)
-                        funnel["normalized_events"] += int(row.get("Total_Normalized_Events") or 0)
-                        funnel["parsing_error_events"] += int(row.get("Total_Parsing_Error_Events") or 0)
-                        funnel["validation_error_events"] += int(row.get("Total_Validation_Error_Events") or 0)
-                        funnel["indexing_error_events"] += int(row.get("Total_Indexing_Error_Events") or 0)
-                except Exception:
-                    pass
+    # 4. Burst Rejection Graph
+    def _burst_rejection(row: Dict[str, Any]) -> None:
+        lt = row.get("log_type") or ""
+        vol = _num(row.get("Max_Of_Quota_Rejected_Log_Volume"))
+        if lt and vol > 0.0:
+            telemetry.quota_rejected_volume_mb[lt] = max(telemetry.quota_rejected_volume_mb.get(lt, 0.0), vol)
 
-            # 4. Burst Rejection Graph
-            elif "burst rejection" in c_name:
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("log_type") or ""
-                        vol = float(row.get("Max_Of_Quota_Rejected_Log_Volume") or 0.0)
-                        if lt and vol > 0.0:
-                            telemetry.quota_rejected_volume_mb[lt] = max(
-                                telemetry.quota_rejected_volume_mb.get(lt, 0.0), vol
-                            )
-                except Exception:
-                    pass
+    # 5. Burst Limit Graph - Quota Limit ("Qouta" is the live column spelling)
+    def _burst_limit(row: Dict[str, Any]) -> None:
+        lt = row.get("log_type") or ""
+        limit_val = _num(row.get("Max_Qouta_Limit_MB_Per_Second"))
+        if lt and limit_val > 0.0:
+            telemetry.quota_limit_mb_per_sec[lt] = max(telemetry.quota_limit_mb_per_sec.get(lt, 0.0), limit_val)
 
-            # 5. Burst Limit Graph - Quota Limit
-            elif "burst limit graph" in c_name:
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("log_type") or ""
-                        limit_val = float(row.get("Max_Qouta_Limit_MB_Per_Second") or 0.0)
-                        if lt and limit_val > 0.0:
-                            telemetry.quota_limit_mb_per_sec[lt] = max(
-                                telemetry.quota_limit_mb_per_sec.get(lt, 0.0), limit_val
-                            )
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    _map_rows("log count by collector id", _collector)
+    _map_rows("parser error history", _parser_errors)
+    _map_rows("ingestion - events by status", _funnel)
+    _map_rows("burst rejection", _burst_rejection)
+    _map_rows("burst limit graph", _burst_limit)
 
     return telemetry

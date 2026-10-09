@@ -4348,16 +4348,25 @@ class SecOpsEngine:
         days: int = 7,
         clear_cache: bool = True,
         project_id: Optional[str] = None,
+        persist: bool = True,
     ) -> TimestampIntegrityReport:
-        """Audits log sources for ingestion latency bottlenecks and NTP clock skews."""
+        """Audits log sources for ingestion latency bottlenecks and NTP clock skews.
+
+        ``persist=False`` skips the Evidence Fabric write (read-only run). Writes
+        only happen when the engine was constructed with an ``evidence_store``.
+        """
         return self._timestamp_integrity_wf.execute(
             days=days,
             clear_cache=clear_cache,
             project_id=project_id,
+            persist=persist,
         )
 
     def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
-        """Retrieves the latest stored timestamp integrity report from Evidence Fabric."""
+        """Retrieves the latest stored timestamp integrity report from Evidence Fabric (read-only).
+
+        Returns None when no evidence store is wired or no report has been stored.
+        """
         if not self.evidence_store:
             return None
         return self.evidence_store.get_latest_timestamp_integrity()

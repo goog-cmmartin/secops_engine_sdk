@@ -388,6 +388,11 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     cur_get = curated_sub.add_parser("get", help="Deep-inspect a Curated Rule Set, its deployments, and member rules")
     cur_get.add_argument("identifier", help="Curated Rule Set UUID, resource name, or title")
+    cur_get.add_argument("--no-rules", action="store_true", help="Skip the slow member-rule catalog scan")
+
+    cur_deps = curated_sub.add_parser("deployments", help="List every Curated Rule Set BROAD/PRECISE deployment (enabled, alerting) in one bulk call")
+    cur_deps.add_argument("--no-names", action="store_true", help="Skip the rule set display-name join")
+    cur_deps.add_argument("--json", action="store_true", help="Output raw JSON")
 
     cur_rule = curated_sub.add_parser("rule", help="Inspect a Curated Rule and extract its executable YARA-L logic")
     cur_rule.add_argument("rule_id", help="Curated Rule ID (e.g. 'ur_025628f0-af2d-4a52-b899-4de31928edfc') or title")
@@ -1001,6 +1006,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_list.add_argument("--filter", "-f", help="Filter expression (e.g. 'display_name:\"my_rule\"')")
     rule_list.add_argument("--view", choices=["BASIC", "FULL"], default="BASIC", help="Rule view (default: BASIC)")
     rule_list.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_list.add_argument("--all", action="store_true", help="Follow nextPageToken and list every rule (--limit is then the page size)")
     rule_list.add_argument("--json", action="store_true", help="Output raw JSON")
 
     rule_get = rule_sub.add_parser("get", help="Get detection rule details and YARA-L logic")
@@ -1045,7 +1051,19 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_errors = rule_sub.add_parser("errors", help="List runtime / execution errors across detection rules")
     rule_errors.add_argument("--rule", "-r", help="Optional Rule ID to filter errors by")
     rule_errors.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_errors.add_argument("--all", action="store_true", help="Follow nextPageToken and list every error (--limit is then the page size)")
+    rule_errors.add_argument("--since-days", type=int, help="Only errors whose timeRange.endTime is within N days (implies --all)")
     rule_errors.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_series = rule_sub.add_parser("series", help="Per-rule detection counts bucketed by hour or day (one dashboard query)")
+    rule_series.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
+    rule_series.add_argument("--bucket", choices=["hour", "day"], default="hour", help="Bucket size, UTC (default: hour)")
+    rule_series.add_argument("--rule", "-r", action="append", help="Rule ID to keep (repeatable)")
+    rule_series.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_envs = rule_sub.add_parser("environments", help="Rule -> SOAR environment join: distinct cases per (rule, case.environment)")
+    rule_envs.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
+    rule_envs.add_argument("--json", action="store_true", help="Output raw JSON")
 
     rule_audit = rule_sub.add_parser("audit", help="Unified detection repository health audit across customer & curated rules")
     rule_audit.add_argument("--no-curated", action="store_true", help="Exclude Google Curated rules from audit")
@@ -3249,7 +3267,9 @@ def run_curated_cli(args):
     elif args.curated_action == "get":
         print(f"\n[CLI] Deep-inspecting Curated Rule Set: '{args.identifier}'...")
         try:
-            detail = engine.get_curated_ruleset(args.identifier)
+            detail = engine.get_curated_ruleset(args.identifier, include_rules=not getattr(args, "no_rules", False))
+            for err in detail.errors:
+                print(f"  [!] partial read failure: {err}")
             rs = detail.rule_set
             tactics_str = ", ".join([f"{t.id} ({t.display_name})" for t in rs.tactics]) if rs.tactics else "None"
             techniques_str = ", ".join([f"{t.id} ({t.display_name})" for t in rs.techniques]) if rs.techniques else "None"
@@ -3285,6 +3305,26 @@ def run_curated_cli(args):
 
         except Exception as e:
             print(f"Error inspecting curated rule set: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.curated_action == "deployments":
+        try:
+            res = engine.list_curated_rule_set_deployments(include_display_names=not args.no_names)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_set_id": d.rule_set_id, "category_id": d.category_id, "display_name": d.display_name,
+                     "precision": d.precision, "enabled": d.enabled, "alerting": d.alerting}
+                    for d in res.deployments
+                ], indent=2))
+                return
+            print(f"\n=== CURATED RULE SET DEPLOYMENTS ({len(res.deployments)}) ===")
+            for d in res.deployments:
+                print(f"  {(d.display_name or d.rule_set_id)[:50]:50s} {d.precision:8s} enabled={d.enabled!s:5s} alerting={d.alerting}")
+            if res.provenance.get("display_name_error"):
+                print(f"  [!] display-name join failed: {res.provenance['display_name_error']}")
+            print()
+        except Exception as e:
+            print(f"Error listing curated deployments: {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.curated_action == "rule":
@@ -6124,10 +6164,12 @@ def run_rule_cli(args):
     if action == "list":
         print(f"\n[CLI] Listing Chronicle SIEM detection rules (limit={args.limit})...")
         try:
+            extra = {"all_pages": True} if getattr(args, "all", False) else {}
             res = engine.list_rules(
                 page_size=args.limit,
                 filter_expr=args.filter,
                 view=args.view,
+                **extra,
             )
             if getattr(args, "json", False):
                 print(json.dumps([r.__dict__ for r in res.rules], indent=2, default=str))
@@ -6308,7 +6350,14 @@ def run_rule_cli(args):
     elif action == "errors":
         print(f"\n[CLI] Listing rule execution errors (limit={args.limit})...")
         try:
-            res = engine.list_rule_errors(args.rule, page_size=args.limit)
+            since_days = getattr(args, "since_days", None)
+            since = datetime.now(timezone.utc) - timedelta(days=since_days) if since_days else None
+            extra = {}
+            if getattr(args, "all", False):
+                extra["all_pages"] = True
+            if since is not None:
+                extra["since"] = since
+            res = engine.list_rule_errors(args.rule, page_size=args.limit, **extra)
             if getattr(args, "json", False):
                 print(json.dumps([err.__dict__ for err in res.errors], indent=2, default=str))
                 return
@@ -6323,6 +6372,44 @@ def run_rule_cli(args):
             print()
         except Exception as e:
             print(f"Error listing rule errors: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "series":
+        print(f"\n[CLI] Detection series ({args.hours}h, bucket={args.bucket})...")
+        try:
+            res = engine.get_rule_detection_series(lookback_hours=args.hours, bucket=args.bucket, rule_ids=args.rule)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_id": s.rule_id, "rule_name": s.rule_name,
+                     "buckets": [[b.bucket_start.isoformat(), b.count] for b in s.buckets]}
+                    for s in res.series
+                ], indent=2))
+                return
+            print(f"\n=== DETECTION SERIES ({len(res.series)} rules, {res.total_detections} detections) ===")
+            for s in res.series:
+                spark = " ".join(str(b.count) for b in s.buckets)
+                print(f"  {s.rule_id:45s} {s.total:6d}  {s.rule_name[:40]:40s} [{spark[:60]}]")
+            print()
+        except Exception as e:
+            print(f"Error querying detection series: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "environments":
+        print(f"\n[CLI] Rule -> SOAR environment join ({args.days}d)...")
+        try:
+            res = engine.get_rule_case_environments(lookback_days=args.days)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_id": p.rule_id, "rule_name": p.rule_name, "environment": p.environment, "case_count": p.case_count}
+                    for p in res.pairs
+                ], indent=2))
+                return
+            print(f"\n=== RULE / ENVIRONMENT PAIRS ({len(res.pairs)}) ===")
+            for p in res.pairs:
+                print(f"  {p.rule_id:45s} {p.environment[:25]:25s} {p.case_count:6d}  {p.rule_name[:50]}")
+            print()
+        except Exception as e:
+            print(f"Error querying rule environments: {e}", file=sys.stderr)
             sys.exit(1)
 
     elif action == "audit":

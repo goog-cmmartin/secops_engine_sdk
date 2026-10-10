@@ -343,11 +343,23 @@ class RefinementProvenance:
 
 @dataclass
 class ValidationResult:
+    """Outcome of ``:validateQuery``.
+
+    ``valid=False`` means the server parsed the query and reported a compile
+    error (``errorType``/``errorText``). Transport, auth and quota failures are
+    raised, never folded into ``valid=False``.
+    """
 
     valid: bool
     dialect: str = "udm"
     raw_query_type: Optional[str] = None
     error_message: Optional[str] = None
+    # Server ``errorType`` enum (e.g. INVALID_QUERY_TYPE) when valid is False.
+    error_type: Optional[str] = None
+    # Server ``errorPosition``: {start_line, start_column, end_line, end_column}.
+    error_position: Optional[Dict[str, int]] = None
+    # Non-blocking ``warning`` returned for valid queries.
+    warning: Optional[str] = None
 
 
 def _to_camel_case(s: str) -> str:
@@ -512,11 +524,104 @@ class SearchBatchResult(UniversalBatchMixin):
     returned_end_index: int = 1
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     raw_response: Optional[Dict[str, Any]] = None
+    # Non-event part of the final streamSearch chunk (totals, timelines, field
+    # aggregations). Parsed into UdmSearchStats by the search workflow, which
+    # knows the request window needed to place timeline buckets.
+    search_stats_raw: Optional[Dict[str, Any]] = None
+    # True once the server reported the operation done / the event list
+    # complete; False while it is still running; None when the adapter does not
+    # report it (the workflow then consumes the batch as before).
+    operation_done: Optional[bool] = None
+    # Events dropped because the streamed chunks repeated them (same metadata.id).
+    duplicates_dropped: int = 0
 
     @property
     def batch_count(self) -> int:
         """Backward compatibility helper for emitted count."""
         return self.emitted_event_count
+
+
+# Server-side cap on the number of events a UDM search materializes. Observed
+# live 2026-10-10: availableResultCount/baselineEventsCount/filteredEventsCount
+# are all exactly 30000 with tooManyEvents=true for a query matching ~1.1 M events.
+UDM_SEARCH_SERVER_EVENT_CAP = 30000
+
+
+@dataclass
+class UdmTimelineBucket:
+    """One timeline bucket from a UDM search (start is UTC, aligned to the bucket size)."""
+
+    bucket_start: datetime
+    count: int = 0
+    baseline_count: int = 0
+
+
+@dataclass
+class UdmFieldValueCount:
+    """A value and its event count inside a UDM search field aggregation."""
+
+    value: Any = None
+    count: int = 0
+    baseline_count: int = 0
+
+
+@dataclass
+class UdmFieldAggregation:
+    """Top values for one UDM field, as returned by the search view.
+
+    ``values`` holds ``allValues`` when the server sent the full list, else
+    ``topValues`` (``too_many_values`` is then True). ``bottom_values`` is the
+    server's tail sample, kept separately.
+    """
+
+    field: str
+    event_count: int = 0
+    baseline_event_count: int = 0
+    value_count: int = 0
+    too_many_values: bool = False
+    values: List[UdmFieldValueCount] = field(default_factory=list)
+    bottom_values: List[UdmFieldValueCount] = field(default_factory=list)
+
+
+@dataclass
+class UdmSearchStats:
+    """Totals and aggregates the UDM search view returns alongside events.
+
+    All counts and aggregates are computed by the server over at most the first
+    ``UDM_SEARCH_SERVER_EVENT_CAP`` matching events. When ``too_many_events`` is
+    True the true match count is larger than ``total_matched`` and every
+    aggregate is a sample (``aggregates_sampled``).
+    """
+
+    total_matched: Optional[int] = None
+    baseline_count: Optional[int] = None
+    filtered_count: Optional[int] = None
+    available_count: Optional[int] = None
+    too_many_events: bool = False
+    timeline: List[UdmTimelineBucket] = field(default_factory=list)
+    timeline_bucket_seconds: Optional[int] = None
+    activity_timeline: List[UdmTimelineBucket] = field(default_factory=list)
+    activity_timeline_bucket_seconds: Optional[int] = None
+    field_aggregations: List[UdmFieldAggregation] = field(default_factory=list)
+    grouped_field_aggregations: List[UdmFieldAggregation] = field(default_factory=list)
+    server_event_cap: int = UDM_SEARCH_SERVER_EVENT_CAP
+
+    @property
+    def capped(self) -> bool:
+        """Alias: the server stopped materializing at its event cap."""
+        return self.too_many_events
+
+    @property
+    def aggregates_sampled(self) -> bool:
+        """Aggregates cover only the first ``server_event_cap`` matches."""
+        return self.too_many_events
+
+    def aggregation_for(self, name: str) -> Optional[UdmFieldAggregation]:
+        """Returns the aggregation for one field path, or None."""
+        for agg in self.field_aggregations:
+            if agg.field == name:
+                return agg
+        return None
 
 
 @dataclass
@@ -540,6 +645,18 @@ class SearchRequest:
     # search_udm.py). The client-side loop still trims to `receive_limit`, so raising
     materialize_budget: Optional[int] = None
     limit: Optional[int] = None
+    # Search-view options (previously hardcoded in the adapter).
+    case_insensitive: bool = True
+    # The SDK never parsed aiOverview, so generating it was pure cost; off by default.
+    generate_ai_overview: bool = False
+    max_values_per_field: int = 60
+    # Ask the server for detections (1000) and 15-min prevalence. Neither is
+    # parsed by search_udm; set both False for a lean, cheaper request.
+    include_detections: bool = True
+    include_prevalence: bool = True
+    # Field paths to keep in session.search_stats.field_aggregations
+    # (None = every field the server returned).
+    aggregation_fields: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.limit is not None:
@@ -561,6 +678,14 @@ class SearchSession:
     error: Optional[str] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
+    # Totals, timelines and field aggregations from the search view (None until
+    # the first batch carrying them arrives).
+    search_stats: Optional[UdmSearchStats] = None
+    # Duplicate events dropped across streamed chunks / batches (same metadata.id).
+    duplicates_dropped: int = 0
+    # Transient-error retries (429/5xx/network) the adapter performed for this
+    # session: [{"status", "attempt", "sleep_s", "path", "at"}].
+    api_retries: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def results(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
@@ -571,6 +696,42 @@ class SearchSession:
     def rows(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
         """Alias for events."""
         return self.events
+
+    @property
+    def total_matched(self) -> Optional[int]:
+        """Server match count (capped at UDM_SEARCH_SERVER_EVENT_CAP; see too_many_events)."""
+        return self.search_stats.total_matched if self.search_stats else None
+
+    @property
+    def available_count(self) -> Optional[int]:
+        """Events the server materialized and can page (availableResultCount)."""
+        return self.search_stats.available_count if self.search_stats else None
+
+    @property
+    def too_many_events(self) -> bool:
+        return bool(self.search_stats and self.search_stats.too_many_events)
+
+    @property
+    def capped(self) -> bool:
+        """True when the server hit its event cap; more events match than it returns."""
+        return self.too_many_events
+
+    @property
+    def aggregates_sampled(self) -> bool:
+        """True when timelines/field aggregations cover only the first capped events."""
+        return self.too_many_events
+
+    @property
+    def timeline(self) -> List[UdmTimelineBucket]:
+        return self.search_stats.timeline if self.search_stats else []
+
+    @property
+    def activity_timeline(self) -> List[UdmTimelineBucket]:
+        return self.search_stats.activity_timeline if self.search_stats else []
+
+    @property
+    def field_aggregations(self) -> List[UdmFieldAggregation]:
+        return self.search_stats.field_aggregations if self.search_stats else []
 
 
 @dataclass
@@ -686,6 +847,11 @@ class DashboardQueryResult(UniversalBatchMixin):
     last_cache_refreshed_time: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # The API has no "more rows" flag. Callers that control the query's row
+    # limit set these: ask for limit+1 rows, keep `limit`, and mark truncated.
+    # None means unknown (the query's limit was not set by the SDK).
+    requested_limit: Optional[int] = None
+    truncated: Optional[bool] = None
     
     @property
     def items(self) -> List[Dict[str, Any]]:
@@ -731,6 +897,88 @@ class DashboardQueryResult(UniversalBatchMixin):
 
 
 @dataclass
+class UdmAggregateRow:
+    """One cell of an aggregate_udm grid.
+
+    ``dims`` maps each group_by field path to its value (None when the event had
+    no value). ``bucket`` is the UTC start of the time bucket when a
+    ``time_bucket`` was requested. ``count`` is the event count, or the number
+    of distinct ``distinct_field`` values for ``metric="count_distinct"``.
+    """
+
+    dims: Dict[str, Optional[str]] = field(default_factory=dict)
+    bucket: Optional[datetime] = None
+    count: int = 0
+
+
+@dataclass
+class UdmAggregateResult:
+    """Grid returned by aggregate_udm (one synchronous dashboard SQL query)."""
+
+    dimensions: List[str] = field(default_factory=list)
+    rows: List[UdmAggregateRow] = field(default_factory=list)
+    # True when the server had more than `limit` rows (the SDK asks for limit+1).
+    truncated: bool = False
+    limit: int = 0
+    metric: str = "count"
+    distinct_field: Optional[str] = None
+    time_bucket: Optional[str] = None
+    filter: str = ""
+    query_text: str = ""
+    dialect: str = "SQL"
+    time_window: Dict[str, str] = field(default_factory=dict)
+    elapsed_s: float = 0.0
+    last_cache_refreshed_time: Optional[str] = None
+    api_retries: List[Dict[str, Any]] = field(default_factory=list)
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def total_count(self) -> int:
+        """Sum of row counts (per-value semantics for repeated fields; see aggregate_udm)."""
+        return sum(r.count for r in self.rows)
+
+
+@dataclass
+class UdmFieldValueMatch:
+    """One match from ``:findUdmFieldValues`` (a field path holding a matching value)."""
+
+    field_path: str
+    value: str
+    ingestion_time: Optional[datetime] = None
+    match_start: int = 0
+    match_end: int = 0
+
+
+@dataclass
+class UdmFieldValueMatches:
+    """Result of find_udm_field_values."""
+
+    query: str
+    matches: List[UdmFieldValueMatch] = field(default_factory=list)
+    has_more: bool = False
+    next_page_token: Optional[str] = None
+    field_match_regex: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UdmQueryTranslation:
+    """Result of translate_udm_query (natural language -> UDM search query)."""
+
+    text: str
+    query: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def time_range(self) -> Optional[Tuple[datetime, datetime]]:
+        if self.start_time and self.end_time:
+            return (self.start_time, self.end_time)
+        return None
+
+
+@dataclass
 class StatsSearchRequest:
     """Parameters for initiating a UDM Stats Search query."""
 
@@ -744,6 +992,10 @@ class StatsSearchRequest:
     customer_id: Optional[str] = None
     project_id: Optional[str] = None
     location: Optional[str] = None
+    # Detections / prevalence are never parsed by the stats workflow; set False
+    # for a lean request.
+    include_detections: bool = True
+    include_prevalence: bool = True
 
 
 @dataclass
@@ -799,6 +1051,8 @@ class RawLogValidationResult:
     query_type: str = ""
     is_valid: bool = True
     error_message: Optional[str] = None
+    # Server errorPosition {start_line, start_column, end_line, end_column}.
+    error_position: Optional[Dict[str, int]] = None
 
 
 @dataclass

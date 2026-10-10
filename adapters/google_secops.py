@@ -6,13 +6,15 @@ Google SecOps (Chronicle) REST & Long Running Operation (LRO) APIs.
 
 import base64
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from engine.auth import CredentialProvider
 from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
@@ -40,6 +42,133 @@ class SecOpsApiError(RuntimeError):
         super().__init__(f"Google SecOps API Error [{status}]: {message}")
         self.status = status
         self.api_message = message
+
+
+class QueryValidationUnavailableError(RuntimeError):
+    """``:validateQuery`` answered with BACKEND_ERROR_TYPE: the validator failed, not the query.
+
+    Raised instead of returning ``valid=False`` so callers never show a backend
+    outage as a syntax error.
+    """
+
+    def __init__(self, message: str, dialect: str):
+        super().__init__(f"Query validation backend error ({dialect}): {message}")
+        self.dialect = dialect
+
+
+# Query types each validator accepts as valid.
+UDM_SEARCH_QUERY_TYPES = ("QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY", "QUERY_TYPE_STATS_QUERY")
+STATS_QUERY_TYPES = ("QUERY_TYPE_STATS_QUERY", "QUERY_TYPE_UDM_QUERY")
+
+
+def parse_validate_query_response(
+    res: Any,
+    dialect: str,
+    accepted_types: Optional[Tuple[str, ...]] = None,
+) -> ValidationResult:
+    """Maps a ``:validateQuery`` 200 response onto ValidationResult.
+
+    Verified live 2026-10-10: compile errors come back as HTTP 200 with
+    ``errorType``/``errorText``/``errorPosition`` (line + column). Transport,
+    auth and quota failures are HTTP errors and are raised by ``_request``;
+    this function never sees them. ``BACKEND_ERROR_TYPE`` ("general backend
+    error") is a validator failure and raises QueryValidationUnavailableError.
+    """
+    if not isinstance(res, dict):
+        raise RuntimeError(f"Unexpected :validateQuery response shape: {type(res).__name__}")
+    query_type = res.get("queryType")
+    err_type = res.get("errorType")
+    err_text = res.get("errorText")
+    if err_type == "BACKEND_ERROR_TYPE":
+        raise QueryValidationUnavailableError(str(err_text or err_type), dialect)
+    pos_raw = res.get("errorPosition")
+    position = None
+    if isinstance(pos_raw, dict) and pos_raw:
+        position = {
+            "start_line": int(pos_raw.get("startLine", 0) or 0),
+            "start_column": int(pos_raw.get("startColumn", 0) or 0),
+            "end_line": int(pos_raw.get("endLine", 0) or 0),
+            "end_column": int(pos_raw.get("endColumn", 0) or 0),
+        }
+    if err_type or err_text:
+        return ValidationResult(
+            valid=False,
+            dialect=dialect,
+            raw_query_type=query_type,
+            error_message=str(err_text or err_type),
+            error_type=err_type,
+            error_position=position,
+        )
+    if accepted_types is not None and query_type not in accepted_types:
+        return ValidationResult(
+            valid=False,
+            dialect=dialect,
+            raw_query_type=query_type,
+            error_message=f"Query type {query_type or 'UNSPECIFIED'} is not accepted here (expected one of {', '.join(accepted_types)}).",
+            error_type="UNSUPPORTED_QUERY_TYPE",
+        )
+    return ValidationResult(
+        valid=True,
+        dialect=dialect,
+        raw_query_type=query_type,
+        warning=res.get("warning"),
+    )
+
+
+def _udm_event_id(ev: Any) -> Optional[str]:
+    """metadata.id of a streamed UDM search event ({"event": {...}} or bare UDM)."""
+    if not isinstance(ev, dict):
+        return None
+    inner = ev.get("event") if isinstance(ev.get("event"), dict) else ev
+    meta = inner.get("metadata") if isinstance(inner, dict) else None
+    if isinstance(meta, dict):
+        mid = meta.get("id")
+        return str(mid) if mid else None
+    return None
+
+
+def _select_final_stream_chunk(items: List[Dict[str, Any]], payload_key: str) -> Optional[Dict[str, Any]]:
+    """Picks the authoritative chunk from a ``:streamSearch`` response.
+
+    The stream returns cumulative snapshots: observed live 2026-10-10 as chunks
+    of (1, 100, 100 done) events for a 100-event page, and (5, 0, 5 done) in an
+    earlier probe. Concatenating them duplicated every event / stats row. The
+    last ``done`` chunk wins; otherwise the last chunk that carries
+    ``payload_key``; otherwise the last chunk.
+    """
+    if not items:
+        return None
+    done = [op for op in items if op.get("done") is True]
+    if done:
+        return done[-1]
+    with_payload = [op for op in items if (op.get("response", op) or {}).get(payload_key)]
+    if with_payload:
+        return with_payload[-1]
+    return items[-1]
+
+
+def _stream_operations(res: Any) -> List[Dict[str, Any]]:
+    """Normalizes a streamSearch response into operation dicts, raising on operation errors."""
+    raw_items = res if isinstance(res, list) else [res]
+    ops: List[Dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        op_obj = item.get("operation", item)
+        if not isinstance(op_obj, dict):
+            continue
+        if "error" in op_obj:
+            err = op_obj["error"]
+            err_code = err.get("code", "UNKNOWN") if isinstance(err, dict) else "UNKNOWN"
+            err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise RuntimeError(f"Google SecOps Operation Error [{err_code}]: {err_msg}")
+        ops.append(op_obj)
+    return ops
+
+
+# Response keys of the search view that are not events and not bulky
+# per-request extras the SDK does not parse.
+_SEARCH_STATS_EXCLUDED_KEYS = frozenset({"events", "operation", "@type", "detections", "aiOverview", "prevalence"})
 
 
 def _extract_error_message(error_body: str) -> str:
@@ -90,6 +219,10 @@ class GoogleSecOpsAdapter:
         self.api_base = self.config.api_base
         self.default_timeout = 35.0
         self._credential_provider = credential_provider or CredentialProvider()
+        self._retry_lock = threading.Lock()
+        self._retry_seq = 0
+        # Bounded log of transient-error retries (see _record_retry).
+        self.retry_log: Deque[Dict[str, Any]] = deque(maxlen=500)
 
     def _get_auth_token(self) -> str:
         """Acquires a valid Google Cloud access token for SecOps REST calls.
@@ -100,6 +233,54 @@ class GoogleSecOpsAdapter:
         ``engine/auth.py`` for the full resolution contract.
         """
         return self._credential_provider.get_token()
+
+    # ------------------------------------------------------------------
+    # Retry visibility. _request silently retried 429/5xx/network errors up to
+    # five times; the semantics are unchanged, but every retry is now logged at
+    # WARNING and recorded so workflows can attach it to their results
+    # (SearchSession.api_retries, UdmAggregateResult.api_retries).
+    # ------------------------------------------------------------------
+
+    def _record_retry(self, status: Any, attempt: int, sleep_s: float, url: str) -> None:
+        lock = getattr(self, "_retry_lock", None)
+        if lock is None:
+            self._retry_lock = lock = threading.Lock()
+            self._retry_seq = 0
+            self.retry_log = deque(maxlen=500)
+        path = url.split("?", 1)[0]
+        api_base = getattr(self, "api_base", None)
+        if api_base and path.startswith(api_base):
+            path = path[len(api_base):]
+        with lock:
+            self._retry_seq += 1
+            entry = {
+                "seq": self._retry_seq,
+                "status": status,
+                "attempt": attempt,
+                "sleep_s": sleep_s,
+                "path": path,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "thread": threading.get_ident(),
+            }
+            self.retry_log.append(entry)
+        logger.warning(
+            "Google SecOps transient error %s on %s (attempt %d); retrying in %.1fs",
+            status, path, attempt, sleep_s,
+        )
+
+    def retry_marker(self) -> int:
+        """Sequence number of the most recent recorded retry (pass to retries_since)."""
+        return getattr(self, "_retry_seq", 0)
+
+    def retries_since(self, marker: int, current_thread_only: bool = True) -> List[Dict[str, Any]]:
+        """Retries recorded after ``marker`` (optionally only for the calling thread)."""
+        log = list(getattr(self, "retry_log", []) or [])
+        tid = threading.get_ident()
+        return [
+            {k: v for k, v in e.items() if k not in ("seq", "thread")}
+            for e in log
+            if e["seq"] > marker and (not current_thread_only or e["thread"] == tid)
+        ]
 
     def _request(
         self,
@@ -141,6 +322,7 @@ class GoogleSecOpsAdapter:
                     self._credential_provider.invalidate()
                     continue
                 if e.code in [429, 502, 503, 504] and attempt < max_retries:
+                    self._record_retry(e.code, attempt, 2.5 * attempt, url)
                     time.sleep(2.5 * attempt)
                     continue
                 error_body = e.read().decode("utf-8")
@@ -148,6 +330,7 @@ class GoogleSecOpsAdapter:
                 raise SecOpsApiError(e.code, err_msg) from e
             except (TimeoutError, urllib.error.URLError) as e:
                 if attempt < max_retries:
+                    self._record_retry(f"network:{type(e).__name__}", attempt, 1.0 * attempt, url)
                     time.sleep(1.0 * attempt)
                     continue
                 raise RuntimeError(f"Network error connecting to Google SecOps: {e}") from e
@@ -155,32 +338,19 @@ class GoogleSecOpsAdapter:
         raise RuntimeError(f"Google SecOps API request to {url} failed after {max_retries} attempts.")
 
     def validate_query(self, query: str, dialect: str = "udm") -> ValidationResult:
-        """Translates query.validate domain operation to :validateQuery API."""
+        """Translates query.validate domain operation to :validateQuery API.
+
+        Returns ``valid=False`` only for compile errors reported by the server.
+        HTTP failures (network, auth, 429, 5xx) propagate as exceptions.
+        """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:validateQuery"
         params = {
             "dialect": "DIALECT_UDM_SEARCH",
             "allowUnreplacedPlaceholders": "false",
             "rawQuery": query,
         }
-        try:
-            res = self._request("GET", path, params=params)
-            query_type = res.get("queryType")
-            err_text = res.get("errorText") or res.get("errorType")
-            is_valid = query_type in ["QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY", "QUERY_TYPE_STATS_QUERY"] and not err_text
-            return ValidationResult(
-                valid=is_valid,
-                dialect="udm",
-                raw_query_type=query_type,
-                error_message=err_text if not is_valid else None,
-            )
-        except SecOpsConfigurationError:
-            raise
-        except Exception as e:
-            return ValidationResult(
-                valid=False,
-                dialect="udm",
-                error_message=str(e),
-            )
+        res = self._request("GET", path, params=params)
+        return parse_validate_query_response(res, dialect="udm", accepted_types=UDM_SEARCH_QUERY_TYPES)
 
     def start_search(
         self,
@@ -188,13 +358,25 @@ class GoogleSecOpsAdapter:
         start_time: str,
         end_time: str,
         max_events: int = 10000,
+        case_insensitive: bool = True,
+        generate_ai_overview: bool = True,
+        max_values_per_field: int = 60,
+        include_detections: bool = True,
+        include_prevalence: bool = True,
     ) -> str:
         """Translates search.start domain operation to legacyFetchUdmSearchView API.
+
+        The option defaults reproduce the body this method always sent before
+        they were parameters. ``include_detections=False`` /
+        ``include_prevalence=False`` / ``generate_ai_overview=False`` drop the
+        detection list (1000), 15-min prevalence and the AI overview from the
+        request (verified live 2026-10-10: the lean body still returns events,
+        totals, timelines and field aggregations).
 
         Returns normalized operation_id.
         """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacy:legacyFetchUdmSearchView"
-        body = {
+        body: Dict[str, Any] = {
             "baselineQuery": query,
             "baselineTimeRange": {
                 "startTime": start_time,
@@ -202,21 +384,23 @@ class GoogleSecOpsAdapter:
             },
             "snapshotQuery": None,
             "eventList": {"maxReturnedEvents": max_events},
-            "fieldAggregations": {"maxValuesPerField": 60},
-            "detectionOptions": {
-                "detectionList": {"maxReturnedDetections": 1000},
-                "snapshotQuery": 'feedback_summary.status != "CLOSED"',
-                "fieldAggregations": {"maxValuesPerField": 60},
-                "fetchNonAlertingDetections": True,
-            },
-            "prevalence": {
-                "bucketSize": {"resolutionInSeconds": 900},
-                "getPrevalence": True,
-            },
-            "caseInsensitive": True,
-            "generateAiOverview": True,
+            "fieldAggregations": {"maxValuesPerField": max_values_per_field},
+            "caseInsensitive": bool(case_insensitive),
+            "generateAiOverview": bool(generate_ai_overview),
             "returnOperationIdOnly": True,
         }
+        if include_detections:
+            body["detectionOptions"] = {
+                "detectionList": {"maxReturnedDetections": 1000},
+                "snapshotQuery": 'feedback_summary.status != "CLOSED"',
+                "fieldAggregations": {"maxValuesPerField": max_values_per_field},
+                "fetchNonAlertingDetections": True,
+            }
+        if include_prevalence:
+            body["prevalence"] = {
+                "bucketSize": {"resolutionInSeconds": 900},
+                "getPrevalence": True,
+            }
 
         res = self._request("POST", path, body=body)
         # Observed response: [{"operation": "projects/.../operations/s-udm-..."}]
@@ -254,60 +438,81 @@ class GoogleSecOpsAdapter:
         }
 
         res = self._request("GET", path, params=params)
-        all_events = []
-        more_data = False
-
-        if isinstance(res, list):
-            for item in res:
-                op_obj = item.get("operation", item)
-                if "error" in op_obj:
-                    err = op_obj["error"]
-                    err_code = err.get("code", "UNKNOWN")
-                    err_msg = err.get("message", str(err))
-                    raise RuntimeError(f"Google SecOps Operation Error [{err_code}]: {err_msg}")
-                resp_obj = op_obj.get("response", op_obj)
-                events_field = resp_obj.get("events", [])
-                if isinstance(events_field, dict):
-                    item_events = events_field.get("events", [])
-                    # Check terminal item complete / moreDataAvailable flag
-                    if events_field.get("moreDataAvailable") is True:
-                        more_data = True
-                    elif events_field.get("complete") is True:
-                        more_data = False
-                    elif events_field.get("complete") is False:
-                        more_data = True
-                elif isinstance(events_field, list):
-                    item_events = events_field
-                else:
-                    item_events = []
-
-                all_events.extend(item_events)
-
-                if resp_obj.get("moreDataAvailable") is True:
-                    more_data = True
-                elif resp_obj.get("complete") is True or op_obj.get("done") is True:
-                    more_data = False
-                elif op_obj.get("done") is False or resp_obj.get("complete") is False:
-                    more_data = True
-        elif isinstance(res, dict):
-            op_obj = res.get("operation", res)
-            if "error" in op_obj:
-                err = op_obj["error"]
-                err_code = err.get("code", "UNKNOWN")
-                err_msg = err.get("message", str(err))
-                raise RuntimeError(f"Google SecOps Operation Error [{err_code}]: {err_msg}")
-            resp_obj = op_obj.get("response", op_obj)
+        ops = _stream_operations(res)
+        final = _select_final_stream_chunk(ops, "events")
+        resp_obj: Dict[str, Any] = {}
+        events_field: Any = []
+        if final is not None:
+            resp_obj = final.get("response", final) or {}
             events_field = resp_obj.get("events", [])
-            if isinstance(events_field, dict):
-                all_events = events_field.get("events", [])
-                if events_field.get("moreDataAvailable") is True or events_field.get("complete") is False:
-                    more_data = True
-            elif isinstance(events_field, list):
-                all_events = events_field
-            else:
-                all_events = []
+        flags: Dict[str, Any] = {}
+        if isinstance(events_field, dict):
+            raw_events = events_field.get("events", []) or []
+            flags = {k: v for k, v in events_field.items() if k != "events"}
+        elif isinstance(events_field, list):
+            raw_events = events_field
+        else:
+            raw_events = []
 
-            more_data = more_data or resp_obj.get("moreDataAvailable", False) or not op_obj.get("done", True)
+        # Dedupe by metadata.id (defence in depth; the final chunk alone is
+        # already a full snapshot). Earlier chunks are snapshots of the same
+        # page; ids seen only there are appended so nothing is lost if the
+        # server ever streams increments instead.
+        seen: set = set()
+        all_events: List[Any] = []
+        dropped = 0
+        for ev in raw_events:
+            eid = _udm_event_id(ev)
+            if eid is not None and eid in seen:
+                dropped += 1
+                continue
+            if eid is not None:
+                seen.add(eid)
+            all_events.append(ev)
+        total_streamed = len(raw_events)
+        for op in ops:
+            if op is final:
+                continue
+            ef = (op.get("response", op) or {}).get("events", [])
+            chunk_events = ef.get("events", []) if isinstance(ef, dict) else (ef if isinstance(ef, list) else [])
+            total_streamed += len(chunk_events or [])
+            for ev in chunk_events or []:
+                eid = _udm_event_id(ev)
+                if eid is None or eid in seen:
+                    continue
+                if len(all_events) >= batch_size:
+                    break
+                seen.add(eid)
+                all_events.append(ev)
+        dropped = max(dropped, total_streamed - len(all_events))
+
+        # Done-ness: the operation finished, or the event list is complete.
+        done_flag = final.get("done") if final is not None else None
+        complete_flag = flags.get("complete", resp_obj.get("complete"))
+        if done_flag is True or complete_flag is True:
+            operation_done: Optional[bool] = True
+        elif done_flag is False or complete_flag is False or (final is not None and "done" not in final and "name" in final):
+            operation_done = False
+        else:
+            operation_done = None
+
+        available = resp_obj.get("availableResultCount")
+        try:
+            available_n = int(available) if available is not None else None
+        except (TypeError, ValueError):
+            available_n = None
+        if flags.get("moreDataAvailable") is True or resp_obj.get("moreDataAvailable") is True:
+            more_data = True
+        elif operation_done is False:
+            more_data = True
+        else:
+            # A full page means the next index range may hold more events,
+            # unless the server says fewer are available.
+            more_data = len(all_events) >= batch_size and (available_n is None or end_index < available_n)
+
+        stats_raw = {k: v for k, v in resp_obj.items() if k not in _SEARCH_STATS_EXCLUDED_KEYS}
+        if flags:
+            stats_raw["eventListFlags"] = flags
 
         wrapped_events = [UDMEvent(e) if isinstance(e, dict) and not isinstance(e, UDMEvent) else e for e in all_events]
 
@@ -325,6 +530,9 @@ class GoogleSecOpsAdapter:
             returned_end_index=start_index + len(all_events) - 1 if all_events else start_index,
             retrieved_at=datetime.now(timezone.utc),
             raw_response=res if isinstance(res, (dict, list)) else None,
+            search_stats_raw=stats_raw or None,
+            operation_done=operation_done,
+            duplicates_dropped=dropped,
         )
 
     def get_stats(
@@ -403,7 +611,12 @@ class GoogleSecOpsAdapter:
         progress = 1.0
         complete = True
 
-        items = res if isinstance(res, list) else [res]
+        # Only the authoritative chunk: the stream repeats cumulative snapshots,
+        # and extending columns across them duplicated every row (observed
+        # live: 490 rows for totalResults=245).
+        stream_ops = _stream_operations(res)
+        final_op = _select_final_stream_chunk(stream_ops, "stats")
+        items = [final_op] if final_op is not None else []
         for item in items:
             op_obj = item.get("operation", item) if isinstance(item, dict) else {}
             if "error" in op_obj:
@@ -596,7 +809,15 @@ class GoogleSecOpsAdapter:
         raw_query: str,
         allow_unreplaced_placeholders: bool = False,
     ) -> Dict[str, Any]:
-        """Validates raw log query syntax against Chronicle query engine."""
+        """Validates raw log query syntax against Chronicle query engine.
+
+        Dialect: ``DIALECT_UDM_SEARCH`` is correct for raw log search. Verified
+        live 2026-10-10: ``raw = "sshd"`` validates as
+        ``QUERY_TYPE_RAW_LOG_QUERY`` under this dialect, while a bare ``sshd``
+        or ``"sshd"`` is rejected both here and by ``:searchRawLogs`` itself
+        (HTTP 400). ``DIALECT_LEGACY`` rejects both forms. The validateQuery
+        Dialect enum has no raw-log value.
+        """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:validateQuery"
         params = {
             "allowUnreplacedPlaceholders": "true" if allow_unreplaced_placeholders else "false",
@@ -1808,32 +2029,19 @@ class GoogleSecOpsAdapter:
         raw_query: str,
         dialect: str = "DIALECT_STATS",
     ) -> ValidationResult:
-        """Validates statistical or widget query syntax."""
+        """Validates statistical or widget query syntax.
+
+        ``valid=False`` only for server-reported compile errors; HTTP failures
+        (network, auth, 429, 5xx) propagate as exceptions.
+        """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:validateQuery"
         params = {
             "dialect": dialect,
             "allowUnreplacedPlaceholders": "false",
             "rawQuery": raw_query,
         }
-        try:
-            res = self._request("GET", path, params=params)
-            query_type = res.get("queryType")
-            err_text = res.get("errorText") or res.get("errorType")
-            is_valid = (query_type in ["QUERY_TYPE_STATS_QUERY", "QUERY_TYPE_UDM_QUERY"]) and not err_text
-            return ValidationResult(
-                valid=is_valid,
-                dialect=dialect,
-                raw_query_type=query_type,
-                error_message=err_text if not is_valid else None,
-            )
-        except SecOpsConfigurationError:
-            raise
-        except Exception as e:
-            return ValidationResult(
-                valid=False,
-                dialect=dialect,
-                error_message=str(e),
-            )
+        res = self._request("GET", path, params=params)
+        return parse_validate_query_response(res, dialect=dialect, accepted_types=STATS_QUERY_TYPES)
 
     # -------------------------------------------------------------------------
     # Milestone 5.10: SIEM Settings, Feeds, Pipelines & Feed Schemas Methods
@@ -2607,27 +2815,73 @@ class GoogleSecOpsAdapter:
 
     def summarize_entity(
         self,
-        entity_id: str,
+        entity_id: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         return_alerts: bool = False,
         return_prevalence: bool = True,
         include_all_udm_event_types: bool = True,
+        field_value: Optional[str] = None,
+        value_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Summarizes entity metadata, timeline intervals, and prevalence."""
+        """Summarizes entity metadata, timeline intervals, and prevalence.
+
+        Look up by ``entity_id`` or by ``field_value`` + ``value_type`` (a
+        FieldAndValue.ValueType such as ``HOSTNAME`` or ``ASSET_IP_ADDRESS``;
+        both verified live 2026-10-10. ``IP``/``IP_ADDRESS`` are rejected).
+        """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:summarizeEntity"
-        clean_id = entity_id.split("/")[-1]
         params: Dict[str, Any] = {
-            "entityId": clean_id,
             "returnAlerts": "true" if return_alerts else "false",
             "returnPrevalence": "true" if return_prevalence else "false",
             "includeAllUdmEventTypesForFirstLastSeen": "true" if include_all_udm_event_types else "false",
         }
+        if entity_id:
+            params["entityId"] = entity_id.split("/")[-1]
+        elif field_value and value_type:
+            params["fieldAndValue.value"] = field_value
+            params["fieldAndValue.valueType"] = value_type
+        else:
+            raise ValueError("summarize_entity needs entity_id, or field_value and value_type.")
         if start_time:
             params["timeRange.startTime"] = start_time
         if end_time:
             params["timeRange.endTime"] = end_time
         return self._request("GET", path, params=params)
+
+    def find_udm_field_values(
+        self,
+        query: str,
+        page_size: int = 20,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """``GET :findUdmFieldValues``: UDM field paths whose recent values match ``query``.
+
+        Read-only (verified live 2026-10-10, 1.3 s). Response:
+        ``{valueMatches: [{fieldPath, value, ingestionTime, matchStart?, matchEnd}],
+        fieldMatchRegex, nextPageToken, hasMoreMatches}``.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:findUdmFieldValues"
+        params: Dict[str, Any] = {"query": query, "pageSize": int(page_size)}
+        if page_token:
+            params["pageToken"] = page_token
+        res = self._request("GET", path, params=params)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Unexpected :findUdmFieldValues response shape: {type(res).__name__}")
+        return res
+
+    def translate_udm_query(self, text: str) -> Dict[str, Any]:
+        """``POST :translateUdmQuery {text}``: natural language -> UDM search query.
+
+        Read-only (no tenant state is written; verified live 2026-10-10, 3.5-4.2 s).
+        Response: ``{query, timeRange?: {startTime, endTime}}``; ``timeRange`` is
+        omitted when the text names no time window.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:translateUdmQuery"
+        res = self._request("POST", path, body={"text": text})
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Unexpected :translateUdmQuery response shape: {type(res).__name__}")
+        return res
 
     # -------------------------------------------------------------------------
     # Chronicle SIEM Data Tables (projects.locations.instances.dataTables)

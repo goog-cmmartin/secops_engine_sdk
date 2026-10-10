@@ -20,6 +20,7 @@ Table of contents for project documentation and governance.
 - [reports/M1_CAPABILITY_REPORT.md](reports/M1_CAPABILITY_REPORT.md) — Milestone 1.1 capability & robustness report (UDM Search slice). Point-in-time record.
 - [discovery/observations/01_udm_search_discovery.md](discovery/observations/01_udm_search_discovery.md) — Live UDM search behavior/API observations.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.
+- [discovery/observations/07_search_read_observations.md](discovery/observations/07_search_read_observations.md) — Live UDM search reads: aggregate_udm (dashboard SQL), streamed-chunk dedupe, search totals/timelines/field aggregations, validator errors, findUdmFieldValues, translateUdmQuery, IoC IP enum.
 - [discovery/observations/detection_tuning_observations.md](discovery/observations/detection_tuning_observations.md) — Live Detection Tuning and UDM Findings Refinements observations.
 - [discovery/observations/mitre_attack_coverage_observations.md](discovery/observations/mitre_attack_coverage_observations.md) — Live MITRE ATT&CK coverage mapping, rules caching, and telemetry correlation observations.
 - [discovery/observations/cloud_status_observations.md](discovery/observations/cloud_status_observations.md) — Live Google Cloud SecOps service status incident feed and outage correlation observations.

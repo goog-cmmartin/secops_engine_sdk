@@ -5,7 +5,7 @@
 
 _Generated 2026-10-10 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**212 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**215 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -18,13 +18,13 @@ _Generated 2026-10-10 from `engine/registry.py` via `scripts/generate_capabiliti
 | :--- | ----: |
 | workflow | 41 |
 | primitive | 29 |
-| query | 142 |
-| **total** | **212** |
+| query | 145 |
+| **total** | **215** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 58 |
-| bounded | 17 |
+| single | 59 |
+| bounded | 19 |
 | unbounded | 67 |
 | (n/a — workflows/primitive) | 70 |
 
@@ -381,14 +381,17 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `rule.similarity.search` | query | `bounded` | `find_similar_rules` | Finds semantically similar detection rules using 768-d text-embedding-004 vectors and cosine similarity. |
 | `rule.verify` | query | `bounded` | `verify_rule_text` | Validates YARA-L 2.0 rule syntax against the Chronicle compiler. |
 
-### search  (4: workflow=3, query=1)
+### search  (7: workflow=3, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `search.from_entity` | workflow | — | `search_from_entity` | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | workflow | — | `refine_search` | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | workflow | — | `search_udm` | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
+| `search.udm.aggregate` | query | `bounded` | `aggregate_udm` | Counts UDM events grouped by 0-2 allow-listed fields and an optional hour/day bucket in one synchronous dashboard SQL query; restricted, injection-safe filter grammar; lookback <= 168 h, limit <= 2000 rows with truncation flag. |
+| `search.udm.field_values` | query | `bounded` | `find_udm_field_values` | Finds UDM field paths whose recent values match a text fragment (:findUdmFieldValues), for query autocomplete. |
 | `search.udm.stats` | query | `unbounded` | `search_udm_stats` | Validates, initiates, streams, and aggregates UDM statistics, match/outcome metrics, and multi-field grouping operations via LRO. |
+| `search.udm.translate` | query | `single` | `translate_udm_query` | Translates natural-language text into a UDM search query and optional time range (:translateUdmQuery). Does not run the query. |
 
 ### siem_settings  (7: workflow=1, query=6)
 

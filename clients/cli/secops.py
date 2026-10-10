@@ -72,6 +72,40 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     stats_parser.add_argument("--dedup", action="store_true", help="Deduplicate identical rows in the result set")
     stats_parser.add_argument("--case-sensitive", action="store_true", help="Perform case-sensitive matching")
 
+    # Bounded UDM aggregation (dashboard SQL)
+    agg_parser = subparsers.add_parser(
+        "search-aggregate",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Count UDM events by 0-2 allow-listed fields and an optional hour/day bucket",
+        description="""Count UDM events in one synchronous dashboard SQL query.
+
+Examples:
+  secops.py search-aggregate --group-by metadata.log_type --bucket hour --hours 24
+  secops.py search-aggregate --group-by principal.hostname --group-by metadata.event_type \\
+      --filter 'metadata.log_type = "WINEVTLOG"' --limit 50
+
+Filter grammar: field = "value" (also !=, <, <=, >, >=), AND / OR / NOT, parentheses,
+over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2 --group-by.""",
+    )
+    agg_parser.add_argument("--filter", default="", help='Restricted UDM predicate, e.g. \'metadata.event_type = "NETWORK_CONNECTION"\'')
+    agg_parser.add_argument("--group-by", action="append", help="Allow-listed UDM field (repeatable, max 2; default metadata.log_type)")
+    agg_parser.add_argument("--no-group", action="store_true", help="Single total (no group-by field)")
+    agg_parser.add_argument("--bucket", choices=["hour", "day"], help="UTC time bucket")
+    agg_parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24, max 168)")
+    agg_parser.add_argument("--limit", type=int, default=500, help="Max rows (default: 500, max 2000)")
+    agg_parser.add_argument("--distinct", help="Count distinct values of this scalar field instead of events")
+    agg_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+    agg_parser.add_argument("--show-query", action="store_true", help="Print the generated SQL")
+
+    fv_parser = subparsers.add_parser("field-values", help="Find UDM field paths whose recent values match text (autocomplete)")
+    fv_parser.add_argument("query", help="Text fragment to match")
+    fv_parser.add_argument("--limit", type=int, default=20, help="Page size (default: 20)")
+    fv_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    tr_parser = subparsers.add_parser("translate", help="Translate natural language into a UDM search query (does not run it)")
+    tr_parser.add_argument("text", help="Natural-language question")
+    tr_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # Investigate command
     inv_parser = subparsers.add_parser("investigate", help="Investigate a specific SecOps event and view Raw Log")
     inv_parser.add_argument("--event-id", "-id", required=True, help="Event ID (Base64 string)")
@@ -959,7 +993,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     ioc_search = ioc_sub.add_parser("search", help="Search enterprise-wide IoCs")
     ioc_search.add_argument("value", help="IoC value (hash, IP, domain, etc.)")
-    ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, IP_ADDRESS, DOMAIN_NAME)")
+    ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, ASSET_IP_ADDRESS, DOMAIN_NAME)")
     # Chronicle SIEM Data Tables command
     dt_parser = subparsers.add_parser("data-table", help="Manage Chronicle SIEM Data Tables and row entries")
     dt_sub = dt_parser.add_subparsers(dest="dt_action", required=True)
@@ -1230,6 +1264,12 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_search_cli(args)
     elif args.command in ("search-stats", "stats-search"):
         run_search_stats_cli(args)
+    elif args.command == "search-aggregate":
+        run_search_aggregate_cli(args)
+    elif args.command == "field-values":
+        run_field_values_cli(args)
+    elif args.command == "translate":
+        run_translate_cli(args)
     elif args.command == "investigate":
         run_investigate_cli(args)
     elif args.command == "entity-search":
@@ -6868,6 +6908,84 @@ def run_search_stats_cli(args):
         print(f"Session ID    : {session.session_id}")
         print(f"Total Rows    : {len(rows):,}")
         print(f"Duration      : {duration:.2f}s")
+
+
+def run_search_aggregate_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    group_by = [] if args.no_group else (args.group_by or ["metadata.log_type"])
+    try:
+        res = engine.aggregate_udm(
+            filter=args.filter,
+            group_by=group_by,
+            time_bucket=args.bucket,
+            lookback_hours=args.hours,
+            limit=args.limit,
+            metric="count_distinct" if args.distinct else "count",
+            distinct_field=args.distinct,
+        )
+    except ValueError as e:
+        print(f"Invalid aggregate request: {e}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(f"Aggregate query failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.show_query:
+        print(res.query_text, file=sys.stderr)
+    if args.json:
+        print(json.dumps({
+            "dimensions": res.dimensions,
+            "rows": [{"dims": r.dims, "bucket": r.bucket.isoformat() if r.bucket else None, "count": r.count} for r in res.rows],
+            "truncated": res.truncated,
+            "time_window": res.time_window,
+            "elapsed_s": res.elapsed_s,
+            "api_retries": res.api_retries,
+        }, indent=2))
+        return
+    headers = list(res.dimensions) + (["bucket"] if res.time_bucket else []) + ["count"]
+    print("\t".join(headers))
+    for r in res.rows:
+        cells = [str(r.dims.get(d)) for d in res.dimensions]
+        if res.time_bucket:
+            cells.append(r.bucket.isoformat() if r.bucket else "")
+        cells.append(str(r.count))
+        print("\t".join(cells))
+    note = " (truncated: more rows exist)" if res.truncated else ""
+    print(f"\n{len(res.rows)} rows in {res.elapsed_s:.1f}s{note}")
+    if res.api_retries:
+        print(f"Throttled/retried {len(res.api_retries)} time(s): {res.api_retries}", file=sys.stderr)
+
+
+def run_field_values_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    res = engine.find_udm_field_values(args.query, page_size=args.limit)
+    if args.json:
+        print(json.dumps([{"field_path": m.field_path, "value": m.value,
+                           "ingestion_time": m.ingestion_time.isoformat() if m.ingestion_time else None}
+                          for m in res.matches], indent=2))
+        return
+    for m in res.matches:
+        print(f"  {m.field_path:55s} {m.value}")
+    if res.has_more:
+        print("  (more matches available)")
+
+
+def run_translate_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    res = engine.translate_udm_query(args.text)
+    if args.json:
+        print(json.dumps({"query": res.query,
+                          "start_time": res.start_time.isoformat() if res.start_time else None,
+                          "end_time": res.end_time.isoformat() if res.end_time else None}, indent=2))
+        return
+    print(res.query)
+    if res.time_range:
+        print(f"time range: {res.start_time.isoformat()} .. {res.end_time.isoformat()}")
 
 
 if __name__ == "__main__":

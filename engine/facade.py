@@ -435,6 +435,9 @@ from engine.workflows.refine_search import (
 )
 from engine.workflows.search_udm import SearchUDMWorkflow
 from engine.workflows.search_udm_stats import SearchUDMStatsWorkflow
+from engine.workflows.udm_aggregate import AggregateUdmWorkflow
+from engine.workflows.udm_query_assist import FindUdmFieldValuesWorkflow, TranslateUdmQueryWorkflow
+from engine.domain import UdmAggregateResult, UdmFieldValueMatches, UdmQueryTranslation
 from engine.workflows.siem_settings import (
     GetAgentSettingsWorkflow,
     GetEntityRiskConfigWorkflow,
@@ -645,6 +648,9 @@ class SecOpsEngine:
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
         "_search_udm_stats_wf": lambda e: SearchUDMStatsWorkflow(e.adapter),
+        "_aggregate_udm_wf": lambda e: AggregateUdmWorkflow(e.adapter),
+        "_find_udm_field_values_wf": lambda e: FindUdmFieldValuesWorkflow(e.adapter),
+        "_translate_udm_query_wf": lambda e: TranslateUdmQueryWorkflow(e.adapter),
         "_query_product_source_stats_wf": lambda e: QueryProductSourceStatsWorkflow(e.adapter),
         "_validate_raw_log_query_wf": lambda e: ValidateRawLogQueryWorkflow(e.adapter),
         "_search_raw_logs_wf": lambda e: SearchRawLogsWorkflow(e.adapter),
@@ -897,6 +903,56 @@ class SecOpsEngine:
                 mcp_tool_name="search_udm_stats",
                 composed=False,
                 evidence_path="evidence/search/udm_stats",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.aggregate",
+                name="Aggregate UDM Events (Bounded Grid)",
+                description=(
+                    "Counts UDM events grouped by 0-2 allow-listed fields and an optional hour/day "
+                    "bucket in one synchronous dashboard SQL query; restricted, injection-safe filter "
+                    "grammar; lookback <= 168 h, limit <= 2000 rows with truncation flag."
+                ),
+                category="search",
+                handler=self.aggregate_udm,
+                mcp_tool_name="aggregate_udm",
+                composed=False,
+                # Explicit: "aggregate" is not a known read verb. One dashboard
+                # query with a hard row limit (<= 2000) -> bounded query.
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/search/udm_aggregate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.field_values",
+                name="Find UDM Field Values",
+                description="Finds UDM field paths whose recent values match a text fragment (:findUdmFieldValues), for query autocomplete.",
+                category="search",
+                handler=self.find_udm_field_values,
+                mcp_tool_name="find_udm_field_values",
+                composed=False,
+                # Explicit: read-only GET; one page capped by page_size (<= 1000).
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/search/udm_field_values",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.translate",
+                name="Translate Natural Language to UDM Query",
+                description="Translates natural-language text into a UDM search query and optional time range (:translateUdmQuery). Does not run the query.",
+                category="search",
+                handler=self.translate_udm_query,
+                mcp_tool_name="translate_udm_query",
+                composed=False,
+                # Explicit: read-only POST returning one translation.
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/search/udm_translate",
             )
         )
         self.registry.register(
@@ -3626,6 +3682,12 @@ class SecOpsEngine:
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
+        case_insensitive: bool = True,
+        generate_ai_overview: bool = False,
+        max_values_per_field: int = 60,
+        include_detections: bool = True,
+        include_prevalence: bool = True,
+        aggregation_fields: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> SearchSession:
         """Executes the canonical UDM Search workflow.
@@ -3634,6 +3696,19 @@ class SecOpsEngine:
         - Passing a pre-built SearchRequest: `engine.search_udm(request)`
         - Passing a query string positionally: `engine.search_udm("metadata.log_type = ...", start_time=..., end_time=...)`
         - Passing flat keyword arguments: `engine.search_udm(query="...", start_time="...", end_time="...")`
+
+        The session carries ``search_stats`` (also exposed as
+        ``total_matched``, ``available_count``, ``too_many_events``/``capped``,
+        ``timeline``, ``activity_timeline``, ``field_aggregations`` and
+        ``aggregates_sampled``). The server materializes at most 30 000
+        matches; with ``capped`` every count and aggregate is a sample.
+
+        Options: ``generate_ai_overview`` (default False; the SDK never parsed
+        the overview), ``case_insensitive`` (default True, as before),
+        ``include_detections`` / ``include_prevalence`` (default True; set
+        False for a lean, cheaper request), ``max_values_per_field`` and
+        ``aggregation_fields`` (subset of field paths to keep in
+        ``field_aggregations``; None keeps all).
         """
         if isinstance(request, SearchRequest):
             req = request
@@ -3657,6 +3732,12 @@ class SecOpsEngine:
                 project_id=project_id,
                 location=location,
                 materialize_budget=materialize_budget,
+                case_insensitive=case_insensitive,
+                generate_ai_overview=generate_ai_overview,
+                max_values_per_field=max_values_per_field,
+                include_detections=include_detections,
+                include_prevalence=include_prevalence,
+                aggregation_fields=list(aggregation_fields) if aggregation_fields is not None else None,
             )
 
         return self._search_udm_wf.execute(
@@ -3682,8 +3763,16 @@ class SecOpsEngine:
         cancel_token: Optional[Any] = None,
         poll_interval: float = 0.5,
         max_poll_seconds: float = 120.0,
+        include_detections: bool = True,
+        include_prevalence: bool = True,
     ) -> StatsSearchSession:
-        """Executes the canonical UDM Stats Search (Aggregation & Analytics) workflow."""
+        """Executes the canonical UDM Stats Search (Aggregation & Analytics) workflow.
+
+        ``case_insensitive``, ``generate_ai_overview``, ``max_values_per_field``,
+        ``include_detections`` and ``include_prevalence`` are sent to the
+        search view (they used to be ignored and hardcoded). With
+        ``case_insensitive=True`` grouped string values come back lower-cased.
+        """
         if isinstance(request, StatsSearchRequest):
             req = request
         else:
@@ -3703,6 +3792,8 @@ class SecOpsEngine:
                 case_insensitive=case_insensitive,
                 generate_ai_overview=generate_ai_overview,
                 max_values_per_field=max_values_per_field,
+                include_detections=include_detections,
+                include_prevalence=include_prevalence,
             )
 
         return self._search_udm_stats_wf.execute(
@@ -3713,6 +3804,70 @@ class SecOpsEngine:
             poll_interval=poll_interval,
             max_poll_seconds=max_poll_seconds,
         )
+
+    def aggregate_udm(
+        self,
+        filter: str = "",
+        group_by: Optional[List[str]] = None,
+        time_bucket: Optional[str] = None,
+        lookback_hours: int = 24,
+        limit: int = 500,
+        metric: str = "count",
+        distinct_field: Optional[str] = None,
+        start_time: Optional[Union[str, datetime]] = None,
+        end_time: Optional[Union[str, datetime]] = None,
+        clear_cache: Optional[bool] = None,
+    ) -> UdmAggregateResult:
+        """Counts UDM events by 0-2 allow-listed fields and an optional UTC hour/day bucket.
+
+        One synchronous ``dashboardQueries:execute`` call (GoogleSQL pipe
+        syntax). ``group_by`` defaults to ``["metadata.log_type"]``; pass ``[]``
+        for a single total. ``filter`` is a restricted UDM-search predicate
+        (``field = "value"``, ``!=``, ``<``/``<=``/``>``/``>=``, AND/OR/NOT,
+        parentheses) over the same allow-list, translated to SQL with escaped
+        literals; anything else raises ``UdmFilterError``. ``metric`` is
+        ``count`` or ``count_distinct`` (with a scalar ``distinct_field``).
+
+        Bounds (ValueError): lookback / window <= 168 h, 1 <= limit <= 2000,
+        at most 2 group_by fields. ``truncated`` is True when more than
+        ``limit`` rows exist (the SDK requests limit + 1). Query errors raise.
+        See ``engine/workflows/udm_aggregate.py`` for the allow-list and the
+        repeated-field (per-value) semantics.
+        """
+        return self._aggregate_udm_wf.execute(
+            filter=filter,
+            group_by=["metadata.log_type"] if group_by is None else group_by,
+            time_bucket=time_bucket,
+            lookback_hours=lookback_hours,
+            limit=limit,
+            metric=metric,
+            distinct_field=distinct_field,
+            start_time=start_time,
+            end_time=end_time,
+            clear_cache=clear_cache,
+        )
+
+    def find_udm_field_values(
+        self,
+        query: str,
+        page_size: int = 20,
+        page_token: Optional[str] = None,
+    ) -> UdmFieldValueMatches:
+        """Finds UDM field paths whose recent values match ``query`` (autocomplete).
+
+        Read-only ``GET :findUdmFieldValues``. Matches can come from any UDM
+        field (including user ids and registry values); project before showing
+        them to untrusted users.
+        """
+        return self._find_udm_field_values_wf.execute(query=query, page_size=page_size, page_token=page_token)
+
+    def translate_udm_query(self, text: str) -> UdmQueryTranslation:
+        """Translates natural language into a UDM search query (+ optional time range).
+
+        Read-only ``POST :translateUdmQuery``; does not run the query. Whether
+        it consumes Gemini quota is UNKNOWN.
+        """
+        return self._translate_udm_query_wf.execute(text=text)
 
     def query_product_source_stats(
         self,
@@ -5678,8 +5833,13 @@ class SecOpsEngine:
         end_time: Optional[str] = None,
         max_matches: int = 10000,
         add_mandiant_attributes: bool = True,
+        lookback_days: Optional[int] = None,
     ) -> EnterpriseIocBatch:
-        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator."""
+        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator.
+
+        Without ``start_time`` the window is all time (epoch), or the last
+        ``lookback_days`` when given. IPs auto-detect to ``ASSET_IP_ADDRESS``.
+        """
         return self._search_enterprise_iocs_wf.execute(
             value=value,
             value_type=value_type,
@@ -5687,20 +5847,29 @@ class SecOpsEngine:
             end_time=end_time,
             max_matches=max_matches,
             add_mandiant_attributes=add_mandiant_attributes,
+            lookback_days=lookback_days,
         )
 
     def summarize_entity(
         self,
-        entity_id: str,
+        entity_id: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         return_alerts: bool = False,
         return_prevalence: bool = True,
         include_all_udm_event_types: bool = True,
+        field_value: Optional[str] = None,
+        value_type: Optional[str] = None,
     ) -> EntitySummaryResult:
-        """Retrieves entity summary profile, timeline intervals, and prevalence."""
+        """Retrieves entity summary profile, timeline intervals, and prevalence.
+
+        Look up by ``entity_id`` or by ``field_value`` (+ ``value_type``, e.g.
+        HOSTNAME / ASSET_IP_ADDRESS; auto-detected when omitted).
+        """
         return self._summarize_entity_wf.execute(
             entity_id=entity_id,
+            field_value=field_value,
+            value_type=value_type,
             start_time=start_time,
             end_time=end_time,
             return_alerts=return_alerts,

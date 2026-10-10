@@ -298,16 +298,32 @@ class AnalyzeMitreCoverageWorkflow:
         sync_cache_if_empty: bool = True,
         time_unit: str = "DAY",
         time_value: str = "7",
+        persist: bool = True,
     ) -> MitreCoverageAssessment:
+        """Computes MITRE coverage from the cached rule states and live ingestion telemetry.
+
+        ``persist=False`` performs no writes: the empty-cache sync (which saves
+        rule states) is skipped and the assessment is not saved. Note that
+        constructing this workflow without an explicit ``store`` calls
+        ``get_evidence_store()``, whose Firestore connectivity probe writes a
+        ``system_configs/connectivity_check`` document when Firestore is
+        reachable; pass a store to avoid it.
+        """
         logger.info("Executing MITRE ATT&CK Strategic Coverage Analysis (profile=%s)...", profile_id)
 
         # 1. Fetch rules from Firestore cache
         rules = self.store.list_rule_states(limit=10000)
         if not rules and sync_cache_if_empty:
-            logger.info("No cached rules found in EvidenceFabricStore. Initiating sync...")
-            sync_wf = SyncMitreRulesWorkflow(self.adapter, self.store)
-            sync_wf.execute()
-            rules = self.store.list_rule_states(limit=10000)
+            if persist:
+                logger.info("No cached rules found in EvidenceFabricStore. Initiating sync...")
+                sync_wf = SyncMitreRulesWorkflow(self.adapter, self.store)
+                sync_wf.execute()
+                rules = self.store.list_rule_states(limit=10000)
+            else:
+                logger.warning(
+                    "MITRE rule cache is empty and persist=False: skipping the cache sync (it writes rule "
+                    "states); coverage is computed from 0 cached rules."
+                )
 
         # 2. Query live tenant ingestion telemetry
         ingested_log_types: List[str] = []
@@ -455,10 +471,11 @@ class AnalyzeMitreCoverageWorkflow:
         )
 
         # 7. Persist to store
-        try:
-            self.store.save_mitre_assessment(assessment.to_dict())
-        except Exception as ex:
-            logger.warning("Could not persist MITRE assessment to store: %s", ex)
+        if persist:
+            try:
+                self.store.save_mitre_assessment(assessment.to_dict())
+            except Exception as ex:
+                logger.warning("Could not persist MITRE assessment to store: %s", ex)
 
         return assessment
 

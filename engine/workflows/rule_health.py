@@ -3,12 +3,17 @@
 Orchestrates comprehensive health auditing for Chronicle YARA-L detection rules,
 curated rulesets, compilation errors, execution errors, latency observability,
 and detection decay across Google SecOps.
+
+Error visibility: inventory reads (rules, deployments, execution errors) raise.
+Telemetry reads (per-rule detection counts, curated deployments/counts, the two
+curated dashboards) are recorded in ``RuleHealthReport.telemetry_errors`` with
+per-source availability flags, so a failed read is never reported as healthy.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
@@ -19,9 +24,9 @@ from engine.domain import (
     RuleHealthReport,
     RuleHealthStatus,
     RuleSummary,
-    RuleDetail,
     RuleExecutionError,
 )
+from engine.workflows.curated_detections import ListCuratedRuleSetDeploymentsWorkflow
 from engine.workflows.dashboards import (
     ExecuteDashboardQueryWorkflow,
     GetDashboardDetailWorkflow,
@@ -30,8 +35,8 @@ from engine.workflows.detection_rules import (
     ListRulesWorkflow,
     ListRuleDeploymentsWorkflow,
     ListRuleErrorsWorkflow,
-    GetRuleWorkflow,
 )
+from engine.workflows.rule_decay import QueryRuleDetectionCountsWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +55,29 @@ class AuditRuleHealthWorkflow:
         include_curated: bool = True,
         latency_threshold_min: float = 30.0,
         page_size: int = 100,
+        error_lookback_days: Optional[int] = None,
     ) -> RuleHealthReport:
-        """Executes full rule health audit correlating live rules, errors, and dashboard telemetry."""
-        # 1. Fetch custom rules
-        list_rules_wf = ListRulesWorkflow(self.adapter)
-        custom_rules_res = list_rules_wf.execute(page_size=page_size)
-        rules = custom_rules_res.rules
+        """Executes full rule health audit correlating live rules, errors, and telemetry.
 
-        # 2. Fetch execution errors
-        list_errors_wf = ListRuleErrorsWorkflow(self.adapter)
-        errors_res = list_errors_wf.execute(page_size=100)
-        errors = errors_res.errors
+        Args:
+            include_curated: Also classify curated rule sets from their real
+                precision deployments.
+            latency_threshold_min: HIGH_LATENCY threshold (ingestion -> detection).
+            page_size: Page size for the rule list; all pages are always read.
+            error_lookback_days: Only count execution errors whose
+                ``timeRange.endTime`` is within this many days. None (default,
+                backward compatible) counts the full error history the API returns.
+        """
+        started = datetime.now(timezone.utc)
+        telemetry_errors: List[str] = []
 
-        # Map errors by rule id or name
+        # 1. Custom rules (all pages). Raises on failure.
+        rules = ListRulesWorkflow(self.adapter).execute(page_size=page_size, all_pages=True).rules
+
+        # 2. Execution errors (all pages, optional window). Raises on failure.
+        since = started - timedelta(days=error_lookback_days) if error_lookback_days else None
+        errors = ListRuleErrorsWorkflow(self.adapter).execute(page_size=1000, all_pages=True, since=since).errors
+
         errors_by_rule: Dict[str, List[RuleExecutionError]] = {}
         for err in errors:
             r_key = (err.rule_resource_name or "").split("/")[-1].split("@")[0].lower()
@@ -70,74 +85,62 @@ class AuditRuleHealthWorkflow:
                 r_key = err.curated_rule.split("/")[-1].split("@")[0].lower()
             if r_key:
                 errors_by_rule.setdefault(r_key, []).append(err)
-                base_key = r_key.split("@")[0]
-                if base_key != r_key:
-                    errors_by_rule.setdefault(base_key, []).append(err)
 
-        # 3. Collect Telemetry from Rule Detections Overview & Rule Observability
-        telemetry = self._collect_rule_dashboard_telemetry()
+        # 3. Deployments (all pages). Raises on failure: enabled/alerting cannot be guessed.
         deployments_by_rule = self._collect_deployments()
 
-        # 4. Evaluate each rule
+        # 4. Telemetry (recorded, never swallowed).
+        detection_counts, detection_counts_available = self._collect_detection_counts(telemetry_errors)
+        telemetry = self._collect_rule_dashboard_telemetry(telemetry_errors)
+
         findings: List[RuleHealthFinding] = []
-        healthy_count = 0
-        failing_count = 0
-        decay_count = 0
-        latency_alert_count = 0
-        misconfigured_count = 0
-        disabled_count = 0
-
-        # Correlate custom rules
         for rule in rules:
-            finding = self._evaluate_rule(
-                rule=rule,
-                errors_by_rule=errors_by_rule,
-                telemetry=telemetry,
-                latency_threshold_min=latency_threshold_min,
-                deployment=deployments_by_rule.get((rule.name or "").split("/")[-1]),
+            findings.append(
+                self._evaluate_rule(
+                    rule=rule,
+                    errors_by_rule=errors_by_rule,
+                    telemetry=telemetry,
+                    latency_threshold_min=latency_threshold_min,
+                    deployment=deployments_by_rule.get(rule.rule_id),
+                    detection_counts=detection_counts,
+                )
             )
-            findings.append(finding)
+        custom_count = len(findings)
 
-            if finding.status == RuleHealthStatus.HEALTHY:
-                healthy_count += 1
-            elif finding.status in (RuleHealthStatus.EXECUTION_ERROR, RuleHealthStatus.COMPILATION_ERROR):
-                failing_count += 1
-            elif finding.status == RuleHealthStatus.SILENT_DECAY:
-                decay_count += 1
-            elif finding.status == RuleHealthStatus.HIGH_LATENCY:
-                latency_alert_count += 1
-            elif finding.status == RuleHealthStatus.MISCONFIGURED_ALERTING:
-                misconfigured_count += 1
-            elif finding.status == RuleHealthStatus.DISABLED:
-                disabled_count += 1
-
-        # Optionally correlate curated rulesets if requested
+        curated_available = False
         if include_curated:
-            curated_findings = self._evaluate_curated_rulesets(telemetry=telemetry)
-            for cf in curated_findings:
-                findings.append(cf)
-                if cf.status == RuleHealthStatus.HEALTHY:
-                    healthy_count += 1
-                elif cf.status in (RuleHealthStatus.EXECUTION_ERROR, RuleHealthStatus.COMPILATION_ERROR):
-                    failing_count += 1
-                elif cf.status == RuleHealthStatus.SILENT_DECAY:
-                    decay_count += 1
-                elif cf.status == RuleHealthStatus.DISABLED:
-                    disabled_count += 1
+            curated_findings, curated_available = self._evaluate_curated_rulesets(telemetry_errors)
+            findings.extend(curated_findings)
+
+        counts = {status: 0 for status in RuleHealthStatus}
+        for f in findings:
+            counts[f.status] += 1
 
         return RuleHealthReport(
             findings=findings,
-            healthy_count=healthy_count,
-            failing_count=failing_count,
-            decay_count=decay_count,
-            latency_alert_count=latency_alert_count,
-            misconfigured_count=misconfigured_count,
-            disabled_count=disabled_count,
+            healthy_count=counts[RuleHealthStatus.HEALTHY],
+            failing_count=counts[RuleHealthStatus.EXECUTION_ERROR] + counts[RuleHealthStatus.COMPILATION_ERROR],
+            decay_count=counts[RuleHealthStatus.SILENT_DECAY],
+            latency_alert_count=counts[RuleHealthStatus.HIGH_LATENCY],
+            misconfigured_count=counts[RuleHealthStatus.MISCONFIGURED_ALERTING],
+            disabled_count=counts[RuleHealthStatus.DISABLED],
+            unknown_count=counts[RuleHealthStatus.UNKNOWN],
             total_rules_audited=len(findings),
-            total_detections_24h=telemetry.get("total_detections", 0),
+            custom_rules_audited=custom_count,
+            curated_rulesets_audited=len(findings) - custom_count,
+            total_detections_24h=sum(detection_counts.values()),
+            rules_firing_24h=sum(1 for v in detection_counts.values() if v > 0),
+            execution_errors_considered=len(errors),
+            error_lookback_days=error_lookback_days,
             average_risk_score=telemetry.get("average_risk_score", 0.0),
             top_mitre_tactics=telemetry.get("top_mitre_tactics", []),
             top_threat_categories=telemetry.get("top_threat_categories", []),
+            detection_counts_available=detection_counts_available,
+            overview_dashboard_available=telemetry.get("overview_available", False),
+            observability_dashboard_available=telemetry.get("observability_available", False),
+            curated_available=curated_available,
+            telemetry_errors=telemetry_errors,
+            duration_s=round((datetime.now(timezone.utc) - started).total_seconds(), 2),
             generated_at=datetime.now(timezone.utc),
         )
 
@@ -148,59 +151,64 @@ class AuditRuleHealthWorkflow:
         telemetry: Dict[str, Any],
         latency_threshold_min: float,
         deployment: Optional[Any] = None,
+        detection_counts: Optional[Dict[str, int]] = None,
     ) -> RuleHealthFinding:
         """Evaluates health status, latency, detection volume, and error diagnostics for a rule."""
         rule_id = rule.name.split("/")[-1].split("@")[0] if rule.name else ""
         rule_id_lower = rule_id.lower()
         rule_display_lower = (rule.display_name or "").lower()
 
-        # Check execution errors
         rule_errors = errors_by_rule.get(rule_id_lower, [])
-        if not rule_errors and rule_display_lower:
-            rule_errors = errors_by_rule.get(rule_display_lower, [])
-
         last_error_msg = rule_errors[0].error_message if rule_errors else None
         exec_error_count = len(rule_errors)
 
-        # Check telemetry detection counts
-        detection_counts_by_name = telemetry.get("detection_counts_by_name", {})
-        detection_count = detection_counts_by_name.get(rule_display_lower, 0)
-        if detection_count == 0:
-            detection_count = detection_counts_by_name.get(rule_id_lower, 0)
+        # Per-rule 24h detection count, keyed by rule_id (not display name).
+        detection_count = int((detection_counts or {}).get(rule_id, 0))
 
-        # Check latency telemetry
         latencies_by_name = telemetry.get("latencies_by_name", {})
         lat_info = latencies_by_name.get(rule_display_lower) or latencies_by_name.get(rule_id_lower)
         ingestion_latency = lat_info.get("ingestion_to_detection") if lat_info else None
         event_latency = lat_info.get("event_to_detection") if lat_info else None
 
-        # Check least active decay set
         least_active_set = telemetry.get("least_active_rules", set())
         is_in_decay_set = (rule_display_lower in least_active_set) or (rule_id_lower in least_active_set)
 
-        # Determine status and remediation
         remediations: List[str] = []
         status = RuleHealthStatus.HEALTHY
         details = "Rule is operating normally."
 
-        # Deployment & enabled status
         if deployment is not None:
             is_enabled = bool(deployment.enabled)
             is_alerting = bool(deployment.alerting)
+            run_frequency = deployment.run_frequency
         elif "enabled" in rule.raw:
             is_enabled = bool(rule.raw["enabled"])
             is_alerting = bool(rule.raw.get("alerting", True))
+            run_frequency = rule.run_frequency or rule.raw.get("runFrequency") or "UNKNOWN"
         elif rule.raw.get("executionState") in ("PAUSED", "DISABLED"):
             is_enabled = False
             is_alerting = bool(rule.raw.get("alerting", False))
-        else:
+            run_frequency = rule.run_frequency or "UNKNOWN"
+        elif rule.run_frequency or rule.raw.get("executionState"):
+            # Legacy fallback (no deployment record): infer from the rule's own fields.
             is_enabled = bool(
                 rule.run_frequency in ("LIVE", "HOURLY", "DAILY")
                 or rule.raw.get("executionState") == "ACTIVE"
             )
             is_alerting = bool(rule.raw.get("alerting", True))
+            run_frequency = rule.run_frequency or "UNKNOWN"
+        else:
+            # No deployment record and no state on the rule (the live Rule
+            # resource never carries runFrequency): unknown, not "disabled".
+            is_enabled = False
+            is_alerting = False
+            run_frequency = "UNKNOWN"
+            status = RuleHealthStatus.UNKNOWN
+            details = f"No deployment record found for rule '{rule.display_name}'; enabled/alerting state is unknown."
 
-        if not is_enabled:
+        if status == RuleHealthStatus.UNKNOWN:
+            pass
+        elif not is_enabled:
             status = RuleHealthStatus.DISABLED
             details = f"Rule '{rule.display_name}' is currently disabled or has no active run frequency."
             remediations.append("Review rule logic and enable rule execution if detection coverage is required.")
@@ -228,11 +236,11 @@ class AuditRuleHealthWorkflow:
             rule_id=rule_id,
             display_name=rule.display_name or rule_id,
             rule_owner="CUSTOMER",
-            severity=rule.severity or "MEDIUM",
+            severity=rule.severity,
             status=status,
             enabled=is_enabled,
             alerting=is_alerting,
-            run_frequency=rule.run_frequency or "LIVE",
+            run_frequency=run_frequency,
             detection_count_recent=detection_count,
             execution_error_count=exec_error_count,
             last_error_message=last_error_msg,
@@ -244,169 +252,202 @@ class AuditRuleHealthWorkflow:
         )
 
     def _collect_deployments(self) -> Dict[str, Any]:
-        """Maps rule_id -> RuleDeployment across all pages. Empty on failure."""
-        out: Dict[str, Any] = {}
-        wf = ListRuleDeploymentsWorkflow(self.adapter)
-        token: Optional[str] = None
+        """Maps rule_id -> RuleDeployment across all pages. Raises on failure."""
+        res = ListRuleDeploymentsWorkflow(self.adapter).execute(page_size=1000, all_pages=True)
+        return {dep.rule_id: dep for dep in res.deployments if dep.rule_id}
+
+    def _collect_detection_counts(self, telemetry_errors: List[str]) -> "tuple[Dict[str, int], bool]":
+        """Per-rule detection counts over the last day (custom and curated rule IDs)."""
         try:
-            for _ in range(50):
-                res = wf.execute(page_size=1000, page_token=token)
-                for dep in res.deployments:
-                    if dep.rule_id:
-                        out[dep.rule_id] = dep
-                token = res.next_page_token
-                if not token:
-                    break
+            raw = QueryRuleDetectionCountsWorkflow(self.adapter).execute(lookback_days=1)
         except Exception as exc:
-            logger.warning("Rule deployment listing failed; enabled/alerting state unknown: %s", exc)
-        return out
+            msg = f"Per-rule detection count query (1d) failed: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
+            return {}, False
+        return {rid: int(v.get("count", 0)) for rid, v in raw.items()}, True
 
-    def _evaluate_curated_rulesets(self, telemetry: Dict[str, Any]) -> List[RuleHealthFinding]:
-        """Evaluates status of Google curated ruleset categories and deployments."""
-        curated_findings: List[RuleHealthFinding] = []
+    def _evaluate_curated_rulesets(self, telemetry_errors: List[str]) -> "tuple[List[RuleHealthFinding], bool]":
+        """Classifies curated rule sets from their real BROAD/PRECISE deployments.
+
+        A rule set is enabled when any precision is enabled, alerting when any
+        enabled precision alerts. If the deployment list cannot be read, every
+        rule set is reported as UNKNOWN (not DISABLED).
+        """
         try:
-            if hasattr(self.adapter, "list_curated_rulesets"):
-                resp = self.adapter.list_curated_rulesets()
-                rulesets = resp.get("curatedRuleSets", []) or resp.get("ruleSets", [])
-                for rs in rulesets:
-                    rs_id = rs.get("name", "").split("/")[-1] or rs.get("id", "")
-                    title = rs.get("title") or rs.get("displayName") or rs_id
-                    enabled = bool(rs.get("enabled", False) or rs.get("deploymentState") == "ENABLED")
-                    alerting = bool(rs.get("alerting", False))
-
-                    status = RuleHealthStatus.HEALTHY if enabled else RuleHealthStatus.DISABLED
-                    details = "Curated ruleset is enabled and active." if enabled else "Curated ruleset is disabled."
-                    remediations = []
-                    if not enabled:
-                        remediations.append(f"Enable curated ruleset '{title}' to activate Google out-of-the-box detection coverage.")
-
-                    curated_findings.append(
-                        RuleHealthFinding(
-                            rule_id=rs_id,
-                            display_name=title,
-                            rule_owner="GOOGLE",
-                            severity="HIGH",
-                            status=status,
-                            enabled=enabled,
-                            alerting=alerting,
-                            run_frequency="LIVE",
-                            details=details,
-                            remediation_steps=remediations,
-                            raw=rs,
-                        )
-                    )
+            dep_res = ListCuratedRuleSetDeploymentsWorkflow(self.adapter).execute(include_display_names=True)
         except Exception as exc:
-            logger.warning(f"Could not audit curated rulesets: {exc}")
+            msg = f"Curated rule set deployment listing failed: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
+            return [], False
 
-        return curated_findings
+        by_set: Dict[str, List[Any]] = {}
+        names: Dict[str, str] = {}
+        for d in dep_res.deployments:
+            by_set.setdefault(d.rule_set_id, []).append(d)
+            if d.display_name:
+                names[d.rule_set_id] = d.display_name
+        missing_names = dep_res.provenance.get("display_name_error")
+        if missing_names:
+            telemetry_errors.append(f"Curated rule set catalog (display names) unavailable: {missing_names}")
 
-    def _collect_rule_dashboard_telemetry(self) -> Dict[str, Any]:
-        """Extracts detection counts, latencies, MITRE tactics, and decay metrics from native dashboards."""
+        set_counts: Dict[str, int] = {}
+        counts_ok = True
+        try:
+            now = datetime.now(timezone.utc)
+            res = self.adapter.count_curated_ruleset_detections(
+                (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            )
+            for c in (res.get("curatedRuleSetCounts", []) if isinstance(res, dict) else []):
+                set_counts[str(c.get("curatedRuleSet", "")).split("/")[-1]] = int(c.get("count", 0))
+        except Exception as exc:
+            counts_ok = False
+            msg = f"Curated rule set detection counts (1d) failed: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
+
+        findings: List[RuleHealthFinding] = []
+        for rs_id, deps in sorted(by_set.items()):
+            title = names.get(rs_id) or rs_id
+            enabled_precisions = sorted(d.precision for d in deps if d.enabled)
+            alerting_precisions = sorted(d.precision for d in deps if d.enabled and d.alerting)
+            enabled = bool(enabled_precisions)
+            alerting = bool(alerting_precisions)
+            remediations: List[str] = []
+            if enabled:
+                status = RuleHealthStatus.HEALTHY
+                details = (
+                    f"Curated rule set enabled ({', '.join(enabled_precisions)}); "
+                    f"alerting: {', '.join(alerting_precisions) or 'none'}."
+                )
+            else:
+                status = RuleHealthStatus.DISABLED
+                details = "Curated rule set is disabled for every precision."
+                remediations.append(f"Enable curated ruleset '{title}' to activate Google out-of-the-box detection coverage.")
+            findings.append(
+                RuleHealthFinding(
+                    rule_id=rs_id,
+                    display_name=title,
+                    rule_owner="GOOGLE",
+                    severity="UNKNOWN",
+                    status=status,
+                    enabled=enabled,
+                    alerting=alerting,
+                    run_frequency="LIVE" if enabled else "UNKNOWN",
+                    detection_count_recent=set_counts.get(rs_id, 0) if counts_ok else 0,
+                    details=details,
+                    remediation_steps=remediations,
+                    raw={"deployments": [d.raw for d in deps]},
+                )
+            )
+        return findings, True
+
+    def _collect_rule_dashboard_telemetry(self, telemetry_errors: List[str]) -> Dict[str, Any]:
+        """Latencies, least-active rules, risk score, MITRE tactics and threat categories from curated dashboards.
+
+        Every dashboard/chart failure is appended to ``telemetry_errors``;
+        ``overview_available`` / ``observability_available`` are True only when
+        the dashboard was read and at least one target chart executed.
+        """
         telemetry: Dict[str, Any] = {
-            "detection_counts_by_name": {},
             "latencies_by_name": {},
             "least_active_rules": set(),
             "top_mitre_tactics": [],
             "top_threat_categories": [],
             "average_risk_score": 0.0,
-            "total_detections": 0,
+            "overview_available": False,
+            "observability_available": False,
         }
 
-        # Query 1: Rule Detections Overview Dashboard
-        try:
-            get_dash_wf = GetDashboardDetailWorkflow(self.adapter)
-            overview_dash = get_dash_wf.execute(RULE_DETECTIONS_OVERVIEW_DASHBOARD_ID, include_queries=False)
-            exec_wf = ExecuteDashboardQueryWorkflow(self.adapter)
+        def run(label: str, q_name: str):
+            try:
+                return ExecuteDashboardQueryWorkflow(self.adapter).execute(query_name_or_id=q_name)
+            except Exception as exc:
+                msg = f"Dashboard chart '{label}' failed: {type(exc).__name__}: {exc}"
+                logger.warning(msg)
+                telemetry_errors.append(msg)
+                return None
 
+        # Rule Detections Overview
+        try:
+            overview_dash = GetDashboardDetailWorkflow(self.adapter).execute(
+                RULE_DETECTIONS_OVERVIEW_DASHBOARD_ID, include_queries=False
+            )
+        except Exception as exc:
+            msg = f"Rule Detections Overview dashboard unavailable: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
+            overview_dash = None
+        if overview_dash is not None:
             for chart in overview_dash.charts:
                 q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
                 if not q_name:
                     continue
-
                 c_name = (chart.display_name or "").lower()
-
-                # Target Top Active Rules
-                if "top 10 active rules" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
-                        for row in res.rows:
-                            r_name = (row.get("Rulename") or row.get("rule_name") or "").lower()
-                            count_val = int(row.get("Count") or row.get("count") or 0)
-                            if r_name:
-                                telemetry["detection_counts_by_name"][r_name] = count_val
-                                telemetry["total_detections"] += count_val
-                    except Exception as e:
-                        logger.debug(f"Failed to execute Top Active Rules query: {e}")
-
-                # Target Least Active Rules
-                elif "least 10 active rules" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
+                if "least 10 active rules" in c_name:
+                    res = run(chart.display_name, q_name)
+                    if res is not None:
+                        telemetry["overview_available"] = True
                         for row in res.rows:
                             r_name = (row.get("Rulename") or row.get("rule_name") or "").lower()
                             if r_name:
                                 telemetry["least_active_rules"].add(r_name)
-                    except Exception as e:
-                        logger.debug(f"Failed to execute Least Active Rules query: {e}")
-
-                # Target Average Risk Score
                 elif "average risk score" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
+                    res = run(chart.display_name, q_name)
+                    if res is not None:
+                        telemetry["overview_available"] = True
                         if res.rows:
-                            score_val = float(res.rows[0].get("Average_Risk_Score") or res.rows[0].get("risk_score") or 0.0)
-                            telemetry["average_risk_score"] = score_val
-                    except Exception as e:
-                        logger.debug(f"Failed to execute Average Risk Score query: {e}")
-
-                # Target MITRE Tactics
+                            telemetry["average_risk_score"] = float(
+                                res.rows[0].get("Average_Risk_Score") or res.rows[0].get("risk_score") or 0.0
+                            )
                 elif "mitre" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
+                    res = run(chart.display_name, q_name)
+                    if res is not None:
+                        telemetry["overview_available"] = True
                         telemetry["top_mitre_tactics"] = res.rows[:10]
-                    except Exception as e:
-                        logger.debug(f"Failed to execute MITRE query: {e}")
-
-                # Target Threat Categories
                 elif "threat categories" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
+                    res = run(chart.display_name, q_name)
+                    if res is not None:
+                        telemetry["overview_available"] = True
                         telemetry["top_threat_categories"] = res.rows[:10]
-                    except Exception as e:
-                        logger.debug(f"Failed to execute Threat Categories query: {e}")
 
-        except Exception as exc:
-            logger.warning(f"Could not query Rule Detections Overview dashboard: {exc}")
-
-        # Query 2: Rule Observability Dashboard
+        # Rule Observability
         try:
-            get_dash_wf = GetDashboardDetailWorkflow(self.adapter)
-            obs_dash = get_dash_wf.execute(RULE_OBSERVABILITY_DASHBOARD_ID, include_queries=False)
-            exec_wf = ExecuteDashboardQueryWorkflow(self.adapter)
-
+            obs_dash = GetDashboardDetailWorkflow(self.adapter).execute(
+                RULE_OBSERVABILITY_DASHBOARD_ID, include_queries=False
+            )
+        except Exception as exc:
+            msg = f"Rule Observability dashboard unavailable: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
+            obs_dash = None
+        if obs_dash is not None:
             for chart in obs_dash.charts:
                 q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
                 if not q_name:
                     continue
-
                 c_name = (chart.display_name or "").lower()
                 if "per-detection latency" in c_name or "latency numbers" in c_name:
-                    try:
-                        res = exec_wf.execute(query_name_or_id=q_name)
-                        for row in res.rows:
-                            r_name = (row.get("rule_name") or row.get("Rulename") or "").lower()
+                    res = run(chart.display_name, q_name)
+                    if res is None:
+                        continue
+                    telemetry["observability_available"] = True
+                    for row in res.rows:
+                        r_name = (row.get("rule_name") or row.get("Rulename") or "").lower()
+                        if not r_name:
+                            continue
+                        try:
                             ingest_to_det = float(row.get("ingestion_to_detection") or 0.0)
                             event_to_det = float(row.get("event_to_deteciton") or row.get("event_to_detection") or 0.0)
-                            if r_name:
-                                telemetry["latencies_by_name"][r_name] = {
-                                    "ingestion_to_detection": ingest_to_det,
-                                    "event_to_detection": event_to_det,
-                                    "detect_id": row.get("detect_id", ""),
-                                }
-                    except Exception as e:
-                        logger.debug(f"Failed to execute Per-Detection Latency query: {e}")
-
-        except Exception as exc:
-            logger.warning(f"Could not query Rule Observability dashboard: {exc}")
+                        except (TypeError, ValueError) as exc:
+                            telemetry_errors.append(f"Unparseable latency row for '{r_name}': {exc}")
+                            continue
+                        telemetry["latencies_by_name"][r_name] = {
+                            "ingestion_to_detection": ingest_to_det,
+                            "event_to_detection": event_to_det,
+                            "detect_id": row.get("detect_id", ""),
+                        }
 
         return telemetry

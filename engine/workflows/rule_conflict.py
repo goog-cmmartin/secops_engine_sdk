@@ -353,20 +353,34 @@ class FindSimilarRulesWorkflow:
             from agents.core.evidence_store import get_evidence_store
             self.store = get_evidence_store()
 
-    def execute(self, rule_id: str, limit: int = 6) -> List[Dict[str, Any]]:
-        """Queries Evidence Fabric vector store for top semantically similar rules."""
+    def execute(
+        self,
+        rule_id: str,
+        limit: int = 6,
+        auto_embed: bool = True,
+        persist: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Queries Evidence Fabric vector store for top semantically similar rules.
+
+        Args:
+            auto_embed: On a cache miss, embed the target rule and search with
+                that vector. False = read the existing vector store only.
+            persist: Save the fresh embedding (default, previous behaviour).
+                False = search with it without writing anything.
+        """
         similar = self.store.find_similar_rules(target_rule_id=rule_id, limit=limit)
-        if not similar:
+        if not similar and auto_embed:
             try:
                 target_rule = self.adapter.get_rule(rule_id)
                 summary = synthesize_rule_summary(target_rule)
                 vecs = self.store.generate_rule_embeddings([summary])
                 if vecs:
-                    self.store.save_rule_embeddings(rule_id, vecs[0], {
-                        "rule_id": rule_id,
-                        "rule_name": getattr(target_rule, "rule_name", rule_id),
-                        "summary": summary,
-                    })
+                    if persist:
+                        self.store.save_rule_embeddings(rule_id, vecs[0], {
+                            "rule_id": rule_id,
+                            "rule_name": getattr(target_rule, "rule_name", rule_id),
+                            "summary": summary,
+                        })
                     similar = self.store.find_similar_rules(target_rule_id=rule_id, embedding=vecs[0], limit=limit)
             except Exception as ex:
                 logger.warning("Could not auto-embed target rule %s: %s", rule_id, ex)

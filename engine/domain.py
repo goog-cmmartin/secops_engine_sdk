@@ -2157,13 +2157,18 @@ class CuratedRuleSummary:
 
 @dataclass
 class CuratedRuleDetail:
-    """Complete composite for a Curated Rule, including raw YARA-L logic."""
+    """Complete composite for a Curated Rule, including raw YARA-L logic.
+
+    ``errors`` lists sub-reads that failed (e.g. the Content Hub rule text
+    lookup); the affected fields are then empty because they are unknown.
+    """
     rule: CuratedRuleSummary
     rule_text: str = ""
     live_status_enabled: bool = False
     tactics: List[MitreAttackMapping] = field(default_factory=list)
     techniques: List[MitreAttackMapping] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -2186,12 +2191,19 @@ class CuratedRuleSetSummary:
 
 @dataclass
 class CuratedRuleSetDetail:
-    """Deep-inspection composite for a Curated Rule Set."""
+    """Deep-inspection composite for a Curated Rule Set.
+
+    ``errors`` lists failed sub-reads (deployments, detection_count,
+    member_rules). ``rules_checked`` is False when member rules were not
+    requested or their read failed, so an empty ``rules`` is not "no members".
+    """
     rule_set: CuratedRuleSetSummary
     rules: List[CuratedRuleSummary] = field(default_factory=list)
     deployments: List[CuratedRuleSetDeployment] = field(default_factory=list)
     detection_count: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    rules_checked: bool = False
 
 
 @dataclass
@@ -2211,6 +2223,70 @@ class CuratedRuleSetBatch(UniversalBatchMixin):
     results: List[CuratedRuleSetSummary]
     total_count: int
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CuratedRuleSetDeploymentRecord:
+    """One precision deployment (BROAD/PRECISE) of a Curated Rule Set.
+
+    Read from the bulk ``curatedRuleSets/-/curatedRuleSetDeployments`` list.
+    The API omits false booleans (proto3), so a missing ``enabled`` /
+    ``alerting`` maps to False. The list response carries no display name;
+    ``display_name`` is filled from the rule set catalog when the caller asks
+    for the join, and is "" otherwise.
+    """
+    rule_set_id: str
+    category_id: str
+    precision: str
+    enabled: bool = False
+    alerting: bool = False
+    display_name: str = ""
+    resource_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def armed(self) -> bool:
+        """Enabled and alerting (detections create alerts)."""
+        return self.enabled and self.alerting
+
+
+@dataclass
+class CuratedRuleSetDeploymentListResult(UniversalBatchMixin):
+    """All curated rule set precision deployments in the tenant."""
+    deployments: List[CuratedRuleSetDeploymentRecord] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSetDeploymentRecord]:
+        return self.deployments
+
+
+@dataclass
+class CuratedRuleSetListResult(UniversalBatchMixin):
+    """Curated Rule Sets read from ``curatedRuleSetCategories/-/curatedRuleSets``."""
+    rule_sets: List[CuratedRuleSetSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSetSummary]:
+        return self.rule_sets
+
+
+@dataclass
+class CuratedRuleListResult(UniversalBatchMixin):
+    """Curated rules read from ``curatedRules`` (slow: ~20 s per 100-1000 page)."""
+    rules: List[CuratedRuleSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSummary]:
+        return self.rules
 
 
 @dataclass
@@ -2749,7 +2825,16 @@ class RuleHealthFinding:
 
 @dataclass
 class RuleHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets."""
+    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets.
+
+    ``total_detections_24h`` is the sum of per-rule detection counts over the
+    last day for every rule that fired (custom ``ru_`` and curated ``ur_``),
+    from one ``detection.detection.rule_id`` dashboard query.
+    ``detection_counts_available`` is False when that query failed; then every
+    ``detection_count_recent`` is 0 *because it is unknown*. The other
+    ``*_available`` flags cover the curated deployments/counts and the two
+    curated dashboards; ``telemetry_errors`` lists every failure.
+    """
     findings: List[RuleHealthFinding]
     healthy_count: int = 0
     failing_count: int = 0
@@ -2757,12 +2842,34 @@ class RuleHealthReport(UniversalBatchMixin):
     latency_alert_count: int = 0
     misconfigured_count: int = 0
     disabled_count: int = 0
+    unknown_count: int = 0
     total_rules_audited: int = 0
+    custom_rules_audited: int = 0
+    curated_rulesets_audited: int = 0
     total_detections_24h: int = 0
+    rules_firing_24h: int = 0
+    execution_errors_considered: int = 0
+    error_lookback_days: Optional[int] = None
     average_risk_score: float = 0.0
     top_mitre_tactics: List[Dict[str, Any]] = field(default_factory=list)
     top_threat_categories: List[Dict[str, Any]] = field(default_factory=list)
+    detection_counts_available: bool = False
+    overview_dashboard_available: bool = False
+    observability_dashboard_available: bool = False
+    curated_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
+    duration_s: float = 0.0
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when per-rule counts and both dashboards were read without errors."""
+        return (
+            self.detection_counts_available
+            and self.overview_dashboard_available
+            and self.observability_dashboard_available
+            and not self.telemetry_errors
+        )
 
     @property
     def items(self) -> List[RuleHealthFinding]:
@@ -2771,7 +2878,14 @@ class RuleHealthReport(UniversalBatchMixin):
 
 @dataclass
 class RuleDecayAssessment:
-    """Detailed decay risk assessment and telemetry health evaluation for a single detection rule."""
+    """Detailed decay risk assessment and telemetry health evaluation for a single detection rule.
+
+    ``compile_checked`` is True only when ``verifyRuleText`` actually ran for
+    the rule; ``compile_check_error`` explains why it did not (API failure or
+    missing rule text). ``population_check_errors`` maps UDM fields whose
+    population query failed to the error; those fields are not counted as
+    unpopulated.
+    """
     rule_id: str
     rule_name: str
     dps_score: int
@@ -2784,12 +2898,21 @@ class RuleDecayAssessment:
     unpopulated_fields: List[str] = field(default_factory=list)
     compiler_errors: List[str] = field(default_factory=list)
     recommendation: str = "KEEP_ACTIVE"
+    compile_checked: bool = False
+    compile_check_error: Optional[str] = None
+    population_check_errors: Dict[str, str] = field(default_factory=dict)
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RuleDecayReport(UniversalBatchMixin):
-    """Tenant-wide report summarizing detection rule decay, DPS distribution, and telemetry health."""
+    """Tenant-wide report summarizing detection rule decay, DPS distribution, and telemetry health.
+
+    ``telemetry_available`` is False when the detection-count query failed
+    (``telemetry_errors`` says why); SILENT is then not evaluated and each
+    assessment carries ``TELEMETRY_UNAVAILABLE``. ``check_errors`` lists
+    per-rule compile/population check failures (API errors, not rule defects).
+    """
     assessments: List[RuleDecayAssessment]
     total_audited: int = 0
     broken_compilation_count: int = 0
@@ -2797,6 +2920,13 @@ class RuleDecayReport(UniversalBatchMixin):
     stale_count: int = 0
     unpopulated_count: int = 0
     average_dps: float = 0.0
+    lookback_days: int = 90
+    telemetry_available: bool = True
+    telemetry_errors: List[str] = field(default_factory=list)
+    compile_checked_count: int = 0
+    population_checked_count: int = 0
+    check_errors: List[str] = field(default_factory=list)
+    duration_s: float = 0.0
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -4443,6 +4573,79 @@ class RuleRevisionListResult(UniversalBatchMixin):
         return self.revisions
 
 
+@dataclass
+class RuleDetectionBucket:
+    """Detection count for one rule in one time bucket (UTC)."""
+    bucket_start: datetime
+    count: int
+
+
+@dataclass
+class RuleDetectionSeries:
+    """Per-rule bucketed detection counts, oldest bucket first.
+
+    Only buckets with at least one detection are present (the dashboard query
+    returns no row for an empty bucket); consumers that need a dense series
+    fill gaps with zero.
+    """
+    rule_id: str
+    rule_name: str = ""
+    buckets: List[RuleDetectionBucket] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return sum(b.count for b in self.buckets)
+
+
+@dataclass
+class RuleDetectionSeriesResult(UniversalBatchMixin):
+    """Bucketed detection counts for every rule (custom ``ru_`` and curated ``ur_``) that fired."""
+    series: List[RuleDetectionSeries] = field(default_factory=list)
+    bucket: str = "hour"
+    lookback_hours: int = 24
+    total_detections: int = 0
+    query: str = ""
+    raw_row_count: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleDetectionSeries]:
+        return self.series
+
+    def by_rule_id(self) -> Dict[str, RuleDetectionSeries]:
+        return {s.rule_id: s for s in self.series}
+
+
+@dataclass
+class RuleCaseEnvironment:
+    """Number of distinct SOAR cases a rule produced in one SOAR environment."""
+    rule_id: str
+    environment: str
+    case_count: int
+    rule_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleCaseEnvironmentResult(UniversalBatchMixin):
+    """Rule -> SOAR environment join from ``case.alerts.metadata.detection.rule_id`` x ``case.environment``."""
+    pairs: List[RuleCaseEnvironment] = field(default_factory=list)
+    lookback_days: int = 30
+    query: str = ""
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleCaseEnvironment]:
+        return self.pairs
+
+    def environments_by_rule(self) -> Dict[str, Dict[str, int]]:
+        """``{rule_id: {environment: case_count}}``."""
+        out: Dict[str, Dict[str, int]] = {}
+        for p in self.pairs:
+            out.setdefault(p.rule_id, {})[p.environment] = p.case_count
+        return out
+
+
 class DashboardHealthStatus(str, Enum):
     """Classification states for Google SecOps Native Dashboards."""
     HEALTHY = "HEALTHY"
@@ -4590,21 +4793,34 @@ class EntityCardinalityRecord:
 
 @dataclass
 class DimensionCardinality:
-    """Distribution for a specific UDM entity subfield dimension."""
+    """Distribution for a specific UDM entity subfield dimension.
+
+    ``error`` is set when the dimension query failed; ``records`` is then
+    empty because the distribution is unknown, not because it is empty.
+    """
     dimension: str  # e.g. "principal_ip", "target_hostname", "user_id"
     subfield_path: str
     records: List[EntityCardinalityRecord] = field(default_factory=list)
     total_distinct_values: int = 0
+    error: Optional[str] = None
 
 
 @dataclass
 class EntityCardinalityReport(UniversalBatchMixin):
-    """Multi-dimensional entity cardinality distribution for a detection rule."""
+    """Multi-dimensional entity cardinality distribution for a detection rule.
+
+    ``query_errors`` lists every failed dimension query (``dimension: error``).
+    """
     rule_id: str
     rule_name: str = ""
     dimensions: List[DimensionCardinality] = field(default_factory=list)
     time_window: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+    query_errors: List[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> List[DimensionCardinality]:
+        return self.dimensions
 
     def __iter__(self):
         return iter(self.dimensions)
@@ -4615,7 +4831,13 @@ class EntityCardinalityReport(UniversalBatchMixin):
 
 @dataclass
 class RuleCaseHistoryRecord:
-    """SOAR case record associated with a detection rule."""
+    """SOAR case record associated with a detection rule.
+
+    ``case_name`` is the case resource UUID (``case.name``). ``soar_case_id``
+    is the numeric SOAR case ID shown in the UI, read from
+    ``case.response_platform_info.response_platform_id`` (verified live:
+    platform type ``RESPONSE_PLATFORM_TYPE_SIEMPLIFY``, values like ``19950``).
+    """
     case_name: str
     display_name: str
     status: str
@@ -4623,6 +4845,9 @@ class RuleCaseHistoryRecord:
     root_cause: str
     rule_id: str
     raw: Dict[str, Any] = field(default_factory=dict)
+    environment: str = ""
+    soar_case_id: str = ""
+    response_platform_type: str = ""
 
 
 @dataclass
@@ -4715,13 +4940,18 @@ class CorrelatedDetectionSample:
 
 @dataclass
 class CorrelatedSamplingBatch(UniversalBatchMixin):
-    """Batch of correlated detection event samples for a rule."""
+    """Batch of correlated detection event samples for a rule.
+
+    ``query_errors`` lists failed sample queries (primary process-tuple query,
+    network fallback). If every query fails the workflow raises instead.
+    """
     rule_id: str
     rule_name: str
     samples: List[CorrelatedDetectionSample] = field(default_factory=list)
     total_samples: int = 0
     time_window: str = "14d"
     raw: Dict[str, Any] = field(default_factory=dict)
+    query_errors: List[str] = field(default_factory=list)
 
     @property
     def items(self) -> List[CorrelatedDetectionSample]:

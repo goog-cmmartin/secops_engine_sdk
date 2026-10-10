@@ -1227,15 +1227,49 @@ class GoogleSecOpsAdapter:
         self,
         category_id: Optional[str] = None,
         page_size: int = 1000,
+        page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists Curated Rule Sets across all categories or within a specific category."""
         cat_token = category_id.split("/")[-1] if category_id else "-"
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRuleSetCategories/{cat_token}/curatedRuleSets"
-        params = {"pageSize": page_size}
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
         if isinstance(res, dict):
             return res
         return {"curatedRuleSets": []}
+
+    def get_curated_ruleset(self, ruleset_id_or_name: str) -> Dict[str, Any]:
+        """Gets one Curated Rule Set by ID (category wildcard ``-``) or full resource name."""
+        clean = ruleset_id_or_name.strip()
+        if clean.startswith("projects/"):
+            path = f"/v1alpha/{clean}"
+        else:
+            path = (
+                f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}"
+                f"/curatedRuleSetCategories/-/curatedRuleSets/{clean.split('/')[-1]}"
+            )
+        return self._request("GET", path)
+
+    def list_curated_ruleset_deployments(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists precision deployments (enabled/alerting) of every Curated Rule Set in one call.
+
+        Uses the ``-`` wildcard for category and rule set:
+        ``curatedRuleSetCategories/-/curatedRuleSets/-/curatedRuleSetDeployments``.
+        """
+        path = (
+            f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}"
+            "/curatedRuleSetCategories/-/curatedRuleSets/-/curatedRuleSetDeployments"
+        )
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        return self._request("GET", path, params=params)
 
     def get_curated_ruleset_deployments(self, curated_ruleset_name: str) -> Dict[str, Any]:
         """Retrieves deployment states (broad/precise, enabled, alerting) for a Curated Rule Set."""
@@ -1300,10 +1334,12 @@ class GoogleSecOpsAdapter:
             return res
         return {"deployments": []}
 
-    def list_curated_rules(self, page_size: int = 1000) -> Dict[str, Any]:
-        """Lists all Google-curated individual rules."""
+    def list_curated_rules(self, page_size: int = 1000, page_token: Optional[str] = None) -> Dict[str, Any]:
+        """Lists Google-curated individual rules (one page; the endpoint has no filter)."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules"
-        params = {"pageSize": page_size}
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
         if isinstance(res, dict):
             return res

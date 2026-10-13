@@ -5,9 +5,12 @@ import unittest
 from engine.domain import GcpLogEntry, GcpLogQueryResult
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
+from datetime import datetime, timezone
+
 from engine.workflows.gcp_logging_query import (
     GcpLoggingQueryWorkflow,
     _normalize_log_entry,
+    _since_clause,
 )
 from tests.test_helpers import get_live_engine
 
@@ -86,6 +89,17 @@ class GcpLoggingWorkflowUnitTest(unittest.TestCase):
         self.assertEqual(result.next_page_token, "token-next-page-123")
         self.assertEqual(self.adapter.last_query["filter_str"], "severity >= ERROR")
         self.assertEqual(self.adapter.last_query["page_size"], 25)
+
+    def test_time_filters_are_literal_rfc3339(self):
+        """Cloud Logging has no date arithmetic: the start time must be a literal timestamp."""
+        now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(_since_clause(24, now), 'timestamp >= "2026-10-12T12:00:00Z"')
+        self.workflow.query_secops_errors(hours=6, component="parser")
+        query = self.adapter.last_query["filter_str"]
+        self.assertNotIn(" - 6h", query)
+        self.assertRegex(query, r'^timestamp >= "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z" AND severity >= ERROR AND \(')
+        self.workflow.query_secops_audit_logs(hours=12)
+        self.assertNotIn(" - 12h", self.adapter.last_query["filter_str"])
 
     def test_query_secops_audit_logs_human_filter(self):
         self.workflow.query_secops_audit_logs(hours=12, human_only=True)

@@ -100,7 +100,15 @@ def sanitize_playbook_for_firestore(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class EvidenceFabricStore(ABC):
-    """Abstract interface for the shared multi-agent state store."""
+    """Abstract interface for the shared multi-agent state store.
+
+    ``is_fallback`` / ``fallback_reason`` are set by ``get_evidence_store`` when
+    it returned a ``LocalFileEvidenceStore`` instead of Firestore, so callers
+    can tell that persisted state lands on the local filesystem.
+    """
+
+    is_fallback: bool = False
+    fallback_reason: Optional[str] = None
 
     @abstractmethod
     def record_evidence(
@@ -2332,6 +2340,10 @@ def diff_tenant_baselines(prior: Optional[Dict[str, Any]], current: Dict[str, An
     }
 
 
+# Fallback reasons already logged at WARNING (one log line per reason per process).
+_FALLBACK_WARNED: set = set()
+
+
 def get_evidence_store(
     project_id: Optional[str] = None,
     database_id: Optional[str] = None,
@@ -2372,7 +2384,11 @@ def get_evidence_store(
         except Exception:
             pass
 
-    if resolved_project and os.getenv("SECOPS_DISABLE_FIRESTORE") != "1":
+    if os.getenv("SECOPS_DISABLE_FIRESTORE") == "1":
+        reason = "SECOPS_DISABLE_FIRESTORE=1"
+    elif not resolved_project:
+        reason = "no GCP project resolved (GCP_PROJECT_ID / SECOPS_PROJECT_ID / GOOGLE_CLOUD_PROJECT / gcloud config)"
+    else:
         try:
             store = FirestoreEvidenceStore(project_id=resolved_project, database_id=resolved_db)
             # Verify connectivity with a quick light check
@@ -2382,11 +2398,20 @@ def get_evidence_store(
             )
             return store
         except Exception as e:
-            logger.warning(
-                "Could not connect to Firestore (%s / %s). Falling back to LocalFileEvidenceStore: %s",
-                resolved_project,
-                resolved_db,
-                e,
-            )
+            reason = f"Firestore unavailable for {resolved_project}/{resolved_db}: {type(e).__name__}: {e}"
 
-    return LocalFileEvidenceStore(root_dir=resolved_root)
+    # The fallback behaviour itself is unchanged (AGENTS.md concerns SecOps
+    # tenant data, and this store holds agent state); it is made visible:
+    # one WARNING per distinct reason per process, plus flags on the store.
+    if reason not in _FALLBACK_WARNED:
+        _FALLBACK_WARNED.add(reason)
+        logger.warning(
+            "Evidence store falling back to LocalFileEvidenceStore(root_dir=%s): %s. "
+            "Persisted agent state will be written under that directory.",
+            resolved_root,
+            reason,
+        )
+    store = LocalFileEvidenceStore(root_dir=resolved_root)
+    store.is_fallback = True
+    store.fallback_reason = reason
+    return store

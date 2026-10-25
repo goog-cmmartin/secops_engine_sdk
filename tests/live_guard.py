@@ -39,6 +39,8 @@ READ_ONLY_POST_SUFFIXES = (
     ":runParser",
     ":verifyRuleText",
     ":validateQuery",
+    # Natural language -> UDM query translation; returns text, persists nothing.
+    ":translateUdmQuery",
     "logging.googleapis.com/v2/entries:list",
     # Cancelling a long-running operation the test itself started (UDM search timeout path).
     ":cancel",

@@ -11,6 +11,7 @@ from engine.domain import (
     StatsSearchRequest,
     StatsSearchSession,
 )
+from engine.workflows.search_udm import _start_search_kwargs, _validate_query
 
 
 def _is_cancelled(token: Any) -> bool:
@@ -58,12 +59,17 @@ class SearchUDMStatsWorkflow:
 
         _notify_state()
 
-        # Step 1: Query Validation
+        # Step 1: Query Validation. A failed validation *request* (network,
+        # auth, 429) is reported as such, never as invalid syntax.
         try:
-            val_res = self.adapter.validate_query(request.query, dialect=getattr(request, "dialect", None))
-        except TypeError:
-            val_res = self.adapter.validate_query(request.query)
-
+            val_res = _validate_query(self.adapter, request)
+        except Exception as e:
+            session.lifecycle = LifecycleState.FAILED
+            session.completeness = CompletenessState.EMPTY
+            session.error = f"Query validation request failed (not a syntax error): {e}"
+            session.completed_at = datetime.now(timezone.utc)
+            _notify_state()
+            return session
         if not val_res.valid:
             session.lifecycle = LifecycleState.FAILED
             session.completeness = CompletenessState.EMPTY
@@ -84,22 +90,13 @@ class SearchUDMStatsWorkflow:
         _notify_state()
 
         try:
-            try:
-                operation_id = self.adapter.start_search(
-                    query=request.query,
-                    start_time=request.start_time,
-                    end_time=request.end_time,
-                    max_events=request.max_events,
-                    dialect=getattr(request, "dialect", None),
-                    user_sql=getattr(request, "user_sql", None),
-                )
-            except TypeError:
-                operation_id = self.adapter.start_search(
-                    query=request.query,
-                    start_time=request.start_time,
-                    end_time=request.end_time,
-                    max_events=request.max_events,
-                )
+            operation_id = self.adapter.start_search(
+                query=request.query,
+                start_time=request.start_time,
+                end_time=request.end_time,
+                max_events=request.max_events,
+                **_start_search_kwargs(self.adapter, request),
+            )
             session.session_id = operation_id
         except Exception as e:
             session.lifecycle = LifecycleState.FAILED

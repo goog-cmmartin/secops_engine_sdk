@@ -6,21 +6,30 @@ Invariants: Strict live API provenance, zero synthetic data, explicit error visi
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+import logging
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.domain import (
     CuratedDetectionMetrics,
     CuratedPrecision,
     CuratedRuleDetail,
+    CuratedRuleListResult,
     CuratedRuleSearchQuery,
     CuratedRuleSetBatch,
     CuratedRuleSetDeployment,
+    CuratedRuleSetDeploymentListResult,
+    CuratedRuleSetDeploymentRecord,
     CuratedRuleSetDetail,
+    CuratedRuleSetListResult,
     CuratedRuleSetSummary,
     CuratedRuleSummary,
     MitreAttackMapping,
     TenantRuleMetrics,
 )
+from engine.pagination import collect_pages
+
+logger = logging.getLogger(__name__)
 
 
 def _map_mitre_mapping(raw: Dict[str, Any], kind: str = "tactic") -> MitreAttackMapping:
@@ -112,6 +121,234 @@ def _map_curated_ruleset_summary(
     )
 
 
+_ID_LIKE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def resolve_by_identifier(items: List[Dict[str, Any]], identifier: str, kind: str) -> Dict[str, Any]:
+    """Resolves an ID, resource name or title against raw catalog items.
+
+    Order: exact (case-insensitive) ID / resource name / title; then a unique
+    case-insensitive title substring. Several exact or several substring
+    matches raise ``ValueError`` listing the candidates instead of silently
+    picking the first one.
+    """
+    ident = identifier.strip().lower()
+
+    def keys(r: Dict[str, Any]) -> Tuple[str, str, str]:
+        name = str(r.get("name", ""))
+        return name.split("/")[-1].lower(), name.lower(), str(r.get("displayName", "")).lower()
+
+    exact = [r for r in items if ident in keys(r)]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        titles = [r.get("displayName", "") for r in exact[:5]]
+        raise ValueError(f"{kind} identifier '{identifier}' is ambiguous: {len(exact)} exact matches {titles}")
+    partial = [r for r in items if ident and ident in keys(r)[2]]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        titles = [r.get("displayName", "") for r in partial[:5]]
+        raise ValueError(
+            f"{kind} title '{identifier}' is ambiguous: {len(partial)} titles contain it, e.g. {titles}; "
+            "pass the exact title or ID"
+        )
+    raise ValueError(f"{kind} not found: '{identifier}'")
+
+
+def list_all_curated_rulesets_raw(adapter: Any, page_size: int = 1000) -> List[Dict[str, Any]]:
+    """Every raw Curated Rule Set across all pages (raises on API error)."""
+
+    def fetch(tok: Optional[str]):
+        res = adapter.list_curated_rulesets(page_size=page_size, page_token=tok)
+        if not isinstance(res, dict):
+            return [], None
+        return list(res.get("curatedRuleSets", []) or []), res.get("nextPageToken")
+
+    items, _, _ = collect_pages(fetch)
+    return items
+
+
+def list_all_curated_rules_raw(adapter: Any, page_size: int = 1000) -> List[Dict[str, Any]]:
+    """Every raw curated rule across all pages (slow: ~20 s per page; raises on API error)."""
+
+    def fetch(tok: Optional[str]):
+        res = adapter.list_curated_rules(page_size=page_size, page_token=tok)
+        if not isinstance(res, dict):
+            return [], None
+        return list(res.get("curatedRules", []) or []), res.get("nextPageToken")
+
+    items, _, _ = collect_pages(fetch)
+    return items
+
+
+def _parse_curated_deployment_name(name: str) -> Tuple[str, str]:
+    """``(category_id, rule_set_id)`` from a ``.../curatedRuleSetCategories/{c}/curatedRuleSets/{r}/curatedRuleSetDeployments/{p}`` name."""
+    cat_id = ""
+    rs_id = ""
+    if "/curatedRuleSetCategories/" in name:
+        cat_id = name.split("/curatedRuleSetCategories/")[1].split("/")[0]
+    if "/curatedRuleSets/" in name:
+        rs_id = name.split("/curatedRuleSets/")[1].split("/")[0]
+    return cat_id, rs_id
+
+
+def map_curated_deployment_record(raw: Dict[str, Any], display_name: str = "") -> CuratedRuleSetDeploymentRecord:
+    name = str(raw.get("name", ""))
+    cat_id, rs_id = _parse_curated_deployment_name(name)
+    precision = str(raw.get("precision") or "").upper()
+    if not precision and "/curatedRuleSetDeployments/" in name:
+        precision = name.rsplit("/", 1)[-1].upper()
+    return CuratedRuleSetDeploymentRecord(
+        rule_set_id=rs_id,
+        category_id=cat_id,
+        precision=precision or CuratedPrecision.UNKNOWN.value,
+        # proto3 omits false booleans
+        enabled=bool(raw.get("enabled", False)),
+        alerting=bool(raw.get("alerting", False)),
+        display_name=display_name,
+        resource_name=name,
+        raw=raw,
+    )
+
+
+class ListCuratedRuleSetDeploymentsWorkflow:
+    """Bulk read of every curated rule set precision deployment (``-`` wildcards, one call per page)."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        include_display_names: bool = True,
+        page_size: int = 1000,
+        max_results: Optional[int] = None,
+    ) -> CuratedRuleSetDeploymentListResult:
+        """Lists all curated deployments across all pages.
+
+        Args:
+            include_display_names: Join rule set display names from the rule set
+                catalog (one extra ~1.3 s list call). If that join fails the
+                deployments are still returned with ``display_name=""`` and the
+                error in ``provenance["display_name_error"]``.
+            page_size: API page size.
+            max_results: Optional cap on returned deployments.
+
+        Raises:
+            Any adapter error from the deployment list.
+        """
+
+        def fetch(tok: Optional[str]):
+            res = self.adapter.list_curated_ruleset_deployments(page_size=page_size, page_token=tok)
+            if not isinstance(res, dict):
+                raise ValueError(f"Unexpected curatedRuleSetDeployments response type: {type(res).__name__}")
+            return list(res.get("curatedRuleSetDeployments", []) or []), res.get("nextPageToken")
+
+        raw_deps, next_token, pages = collect_pages(fetch, max_results=max_results)
+        names: Dict[str, str] = {}
+        name_error: Optional[str] = None
+        if include_display_names and raw_deps:
+            try:
+                for rs in list_all_curated_rulesets_raw(self.adapter):
+                    rs_id = str(rs.get("name", "")).split("/")[-1]
+                    if rs_id:
+                        names[rs_id] = rs.get("displayName", "")
+            except Exception as exc:
+                name_error = f"{type(exc).__name__}: {exc}"
+                logger.warning("Curated rule set display-name join failed: %s", name_error)
+        records = []
+        for d in raw_deps:
+            if not isinstance(d, dict):
+                continue
+            rec = map_curated_deployment_record(d)
+            rec.display_name = names.get(rec.rule_set_id, "")
+            records.append(rec)
+        return CuratedRuleSetDeploymentListResult(
+            deployments=records,
+            next_page_token=next_token,
+            pages_fetched=pages,
+            provenance={
+                "api": "curatedRuleSetCategories/-/curatedRuleSets/-/curatedRuleSetDeployments",
+                "count": len(records),
+                "display_names_joined": include_display_names and name_error is None,
+                "display_name_error": name_error,
+            },
+        )
+
+
+class ListCuratedRuleSetsWorkflow:
+    """Lists Curated Rule Sets with page-token support (single page by default)."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+        category_id: Optional[str] = None,
+    ) -> CuratedRuleSetListResult:
+        raw_cats = self.adapter.list_curated_ruleset_categories()
+        cats_list = raw_cats.get("curatedRuleSetCategories", []) if isinstance(raw_cats, dict) else []
+        cat_map = {c.get("name", "").split("/")[-1]: c.get("displayName", "") for c in cats_list if c.get("name")}
+
+        def fetch(tok: Optional[str]):
+            res = self.adapter.list_curated_rulesets(category_id=category_id, page_size=page_size, page_token=tok)
+            if not isinstance(res, dict):
+                return [], None
+            return list(res.get("curatedRuleSets", []) or []), res.get("nextPageToken")
+
+        if all_pages or max_results is not None:
+            raw_items, next_token, pages = collect_pages(fetch, page_token=page_token, max_results=max_results)
+        else:
+            raw_items, next_token = fetch(page_token)
+            pages = 1
+        return CuratedRuleSetListResult(
+            rule_sets=[_map_curated_ruleset_summary(r, categories_map=cat_map) for r in raw_items if isinstance(r, dict)],
+            next_page_token=next_token if isinstance(next_token, str) and next_token else None,
+            pages_fetched=pages,
+            provenance={"count": len(raw_items), "category_id": category_id},
+        )
+
+
+class ListCuratedRulesWorkflow:
+    """Lists individual curated rules with page-token support (single page by default).
+
+    The endpoint has no server-side filter and is slow (~20 s per page);
+    cache results.
+    """
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+    ) -> CuratedRuleListResult:
+        def fetch(tok: Optional[str]):
+            res = self.adapter.list_curated_rules(page_size=page_size, page_token=tok)
+            if not isinstance(res, dict):
+                return [], None
+            return list(res.get("curatedRules", []) or []), res.get("nextPageToken")
+
+        if all_pages or max_results is not None:
+            raw_items, next_token, pages = collect_pages(fetch, page_token=page_token, max_results=max_results)
+        else:
+            raw_items, next_token = fetch(page_token)
+            pages = 1
+        return CuratedRuleListResult(
+            rules=[_map_curated_rule_summary(r) for r in raw_items if isinstance(r, dict)],
+            next_page_token=next_token if isinstance(next_token, str) and next_token else None,
+            pages_fetched=pages,
+            provenance={"count": len(raw_items)},
+        )
+
+
 class SearchCuratedRuleSetsWorkflow:
     """Executes multi-facet search across Curated Rule Sets, MITRE mappings, and log sources."""
 
@@ -132,9 +369,8 @@ class SearchCuratedRuleSetsWorkflow:
             if c_id:
                 cat_map[c_id] = c.get("displayName", "")
 
-        # 2. Fetch all curated rule sets
-        raw_res = self.adapter.list_curated_rulesets(page_size=1000)
-        raw_rulesets = raw_res.get("curatedRuleSets", []) if isinstance(raw_res, dict) else []
+        # 2. Fetch all curated rule sets (all pages)
+        raw_rulesets = list_all_curated_rulesets_raw(self.adapter)
 
         summaries = [_map_curated_ruleset_summary(r, categories_map=cat_map) for r in raw_rulesets]
 
@@ -199,39 +435,50 @@ class GetCuratedRuleSetDetailWorkflow:
             adapter = GoogleSecOpsAdapter()
         self.adapter = adapter
 
-    def execute(self, ruleset_id_or_title: str) -> CuratedRuleSetDetail:
+    def _resolve(self, identifier: str) -> Dict[str, Any]:
+        """Direct GET for an ID / resource name; title resolution over the catalog otherwise."""
+        if identifier.startswith("projects/") or _ID_LIKE.match(identifier):
+            if hasattr(self.adapter, "get_curated_ruleset"):
+                try:
+                    res = self.adapter.get_curated_ruleset(identifier)
+                    if isinstance(res, dict) and res.get("name"):
+                        return res
+                except Exception as exc:
+                    # 400/404: not a rule set ID (e.g. a one-word title); fall back to title resolution.
+                    if getattr(exc, "status", None) not in (400, 404):
+                        raise
+        return resolve_by_identifier(list_all_curated_rulesets_raw(self.adapter), identifier, "Curated Rule Set")
+
+    def execute(
+        self,
+        ruleset_id_or_title: str,
+        include_rules: bool = True,
+        include_detection_count: bool = True,
+    ) -> CuratedRuleSetDetail:
+        """Resolves and inspects one Curated Rule Set.
+
+        Args:
+            include_rules: Scan the curated rule catalog for member rules (slow,
+                ~20-30 s; the ``curatedRules`` endpoint has no filter).
+            include_detection_count: 7-day ``countAllCuratedRuleSetDetections``.
+
+        Failures of the deployment, count or member reads are recorded in
+        ``CuratedRuleSetDetail.errors`` (and logged); the corresponding field
+        is then empty/0 *because it is unknown*.
+        """
         if not ruleset_id_or_title or not ruleset_id_or_title.strip():
             raise ValueError("Curated Rule Set identifier or title is required")
 
         identifier = ruleset_id_or_title.strip()
+        errors: List[str] = []
 
         # 1. Fetch categories
         raw_cats = self.adapter.list_curated_ruleset_categories()
         cats_list = raw_cats.get("curatedRuleSetCategories", []) if isinstance(raw_cats, dict) else []
         cat_map: Dict[str, str] = {c.get("name", "").split("/")[-1]: c.get("displayName", "") for c in cats_list if c.get("name")}
 
-        # 2. Fetch all rule sets to resolve target
-        raw_res = self.adapter.list_curated_rulesets(page_size=1000)
-        raw_rulesets = raw_res.get("curatedRuleSets", []) if isinstance(raw_res, dict) else []
-
-        target_raw: Optional[Dict[str, Any]] = None
-        for r in raw_rulesets:
-            r_name = r.get("name", "")
-            r_id = r_name.split("/")[-1] if r_name else ""
-            r_title = r.get("displayName", "")
-
-            if (
-                identifier.lower() == r_id.lower()
-                or identifier.lower() == r_name.lower()
-                or identifier.lower() == r_title.lower()
-                or identifier.lower() in r_title.lower()
-            ):
-                target_raw = r
-                break
-
-        if not target_raw:
-            raise ValueError(f"Curated Rule Set not found: '{ruleset_id_or_title}'")
-
+        # 2. Resolve target (raises ValueError when not found or ambiguous)
+        target_raw = self._resolve(identifier)
         full_name = target_raw.get("name", "")
         ruleset_id = full_name.split("/")[-1] if full_name else ""
 
@@ -241,34 +488,38 @@ class GetCuratedRuleSetDetailWorkflow:
             dep_res = self.adapter.get_curated_ruleset_deployments(full_name)
             raw_deps = dep_res.get("curatedRuleSetDeployments", []) if isinstance(dep_res, dict) else []
             deployments = [_map_curated_deployment(d) for d in raw_deps if isinstance(d, dict)]
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append(f"deployments: {type(exc).__name__}: {exc}")
 
         # 4. Fetch detection counts for the last 7 days
         detection_count = 0
-        try:
-            now = datetime.now(timezone.utc)
-            start_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            end_iso = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            count_res = self.adapter.count_curated_ruleset_detections(start_iso, end_iso)
-            raw_counts = count_res.get("curatedRuleSetCounts", []) if isinstance(count_res, dict) else []
-            for c in raw_counts:
-                if c.get("curatedRuleSet") == full_name:
-                    detection_count = int(c.get("count", 0))
-                    break
-        except Exception:
-            pass
+        if include_detection_count:
+            try:
+                now = datetime.now(timezone.utc)
+                start_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                end_iso = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                count_res = self.adapter.count_curated_ruleset_detections(start_iso, end_iso)
+                raw_counts = count_res.get("curatedRuleSetCounts", []) if isinstance(count_res, dict) else []
+                for c in raw_counts:
+                    if str(c.get("curatedRuleSet", "")).split("/")[-1] == ruleset_id:
+                        detection_count = int(c.get("count", 0))
+                        break
+            except Exception as exc:
+                errors.append(f"detection_count: {type(exc).__name__}: {exc}")
 
         # 5. Fetch member rules belonging to this curated rule set
         member_rules: List[CuratedRuleSummary] = []
-        try:
-            all_rules_res = self.adapter.list_curated_rules(page_size=1000)
-            raw_rules = all_rules_res.get("curatedRules", []) if isinstance(all_rules_res, dict) else []
-            for rule in raw_rules:
-                if rule.get("curatedRuleSet") == full_name or (rule.get("curatedRuleSet", "").endswith(f"/{ruleset_id}")):
-                    member_rules.append(_map_curated_rule_summary(rule))
-        except Exception:
-            pass
+        if include_rules:
+            try:
+                for rule in list_all_curated_rules_raw(self.adapter):
+                    rs_ref = rule.get("curatedRuleSet", "")
+                    if isinstance(rs_ref, str) and (rs_ref == full_name or rs_ref.endswith(f"/{ruleset_id}")):
+                        member_rules.append(_map_curated_rule_summary(rule))
+            except Exception as exc:
+                errors.append(f"member_rules: {type(exc).__name__}: {exc}")
+
+        for e in errors:
+            logger.warning("get_curated_ruleset(%s) partial failure: %s", identifier, e)
 
         summary = _map_curated_ruleset_summary(
             target_raw,
@@ -283,6 +534,8 @@ class GetCuratedRuleSetDetailWorkflow:
             deployments=deployments,
             detection_count=detection_count,
             raw=target_raw,
+            errors=errors,
+            rules_checked=include_rules and not any(e.startswith("member_rules") for e in errors),
         )
 
 
@@ -333,27 +586,8 @@ class GetCuratedRuleDetailWorkflow:
                     raw=featured_direct,
                 )
 
-        # Fallback path: search all curated rules catalog
-        all_rules_res = self.adapter.list_curated_rules(page_size=1000)
-        raw_rules = all_rules_res.get("curatedRules", []) if isinstance(all_rules_res, dict) else []
-
-        target_rule: Optional[Dict[str, Any]] = None
-        for r in raw_rules:
-            r_name = r.get("name", "")
-            r_id = r_name.split("/")[-1] if r_name else ""
-            r_title = r.get("displayName", "")
-
-            if (
-                identifier.lower() == r_id.lower()
-                or identifier.lower() == r_name.lower()
-                or identifier.lower() == r_title.lower()
-                or identifier.lower() in r_title.lower()
-            ):
-                target_rule = r
-                break
-
-        if not target_rule:
-            raise ValueError(f"Curated Rule not found: '{rule_id_or_title}'")
+        # Fallback path: search all curated rules catalog (all pages; exact match first)
+        target_rule = resolve_by_identifier(list_all_curated_rules_raw(self.adapter), identifier, "Curated Rule")
 
         summary = _map_curated_rule_summary(target_rule)
 
@@ -362,6 +596,7 @@ class GetCuratedRuleDetailWorkflow:
         live_enabled = False
         tactics: List[MitreAttackMapping] = []
         techniques: List[MitreAttackMapping] = summary.techniques
+        errors: List[str] = []
 
         try:
             featured = self.adapter.get_featured_content_rule(summary.id)
@@ -373,8 +608,11 @@ class GetCuratedRuleDetailWorkflow:
                     tactics = [_map_mitre_mapping(t, "tactic") for t in crc.get("tactics", [])]
                     if crc.get("techniques"):
                         techniques = [_map_mitre_mapping(t, "technique") for t in crc.get("techniques", [])]
-        except Exception:
-            pass
+            else:
+                errors.append(f"featured_content_rule: no Content Hub entry for {summary.id}")
+        except Exception as exc:
+            errors.append(f"featured_content_rule: {type(exc).__name__}: {exc}")
+            logger.warning("get_curated_rule(%s): Content Hub lookup failed: %s", summary.id, exc)
 
         return CuratedRuleDetail(
             rule=summary,
@@ -383,6 +621,7 @@ class GetCuratedRuleDetailWorkflow:
             tactics=tactics,
             techniques=techniques,
             raw=target_rule,
+            errors=errors,
         )
 
 
@@ -421,9 +660,8 @@ class GetCuratedDetectionMetricsWorkflow:
         raw_counts_res = self.adapter.count_curated_ruleset_detections(start_iso, end_iso)
         raw_counts = raw_counts_res.get("curatedRuleSetCounts", []) if isinstance(raw_counts_res, dict) else []
 
-        # 3. Fetch rule sets to enrich rule set names
-        raw_res = self.adapter.list_curated_rulesets(page_size=1000)
-        raw_rulesets = raw_res.get("curatedRuleSets", []) if isinstance(raw_res, dict) else []
+        # 3. Fetch rule sets to enrich rule set names (all pages)
+        raw_rulesets = list_all_curated_rulesets_raw(self.adapter)
         name_map: Dict[str, str] = {r.get("name", ""): r.get("displayName", "") for r in raw_rulesets if r.get("name")}
 
         top_firing: List[Dict[str, Any]] = []
@@ -483,25 +721,11 @@ class SetCuratedRuleSetDeploymentWorkflow:
             if identifier.startswith("projects/") and "/curatedRuleSets/" in identifier:
                 ruleset_resource_name = identifier
             else:
-                # Search all rulesets to match ID or title
-                raw_res = self.adapter.list_curated_rulesets(page_size=1000)
-                raw_rulesets = raw_res.get("curatedRuleSets", []) if isinstance(raw_res, dict) else []
-                target_raw: Optional[Dict[str, Any]] = None
-                for r in raw_rulesets:
-                    r_name = r.get("name", "")
-                    r_id = r_name.split("/")[-1] if r_name else ""
-                    r_title = r.get("displayName", "")
-                    if (
-                        identifier.lower() == r_id.lower()
-                        or identifier.lower() == r_name.lower()
-                        or identifier.lower() == r_title.lower()
-                        or identifier.lower() in r_title.lower()
-                    ):
-                        target_raw = r
-                        break
-
-                if not target_raw:
-                    raise ValueError(f"Curated Rule Set not found: '{ruleset_id_or_title}'")
+                # Resolve ID or title across all pages; ambiguous titles raise
+                # instead of patching whichever rule set matched first.
+                target_raw = resolve_by_identifier(
+                    list_all_curated_rulesets_raw(self.adapter), identifier, "Curated Rule Set"
+                )
                 ruleset_resource_name = target_raw.get("name", "")
 
             # Construct deployment resource name

@@ -72,6 +72,40 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     stats_parser.add_argument("--dedup", action="store_true", help="Deduplicate identical rows in the result set")
     stats_parser.add_argument("--case-sensitive", action="store_true", help="Perform case-sensitive matching")
 
+    # Bounded UDM aggregation (dashboard SQL)
+    agg_parser = subparsers.add_parser(
+        "search-aggregate",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Count UDM events by 0-2 allow-listed fields and an optional hour/day bucket",
+        description="""Count UDM events in one synchronous dashboard SQL query.
+
+Examples:
+  secops.py search-aggregate --group-by metadata.log_type --bucket hour --hours 24
+  secops.py search-aggregate --group-by principal.hostname --group-by metadata.event_type \\
+      --filter 'metadata.log_type = "WINEVTLOG"' --limit 50
+
+Filter grammar: field = "value" (also !=, <, <=, >, >=), AND / OR / NOT, parentheses,
+over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2 --group-by.""",
+    )
+    agg_parser.add_argument("--filter", default="", help='Restricted UDM predicate, e.g. \'metadata.event_type = "NETWORK_CONNECTION"\'')
+    agg_parser.add_argument("--group-by", action="append", help="Allow-listed UDM field (repeatable, max 2; default metadata.log_type)")
+    agg_parser.add_argument("--no-group", action="store_true", help="Single total (no group-by field)")
+    agg_parser.add_argument("--bucket", choices=["hour", "day"], help="UTC time bucket")
+    agg_parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24, max 168)")
+    agg_parser.add_argument("--limit", type=int, default=500, help="Max rows (default: 500, max 2000)")
+    agg_parser.add_argument("--distinct", help="Count distinct values of this scalar field instead of events")
+    agg_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+    agg_parser.add_argument("--show-query", action="store_true", help="Print the generated SQL")
+
+    fv_parser = subparsers.add_parser("field-values", help="Find UDM field paths whose recent values match text (autocomplete)")
+    fv_parser.add_argument("query", help="Text fragment to match")
+    fv_parser.add_argument("--limit", type=int, default=20, help="Page size (default: 20)")
+    fv_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    tr_parser = subparsers.add_parser("translate", help="Translate natural language into a UDM search query (does not run it)")
+    tr_parser.add_argument("text", help="Natural-language question")
+    tr_parser.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # Investigate command
     inv_parser = subparsers.add_parser("investigate", help="Investigate a specific SecOps event and view Raw Log")
     inv_parser.add_argument("--event-id", "-id", required=True, help="Event ID (Base64 string)")
@@ -115,6 +149,27 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_search_cmd.add_argument("--important", action="store_true", default=None, help="Filter only important cases")
     case_search_cmd.add_argument("--limit", type=int, default=20, help="Results page size (default: 20)")
     case_search_cmd.add_argument("--page", type=int, default=0, help="Page number (default: 0)")
+
+    case_list_cmd = case_sub.add_parser(
+        "list",
+        help="List cases with exact status/environment/priority filters (native cases collection, no time window)",
+        description=(
+            "List cases from the native cases collection. Unlike 'case search', this filters "
+            "on exact open/closed status and has no time window, so long-lived open cases are included. "
+            "Repeat a flag to OR values (e.g. -p CRITICAL -p HIGH); different flags are AND-ed."
+        ),
+    )
+    case_list_cmd.add_argument("--status", type=str.upper, choices=["OPENED", "OPEN", "CLOSED"], default=None, help="Exact case status: OPENED (alias OPEN) or CLOSED")
+    case_list_cmd.add_argument("--environment", "-env", action="append", default=[], help="Filter by environment (repeatable)")
+    case_list_cmd.add_argument("--priority", "-p", action="append", default=[], help="Filter by priority: INFO, LOW, MEDIUM, HIGH, CRITICAL (repeatable)")
+    case_list_cmd.add_argument("--stage", "-s", action="append", default=[], help="Filter by stage, e.g. Triage (repeatable)")
+    case_list_cmd.add_argument("--assignee", "-u", action="append", default=[], help="Filter by assignee, e.g. @Tier1 (repeatable)")
+    case_list_cmd.add_argument("--important", action="store_true", default=None, help="Only important cases")
+    case_list_cmd.add_argument("--incident", action="store_true", default=None, help="Only cases marked as incidents")
+    case_list_cmd.add_argument("--filter", default=None, help="Raw server filter AND-ed with the flags, e.g. 'createTime > 1791000000000'")
+    case_list_cmd.add_argument("--order-by", default="createTime desc", help="Sort order (default: 'createTime desc'; also updateTime, priority)")
+    case_list_cmd.add_argument("--limit", type=int, default=50, help="Maximum cases to fetch across pages (default: 50)")
+    case_list_cmd.add_argument("--json", action="store_true", help="Output raw JSON")
 
     case_triage_single_cmd = case_sub.add_parser(
         "triage",
@@ -389,6 +444,11 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     cur_get = curated_sub.add_parser("get", help="Deep-inspect a Curated Rule Set, its deployments, and member rules")
     cur_get.add_argument("identifier", help="Curated Rule Set UUID, resource name, or title")
+    cur_get.add_argument("--no-rules", action="store_true", help="Skip the slow member-rule catalog scan")
+
+    cur_deps = curated_sub.add_parser("deployments", help="List every Curated Rule Set BROAD/PRECISE deployment (enabled, alerting) in one bulk call")
+    cur_deps.add_argument("--no-names", action="store_true", help="Skip the rule set display-name join")
+    cur_deps.add_argument("--json", action="store_true", help="Output raw JSON")
 
     cur_rule = curated_sub.add_parser("rule", help="Inspect a Curated Rule and extract its executable YARA-L logic")
     cur_rule.add_argument("rule_id", help="Curated Rule ID (e.g. 'ur_025628f0-af2d-4a52-b899-4de31928edfc') or title")
@@ -546,6 +606,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     feed_timestamp.add_argument("--days", "-d", type=int, default=7, help="Lookback window in days (default: 7)")
     feed_timestamp.add_argument("--clear-cache", action="store_true", default=True, help="Bypass cache for live freshness (default: True)")
     feed_timestamp.add_argument("--json", action="store_true", help="Output as JSON")
+    feed_timestamp.add_argument("--no-persist", dest="persist", action="store_false", default=True, help="Do not write the report to the Evidence Fabric store (read-only run)")
 
     # Pipelines command
     pipeline_parser = subparsers.add_parser("pipeline", help="Explore Data Processing Pipelines and Bindplane SaaS integrations")
@@ -973,7 +1034,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     ioc_search = ioc_sub.add_parser("search", help="Search enterprise-wide IoCs")
     ioc_search.add_argument("value", help="IoC value (hash, IP, domain, etc.)")
-    ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, IP_ADDRESS, DOMAIN_NAME)")
+    ioc_search.add_argument("--type", "-t", help="Explicit IoC valueType (e.g. HASH_SHA256, HASH_MD5, ASSET_IP_ADDRESS, DOMAIN_NAME)")
     # Chronicle SIEM Data Tables command
     dt_parser = subparsers.add_parser("data-table", help="Manage Chronicle SIEM Data Tables and row entries")
     dt_sub = dt_parser.add_subparsers(dest="dt_action", required=True)
@@ -1020,6 +1081,7 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_list.add_argument("--filter", "-f", help="Filter expression (e.g. 'display_name:\"my_rule\"')")
     rule_list.add_argument("--view", choices=["BASIC", "FULL"], default="BASIC", help="Rule view (default: BASIC)")
     rule_list.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_list.add_argument("--all", action="store_true", help="Follow nextPageToken and list every rule (--limit is then the page size)")
     rule_list.add_argument("--json", action="store_true", help="Output raw JSON")
 
     rule_get = rule_sub.add_parser("get", help="Get detection rule details and YARA-L logic")
@@ -1064,7 +1126,19 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     rule_errors = rule_sub.add_parser("errors", help="List runtime / execution errors across detection rules")
     rule_errors.add_argument("--rule", "-r", help="Optional Rule ID to filter errors by")
     rule_errors.add_argument("--limit", type=int, default=100, help="Results limit (default: 100)")
+    rule_errors.add_argument("--all", action="store_true", help="Follow nextPageToken and list every error (--limit is then the page size)")
+    rule_errors.add_argument("--since-days", type=int, help="Only errors whose timeRange.endTime is within N days (implies --all)")
     rule_errors.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_series = rule_sub.add_parser("series", help="Per-rule detection counts bucketed by hour or day (one dashboard query)")
+    rule_series.add_argument("--hours", type=int, default=24, help="Lookback window in hours (default: 24)")
+    rule_series.add_argument("--bucket", choices=["hour", "day"], default="hour", help="Bucket size, UTC (default: hour)")
+    rule_series.add_argument("--rule", "-r", action="append", help="Rule ID to keep (repeatable)")
+    rule_series.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    rule_envs = rule_sub.add_parser("environments", help="Rule -> SOAR environment join: distinct cases per (rule, case.environment)")
+    rule_envs.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
+    rule_envs.add_argument("--json", action="store_true", help="Output raw JSON")
 
     rule_audit = rule_sub.add_parser("audit", help="Unified detection repository health audit across customer & curated rules")
     rule_audit.add_argument("--no-curated", action="store_true", help="Exclude Google Curated rules from audit")
@@ -1231,6 +1305,12 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_search_cli(args)
     elif args.command in ("search-stats", "stats-search"):
         run_search_stats_cli(args)
+    elif args.command == "search-aggregate":
+        run_search_aggregate_cli(args)
+    elif args.command == "field-values":
+        run_field_values_cli(args)
+    elif args.command == "translate":
+        run_translate_cli(args)
     elif args.command == "investigate":
         run_investigate_cli(args)
     elif args.command == "entity-search":
@@ -1828,17 +1908,17 @@ def run_monitoring_cli(args):
                 "normalizer_series_count": normalizer.total_series,
                 "api_series_count": api.total_series,
                 "ingestion": [s.raw for s in ingestion.time_series],
+                "ingestion_by_log_type": ingestion.to_dict(),
                 "normalizer": [s.raw for s in normalizer.time_series],
                 "api": [s.raw for s in api.time_series],
             }
             print(json.dumps(out, indent=2))
             return
 
-        print(f"Ingestion Streams  : {ingestion.total_series}")
-        for s in ingestion.time_series:
-            latest_val = s.points[0].value if s.points else "N/A"
-            lt = s.metric_labels.get("log_type", "all")
-            print(f"  - {s.metric_type} (log_type={lt}): {latest_val}")
+        print(f"Ingestion ({ingestion.metric_type}, {ingestion.alignment_period} buckets): {len(ingestion.series)} log types")
+        for s in ingestion.series:
+            latest_val = s.points[-1].value if s.points else "N/A"
+            print(f"  - log_type={s.log_type}: total={s.total:,} latest={latest_val} ({len(s.points)} points)")
 
         print(f"\nNormalizer Streams : {normalizer.total_series}")
         for s in normalizer.time_series:
@@ -2211,6 +2291,62 @@ def run_case_cli(args):
             if c.user_assigned:
                 print(f"     Assignee: {c.user_assigned}")
             print()
+
+    elif args.case_action == "list":
+        import json
+        batch = engine.list_cases(
+            status=args.status,
+            environments=args.environment,
+            priorities=args.priority,
+            stages=args.stage,
+            assignees=args.assignee,
+            is_important=True if args.important else None,
+            is_incident=True if args.incident else None,
+            filter=args.filter,
+            order_by=args.order_by,
+            max_results=args.limit,
+        )
+        if args.json:
+            out = {
+                "total_count": batch.total_count,
+                "returned_count": len(batch.cases),
+                "next_page_token": batch.next_page_token,
+                "provenance": batch.provenance,
+                "cases": [
+                    {
+                        "case_id": c.case_id,
+                        "display_name": c.display_name,
+                        "status": c.raw_status,
+                        "priority": c.raw_priority,
+                        "stage": c.stage,
+                        "environment": c.environment,
+                        "assignee": c.assignee,
+                        "alert_count": c.alert_count,
+                        "is_important": c.is_important,
+                        "is_incident": c.is_incident,
+                        "create_time": c.create_time.isoformat() if c.create_time else None,
+                        "update_time": c.update_time.isoformat() if c.update_time else None,
+                    }
+                    for c in batch.cases
+                ],
+            }
+            print(json.dumps(out, indent=2, default=str))
+            return
+        print(f"\n[CLI] Listing Cases (filter='{batch.provenance.get('filter', '')}', limit={args.limit})...")
+        print(f"\n==========================================================================================")
+        print(f" SOAR CASE LIST (Total matching: {batch.total_count:,} | Returned: {len(batch.cases)} | Pages: {batch.provenance.get('pages_fetched')})")
+        print(f"==========================================================================================")
+        if not batch.cases:
+            print(" No cases found matching criteria.")
+            return
+        for idx, c in enumerate(batch.cases, 1):
+            imp_badge = "★ " if c.is_important else ""
+            time_str = c.create_time.strftime("%Y-%m-%d %H:%M:%S") if c.create_time else "N/A"
+            print(f" {idx:3d}. {imp_badge}ID: {c.case_id:<8s} | {c.raw_priority:<18s} | {c.raw_status:<7s} | Stage: {c.stage:<14s} | Alerts: {c.alert_count:3d} | Created: {time_str}")
+            print(f"      Title   : {c.display_name}")
+            print(f"      Env     : {c.environment}   Assignee: {c.assignee or '-'}")
+        if batch.truncated:
+            print(f"\n (More cases match; raise --limit to fetch beyond {len(batch.cases)}.)")
 
     elif args.case_action == "triage":
         print(f"\n[CLI] Triaging Case #{args.case_id} (summary={args.summary}, precedents={args.precedents})...")
@@ -3351,7 +3487,9 @@ def run_curated_cli(args):
     elif args.curated_action == "get":
         print(f"\n[CLI] Deep-inspecting Curated Rule Set: '{args.identifier}'...")
         try:
-            detail = engine.get_curated_ruleset(args.identifier)
+            detail = engine.get_curated_ruleset(args.identifier, include_rules=not getattr(args, "no_rules", False))
+            for err in detail.errors:
+                print(f"  [!] partial read failure: {err}")
             rs = detail.rule_set
             tactics_str = ", ".join([f"{t.id} ({t.display_name})" for t in rs.tactics]) if rs.tactics else "None"
             techniques_str = ", ".join([f"{t.id} ({t.display_name})" for t in rs.techniques]) if rs.techniques else "None"
@@ -3387,6 +3525,26 @@ def run_curated_cli(args):
 
         except Exception as e:
             print(f"Error inspecting curated rule set: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.curated_action == "deployments":
+        try:
+            res = engine.list_curated_rule_set_deployments(include_display_names=not args.no_names)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_set_id": d.rule_set_id, "category_id": d.category_id, "display_name": d.display_name,
+                     "precision": d.precision, "enabled": d.enabled, "alerting": d.alerting}
+                    for d in res.deployments
+                ], indent=2))
+                return
+            print(f"\n=== CURATED RULE SET DEPLOYMENTS ({len(res.deployments)}) ===")
+            for d in res.deployments:
+                print(f"  {(d.display_name or d.rule_set_id)[:50]:50s} {d.precision:8s} enabled={d.enabled!s:5s} alerting={d.alerting}")
+            if res.provenance.get("display_name_error"):
+                print(f"  [!] display-name join failed: {res.provenance['display_name_error']}")
+            print()
+        except Exception as e:
+            print(f"Error listing curated deployments: {e}", file=sys.stderr)
             sys.exit(1)
 
     elif args.curated_action == "rule":
@@ -4180,7 +4338,7 @@ def run_feed_cli(args):
         clear_cache = args.clear_cache
         print(f"\n[CLI] Auditing Telemetry Timestamp Integrity ({days}-day window, clear_cache={clear_cache})...")
         try:
-            report = engine.audit_timestamp_integrity(days=days, clear_cache=clear_cache)
+            report = engine.audit_timestamp_integrity(days=days, clear_cache=clear_cache, persist=getattr(args, "persist", True))
             if getattr(args, "json", False):
                 print(json.dumps(report.to_dict(), indent=2))
                 return
@@ -6316,10 +6474,12 @@ def run_rule_cli(args):
     if action == "list":
         print(f"\n[CLI] Listing Chronicle SIEM detection rules (limit={args.limit})...")
         try:
+            extra = {"all_pages": True} if getattr(args, "all", False) else {}
             res = engine.list_rules(
                 page_size=args.limit,
                 filter_expr=args.filter,
                 view=args.view,
+                **extra,
             )
             if getattr(args, "json", False):
                 print(json.dumps([r.__dict__ for r in res.rules], indent=2, default=str))
@@ -6500,7 +6660,14 @@ def run_rule_cli(args):
     elif action == "errors":
         print(f"\n[CLI] Listing rule execution errors (limit={args.limit})...")
         try:
-            res = engine.list_rule_errors(args.rule, page_size=args.limit)
+            since_days = getattr(args, "since_days", None)
+            since = datetime.now(timezone.utc) - timedelta(days=since_days) if since_days else None
+            extra = {}
+            if getattr(args, "all", False):
+                extra["all_pages"] = True
+            if since is not None:
+                extra["since"] = since
+            res = engine.list_rule_errors(args.rule, page_size=args.limit, **extra)
             if getattr(args, "json", False):
                 print(json.dumps([err.__dict__ for err in res.errors], indent=2, default=str))
                 return
@@ -6515,6 +6682,44 @@ def run_rule_cli(args):
             print()
         except Exception as e:
             print(f"Error listing rule errors: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "series":
+        print(f"\n[CLI] Detection series ({args.hours}h, bucket={args.bucket})...")
+        try:
+            res = engine.get_rule_detection_series(lookback_hours=args.hours, bucket=args.bucket, rule_ids=args.rule)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_id": s.rule_id, "rule_name": s.rule_name,
+                     "buckets": [[b.bucket_start.isoformat(), b.count] for b in s.buckets]}
+                    for s in res.series
+                ], indent=2))
+                return
+            print(f"\n=== DETECTION SERIES ({len(res.series)} rules, {res.total_detections} detections) ===")
+            for s in res.series:
+                spark = " ".join(str(b.count) for b in s.buckets)
+                print(f"  {s.rule_id:45s} {s.total:6d}  {s.rule_name[:40]:40s} [{spark[:60]}]")
+            print()
+        except Exception as e:
+            print(f"Error querying detection series: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "environments":
+        print(f"\n[CLI] Rule -> SOAR environment join ({args.days}d)...")
+        try:
+            res = engine.get_rule_case_environments(lookback_days=args.days)
+            if getattr(args, "json", False):
+                print(json.dumps([
+                    {"rule_id": p.rule_id, "rule_name": p.rule_name, "environment": p.environment, "case_count": p.case_count}
+                    for p in res.pairs
+                ], indent=2))
+                return
+            print(f"\n=== RULE / ENVIRONMENT PAIRS ({len(res.pairs)}) ===")
+            for p in res.pairs:
+                print(f"  {p.rule_id:45s} {p.environment[:25]:25s} {p.case_count:6d}  {p.rule_name[:50]}")
+            print()
+        except Exception as e:
+            print(f"Error querying rule environments: {e}", file=sys.stderr)
             sys.exit(1)
 
     elif action == "audit":
@@ -6973,6 +7178,84 @@ def run_search_stats_cli(args):
         print(f"Session ID    : {session.session_id}")
         print(f"Total Rows    : {len(rows):,}")
         print(f"Duration      : {duration:.2f}s")
+
+
+def run_search_aggregate_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    group_by = [] if args.no_group else (args.group_by or ["metadata.log_type"])
+    try:
+        res = engine.aggregate_udm(
+            filter=args.filter,
+            group_by=group_by,
+            time_bucket=args.bucket,
+            lookback_hours=args.hours,
+            limit=args.limit,
+            metric="count_distinct" if args.distinct else "count",
+            distinct_field=args.distinct,
+        )
+    except ValueError as e:
+        print(f"Invalid aggregate request: {e}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(f"Aggregate query failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.show_query:
+        print(res.query_text, file=sys.stderr)
+    if args.json:
+        print(json.dumps({
+            "dimensions": res.dimensions,
+            "rows": [{"dims": r.dims, "bucket": r.bucket.isoformat() if r.bucket else None, "count": r.count} for r in res.rows],
+            "truncated": res.truncated,
+            "time_window": res.time_window,
+            "elapsed_s": res.elapsed_s,
+            "api_retries": res.api_retries,
+        }, indent=2))
+        return
+    headers = list(res.dimensions) + (["bucket"] if res.time_bucket else []) + ["count"]
+    print("\t".join(headers))
+    for r in res.rows:
+        cells = [str(r.dims.get(d)) for d in res.dimensions]
+        if res.time_bucket:
+            cells.append(r.bucket.isoformat() if r.bucket else "")
+        cells.append(str(r.count))
+        print("\t".join(cells))
+    note = " (truncated: more rows exist)" if res.truncated else ""
+    print(f"\n{len(res.rows)} rows in {res.elapsed_s:.1f}s{note}")
+    if res.api_retries:
+        print(f"Throttled/retried {len(res.api_retries)} time(s): {res.api_retries}", file=sys.stderr)
+
+
+def run_field_values_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    res = engine.find_udm_field_values(args.query, page_size=args.limit)
+    if args.json:
+        print(json.dumps([{"field_path": m.field_path, "value": m.value,
+                           "ingestion_time": m.ingestion_time.isoformat() if m.ingestion_time else None}
+                          for m in res.matches], indent=2))
+        return
+    for m in res.matches:
+        print(f"  {m.field_path:55s} {m.value}")
+    if res.has_more:
+        print("  (more matches available)")
+
+
+def run_translate_cli(args):
+    import json
+
+    engine = SecOpsEngine()
+    res = engine.translate_udm_query(args.text)
+    if args.json:
+        print(json.dumps({"query": res.query,
+                          "start_time": res.start_time.isoformat() if res.start_time else None,
+                          "end_time": res.end_time.isoformat() if res.end_time else None}, indent=2))
+        return
+    print(res.query)
+    if res.time_range:
+        print(f"time range: {res.start_time.isoformat()} .. {res.end_time.isoformat()}")
 
 
 if __name__ == "__main__":

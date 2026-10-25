@@ -7,6 +7,7 @@ and live UDM field population auditing against Google SecOps.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 import re
@@ -19,8 +20,12 @@ from engine.domain import (
     RuleDecayAssessment,
     RuleDecayReport,
     RuleDetail,
+    RuleDetectionBucket,
+    RuleDetectionSeries,
+    RuleDetectionSeriesResult,
     RuleSummary,
 )
+from engine.pagination import collect_pages
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,7 @@ def calculate_decay_score(
     syntax_verified: bool = True,
     compiler_diagnostics: Optional[List[str]] = None,
     is_live: Optional[bool] = None,
+    telemetry_available: bool = True,
 ) -> Tuple[int, List[str], str, int]:
     """Computes the Decay Prioritization Score (DPS: 0-100) and operational classification.
 
@@ -109,6 +115,9 @@ def calculate_decay_score(
         syntax_verified: Whether the rule text passed live Chronicle compilation.
         compiler_diagnostics: Optional list of compiler diagnostic messages.
         is_live: Optional explicit boolean flag indicating if rule is live/enabled in production.
+        telemetry_available: False when the detection-count query failed. SILENT
+            is then not evaluated (a failed query is not evidence of silence) and
+            the flag ``TELEMETRY_UNAVAILABLE`` is added instead.
 
     Returns:
         Tuple of (dps_score, decay_flags, recommendation, days_stale).
@@ -147,7 +156,9 @@ def calculate_decay_score(
     if detection_telemetry_90d:
         count_90d = int(detection_telemetry_90d.get("count", 0))
 
-    if is_live and count_90d == 0:
+    if not telemetry_available:
+        flags.append("TELEMETRY_UNAVAILABLE")
+    elif is_live and count_90d == 0:
         base_weight += 30
         flags.append("SILENT")
 
@@ -220,6 +231,9 @@ class QueryRuleDetectionCountsWorkflow:
     def execute(self, lookback_days: int = 90) -> Dict[str, Dict[str, Any]]:
         """Queries 90-day detection counts for all rules in the tenant.
 
+        Raises the underlying API/query error. An empty dict therefore means
+        "the query ran and no rule fired", never "the query failed".
+
         Returns:
             Dictionary mapping rule_id to telemetry dict:
             {
@@ -233,38 +247,181 @@ class QueryRuleDetectionCountsWorkflow:
             }
         """
         results_by_rule: Dict[str, Dict[str, Any]] = {}
-        try:
-            query_res = self.adapter.execute_dashboard_query(
-                query_text=AUTHORITATIVE_DETECTION_COUNTS_QUERY,
-                time_unit="DAY",
-                time_value=str(lookback_days),
-                dialect="YL2",
-            )
-            for row in getattr(query_res, "rows", []):
-                rule_id = str(row.get("rule_id") or row.get("$rule_id") or "")
-                if not rule_id:
-                    continue
-                rule_name = str(row.get("rule_name") or row.get("$rule_name") or "")
-                raw_count = row.get("count") or row.get("$count") or 0
-                first_seen = str(row.get("first_seen") or row.get("$first_seen") or "")
-                last_seen = str(row.get("last_seen") or row.get("$last_seen") or "")
+        query_res = self.adapter.execute_dashboard_query(
+            query_text=AUTHORITATIVE_DETECTION_COUNTS_QUERY,
+            time_unit="DAY",
+            time_value=str(lookback_days),
+            dialect="YL2",
+        )
+        for row in getattr(query_res, "rows", []):
+            rule_id = str(row.get("rule_id") or row.get("$rule_id") or "")
+            if not rule_id:
+                continue
+            rule_name = str(row.get("rule_name") or row.get("$rule_name") or "")
+            raw_count = row.get("count") or row.get("$count") or 0
+            first_seen = str(row.get("first_seen") or row.get("$first_seen") or "")
+            last_seen = str(row.get("last_seen") or row.get("$last_seen") or "")
 
-                try:
-                    count_val = int(raw_count)
-                except (ValueError, TypeError):
-                    count_val = 0
+            try:
+                count_val = int(raw_count)
+            except (ValueError, TypeError):
+                count_val = 0
 
-                results_by_rule[rule_id] = {
-                    "rule_id": rule_id,
-                    "rule_name": rule_name,
-                    "count": count_val,
-                    "first_seen": first_seen if first_seen else None,
-                    "last_seen": last_seen if last_seen else None,
-                }
-        except Exception as e:
-            logger.warning("Failed executing authoritative detection counts query: %s", e)
+            prev = results_by_rule.get(rule_id)
+            if prev:
+                # Same rule id under a second display name (renamed in window).
+                prev["count"] += count_val
+                continue
+            results_by_rule[rule_id] = {
+                "rule_id": rule_id,
+                "rule_name": rule_name,
+                "count": count_val,
+                "first_seen": first_seen if first_seen else None,
+                "last_seen": last_seen if last_seen else None,
+            }
 
         return results_by_rule
+
+
+# Bucket formats for timestamp.get_timestamp (UTC). Verified live 2026-10-10:
+# hour -> "2026-10-09T13", day -> "2026-10-03".
+DETECTION_SERIES_BUCKETS: Dict[str, str] = {
+    "hour": "%Y-%m-%dT%H",
+    "day": "%Y-%m-%d",
+}
+DETECTION_SERIES_ROW_LIMIT = 10000
+
+
+def build_detection_series_query(bucket: str = "hour", rule_id: Optional[str] = None) -> str:
+    """YARA-L dashboard query: detections per (rule_id, rule_name, time bucket).
+
+    A single ``rule_id`` is applied as an equality filter (cheap). Regex filters
+    on ``rule_id`` are deliberately not used: ``rule_id = /^ru_/`` took 112 s live.
+    Rows are ordered newest bucket first so that hitting the row limit drops the
+    oldest buckets.
+    """
+    if bucket not in DETECTION_SERIES_BUCKETS:
+        raise ValueError(f"bucket must be one of {sorted(DETECTION_SERIES_BUCKETS)}, got {bucket!r}")
+    fmt = DETECTION_SERIES_BUCKETS[bucket]
+    if rule_id is not None and not re.fullmatch(r"[A-Za-z0-9_\-]+", rule_id):
+        raise ValueError(f"invalid rule_id {rule_id!r}")
+    rule_filter = f'\n$rule_id = "{rule_id}"' if rule_id else ""
+    return (
+        "$rule_id = detection.detection.rule_id"
+        f"{rule_filter}\n"
+        "$rule_name = detection.detection.rule_name\n"
+        f'$bucket = timestamp.get_timestamp(detection.detection_time.seconds, "{fmt}")\n'
+        "match: $rule_id, $rule_name, $bucket\n"
+        "outcome: $count = count_distinct(detection.id)\n"
+        "order: $bucket desc\n"
+        f"limit: {DETECTION_SERIES_ROW_LIMIT}"
+    )
+
+
+def parse_detection_series_rows(
+    rows: List[Dict[str, Any]],
+    bucket: str,
+    rule_ids: Optional[List[str]] = None,
+) -> Tuple[List[RuleDetectionSeries], int]:
+    """Groups query rows into per-rule series (oldest bucket first).
+
+    Raises ValueError on a row whose bucket does not match the requested
+    format (unexpected schema must stay visible).
+    """
+    fmt = DETECTION_SERIES_BUCKETS[bucket]
+    wanted = set(rule_ids) if rule_ids else None
+    by_rule: Dict[str, Dict[datetime, int]] = {}
+    names: Dict[str, str] = {}
+    total = 0
+    for row in rows:
+        rid = str(row.get("rule_id") or "")
+        if not rid or (wanted is not None and rid not in wanted):
+            continue
+        raw_bucket = str(row.get("bucket") or "")
+        try:
+            start = datetime.strptime(raw_bucket, fmt).replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise ValueError(f"Unexpected detection series bucket {raw_bucket!r} for rule {rid} (format {fmt})") from exc
+        try:
+            count = int(row.get("count") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Unexpected detection count {row.get('count')!r} for rule {rid}") from exc
+        buckets = by_rule.setdefault(rid, {})
+        buckets[start] = buckets.get(start, 0) + count
+        total += count
+        name = str(row.get("rule_name") or "")
+        if name:
+            names[rid] = name
+    series = [
+        RuleDetectionSeries(
+            rule_id=rid,
+            rule_name=names.get(rid, ""),
+            buckets=[RuleDetectionBucket(bucket_start=k, count=v) for k, v in sorted(b.items())],
+        )
+        for rid, b in by_rule.items()
+    ]
+    series.sort(key=lambda s: (-s.total, s.rule_id))
+    return series, total
+
+
+class QueryRuleDetectionSeriesWorkflow:
+    """Bucketed (hour/day) per-rule detection counts in one dashboard query."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        lookback_hours: int = 24,
+        bucket: str = "hour",
+        rule_ids: Optional[List[str]] = None,
+    ) -> RuleDetectionSeriesResult:
+        """Returns per-rule ``(bucket_start, count)`` series, oldest first.
+
+        Args:
+            lookback_hours: Relative window ending now (dashboard ``HOUR`` unit).
+            bucket: ``"hour"`` or ``"day"`` (UTC buckets).
+            rule_ids: Optional rule IDs to keep. One ID is filtered server-side
+                by equality; several are filtered client-side from one query.
+
+        Raises:
+            ValueError: invalid arguments or unexpected row schema.
+            Any adapter error from the dashboard query (never swallowed).
+        """
+        if lookback_hours <= 0:
+            raise ValueError("lookback_hours must be positive")
+        ids = [r.split("/")[-1].strip() for r in (rule_ids or []) if r and r.strip()]
+        single = ids[0] if len(ids) == 1 else None
+        query = build_detection_series_query(bucket=bucket, rule_id=single)
+        res = self.adapter.execute_dashboard_query(
+            query_text=query,
+            time_unit="HOUR",
+            time_value=str(lookback_hours),
+            dialect="YL2",
+        )
+        rows = list(getattr(res, "rows", []) or [])
+        truncated = len(rows) >= DETECTION_SERIES_ROW_LIMIT
+        if truncated:
+            logger.warning(
+                "Detection series query hit the %d-row limit; oldest buckets may be missing. "
+                "Use a shorter lookback or bucket='day'.",
+                DETECTION_SERIES_ROW_LIMIT,
+            )
+        series, total = parse_detection_series_rows(rows, bucket, ids or None)
+        return RuleDetectionSeriesResult(
+            series=series,
+            bucket=bucket,
+            lookback_hours=lookback_hours,
+            total_detections=total,
+            query=query,
+            raw_row_count=len(rows),
+            provenance={
+                "api": "dashboardQueries:execute",
+                "time_window": getattr(res, "time_window", {}),
+                "truncated": truncated,
+                "rule_filter": ids or None,
+            },
+        )
 
 
 class AuditUdmFieldPopulationWorkflow:
@@ -279,13 +436,15 @@ class AuditUdmFieldPopulationWorkflow:
         vendor_product: Optional[str] = None,
         is_array: bool = False,
     ) -> str:
+        # Dashboard (YL2 statement) syntax: predicates are top-level statements.
+        # An ``events:`` section after ``match:`` is rejected by the compiler
+        # ("mismatched input 'events' expecting <EOF>", verified live 2026-10-10).
         filter_clause = f"$e.{path} = /.+/" if is_array else f'$e.{path} != ""'
-        vendor_filter = f' and $e.metadata.product_name = "{vendor_product}"' if vendor_product else ""
+        vendor_filter = f'\n$e.metadata.product_name = "{vendor_product}"' if vendor_product else ""
         return f"""$field_val = $e.{path}
+{filter_clause}{vendor_filter}
 match:
     $field_val
-events:
-    {filter_clause}{vendor_filter}
 outcome:
     $count = count_distinct($e.metadata.id)
 limit:
@@ -365,15 +524,9 @@ limit:
                             "is_array": True,
                             "discovered_at": datetime.now(timezone.utc).isoformat(),
                         })
-                    retry_query = f"""$field_val = $e.{path}
-match:
-    $field_val
-events:
-    $e.{path} = /.+/{vendor_filter}
-outcome:
-    $count = count_distinct($e.metadata.id)
-limit:
-    10"""
+                    retry_query = self._build_field_population_query(
+                        path=path, vendor_product=vendor_product, is_array=True
+                    )
                     try:
                         retry_res = self.adapter.execute_dashboard_query(
                             query_text=retry_query,
@@ -408,9 +561,57 @@ limit:
 
         return audit_results
 
+def _get(obj: Any, *keys: str) -> Any:
+    """First non-empty value of ``keys`` on a dict or attribute-bearing object."""
+    for key in keys:
+        val = obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+        if val:
+            return val
+    return None
+
+
+def _rule_id_of(obj: Any) -> str:
+    rid = _get(obj, "rule_id", "id")
+    if rid:
+        return str(rid)
+    name = _get(obj, "name") or ""
+    return str(name).split("/")[-1].split("@")[0] if name else ""
+
+
+def _deployment_rule_id(name: str) -> str:
+    parts = (name or "").split("/")
+    if len(parts) >= 2 and parts[-1] == "deployment":
+        return parts[-2]
+    return parts[-1] if parts else ""
+
+
+def parse_verify_response(resp: Any) -> Tuple[bool, List[str]]:
+    """Interprets a raw ``verifyRuleText`` response dict.
+
+    Returns ``(success, error_messages)``; diagnostics are only reported as
+    errors when compilation did not succeed (warnings on a successful compile
+    are not breakage).
+
+    Raises:
+        ValueError: when the response is not a dict (unexpected schema).
+    """
+    if not isinstance(resp, dict):
+        raise ValueError(f"Unexpected verifyRuleText response type: {type(resp).__name__}")
+    success = bool(resp.get("success", False))
+    diags = resp.get("compilationDiagnostics") or []
+    messages = [str(d.get("message") or d) if isinstance(d, dict) else str(d) for d in diags]
+    if success:
+        return True, []
+    return False, messages or ["verifyRuleText returned success=false without diagnostics"]
+
 
 class AuditRuleDecayWorkflow:
-    """Orchestrates comprehensive tenant-wide or single-rule decay auditing."""
+    """Orchestrates comprehensive tenant-wide or single-rule decay auditing.
+
+    Read-only against the tenant when ``schema_cache`` is None (a supplied
+    ``schema_cache`` may persist discovered array-field types via
+    ``save_udm_field_schema``).
+    """
 
     def __init__(self, adapter: GoogleSecOpsAdapter):
         self.adapter = adapter
@@ -421,136 +622,153 @@ class AuditRuleDecayWorkflow:
         lookback_days: int = 90,
         check_population: bool = True,
         schema_cache: Optional[Any] = None,
+        max_workers: int = 4,
     ) -> RuleDecayReport:
-        """Executes full detection rule decay audit correlating inventory, 90d telemetry, and UDM checks."""
-        telemetry_wf = QueryRuleDetectionCountsWorkflow(self.adapter)
-        telemetry_map = telemetry_wf.execute(lookback_days=lookback_days)
+        """Executes the decay audit correlating inventory, detection telemetry and live checks.
+
+        * Rules and deployments are read across all pages; a failure to read
+          them raises (an empty inventory must not look like "nothing decayed").
+        * A failed detection-count query is recorded in ``telemetry_errors``
+          with ``telemetry_available=False``; rules are then flagged
+          ``TELEMETRY_UNAVAILABLE`` and never ``SILENT``.
+        * Each non-archived rule's ``text`` is compiled with ``verifyRuleText``.
+          An API failure of that call is recorded per rule in
+          ``compile_check_error`` and in ``check_errors``; it is not treated as
+          broken compilation.
+        * With ``check_population`` the first 10 UDM fields of each rule are
+          checked (deduplicated across rules). Fields whose check query failed
+          go to ``population_check_errors``, not ``unpopulated_fields``.
+
+        Args:
+            max_workers: Concurrent per-rule compile/population checks. Default 4:
+                with 8 workers ``verifyRuleText`` returned 429 (quota) for 8 of 200
+                rules live. Population checks cost ~6-16 s per distinct UDM field.
+        """
+        started = datetime.now(timezone.utc)
+        telemetry_errors: List[str] = []
+        check_errors: List[str] = []
+        telemetry_available = True
+        try:
+            telemetry_map = QueryRuleDetectionCountsWorkflow(self.adapter).execute(lookback_days=lookback_days)
+        except Exception as exc:
+            telemetry_available = False
+            telemetry_map = {}
+            msg = f"Detection count query ({lookback_days}d) failed: {type(exc).__name__}: {exc}"
+            logger.warning(msg)
+            telemetry_errors.append(msg)
 
         deployment_map: Dict[str, Any] = {}
-        if not rule_id:
-            try:
-                deployments_res = self.adapter.list_rule_deployments(page_size=1000)
-                raw_deps = deployments_res.get("ruleDeployments", []) if isinstance(deployments_res, dict) else getattr(deployments_res, "deployments", [])
-                for d in raw_deps:
-                    d_name = getattr(d, "name", "") or (d.get("name", "") if isinstance(d, dict) else "")
-                    parts = d_name.split("/")
-                    if len(parts) >= 2 and parts[-1] == "deployment":
-                        deployment_map[parts[-2]] = d
-                    elif d_name:
-                        deployment_map[d_name.split("/")[-1]] = d
-            except Exception as dep_err:
-                logger.debug("Could not pre-fetch rule deployments for decay audit: %s", dep_err)
-        else:
-            try:
-                dep_res = self.adapter.get_rule_deployment(rule_id)
-                deployment_map[rule_id.split("/")[-1]] = dep_res
-            except Exception as dep_err:
-                logger.debug("Could not fetch deployment for rule %s: %s", rule_id, dep_err)
-
         target_rules: List[Any] = []
         if rule_id:
-            try:
-                rule_detail = self.adapter.get_rule(rule_id, view="FULL")
-                target_rules.append(rule_detail)
-            except Exception as e:
-                logger.error("Failed fetching rule %s for decay audit: %s", rule_id, e)
+            clean_id = rule_id.split("/")[-1].split("@")[0]
+            deployment_map[clean_id] = self.adapter.get_rule_deployment(rule_id)
+            target_rules.append(self.adapter.get_rule(rule_id, view="FULL"))
         else:
+            def fetch_deps(tok: Optional[str]):
+                resp = self.adapter.list_rule_deployments(page_size=1000, page_token=tok)
+                return list(resp.get("ruleDeployments", []) or []), resp.get("nextPageToken")
+
+            raw_deps, _, _ = collect_pages(fetch_deps)
+            for d in raw_deps:
+                d_id = _deployment_rule_id(_get(d, "name") or "")
+                if d_id:
+                    deployment_map[d_id] = d
+
+            def fetch_rules(tok: Optional[str]):
+                resp = self.adapter.list_rules(page_size=1000, page_token=tok, view="FULL")
+                return list(resp.get("rules", []) or []), resp.get("nextPageToken")
+
+            target_rules, _, _ = collect_pages(fetch_rules)
+
+        # Archived rules are out of scope.
+        active: List[Tuple[Any, str, Any]] = []
+        for r in target_rules:
+            curr_id = _rule_id_of(r)
+            dep = deployment_map.get(curr_id)
+            if bool(_get(dep, "archived")) if dep is not None else False:
+                continue
+            if bool(_get(r, "archived")):
+                continue
+            active.append((r, curr_id, dep))
+
+        pop_cache: Dict[str, Dict[str, Any]] = {}
+
+        def check(entry: Tuple[Any, str, Any]) -> Dict[str, Any]:
+            r, curr_id, _ = entry
+            out: Dict[str, Any] = {
+                "compile_checked": False,
+                "syntax_verified": True,
+                "compiler_errors": [],
+                "compile_check_error": None,
+                "unpopulated": [],
+                "population_check_errors": {},
+                "population_checked": False,
+            }
+            text = _get(r, "text", "rule_text") or ""
+            if not text:
+                out["compile_check_error"] = "Rule text not returned by the API (view=FULL expected)"
+                return out
             try:
-                rules_res = self.adapter.list_rules(page_size=100, view="FULL")
-                if isinstance(rules_res, dict):
-                    target_rules = rules_res.get("rules", [])
-                else:
-                    target_rules = getattr(rules_res, "rules", []) or []
-            except Exception as e:
-                logger.error("Failed listing rules for decay audit: %s", e)
+                success, errs = parse_verify_response(self.adapter.verify_rule_text(rule_text=text))
+                out["compile_checked"] = True
+                out["syntax_verified"] = success
+                out["compiler_errors"] = errs
+            except Exception as exc:
+                out["compile_check_error"] = f"verifyRuleText failed: {type(exc).__name__}: {exc}"
+            if check_population:
+                fields = extract_udm_fields_from_yaral(text)[:10]
+                todo = [f for f in fields if f not in pop_cache]
+                if todo:
+                    results = AuditUdmFieldPopulationWorkflow(self.adapter).execute(
+                        field_paths=todo, lookback_days=30, schema_cache=schema_cache
+                    )
+                    pop_cache.update(results)
+                for f in fields:
+                    info = pop_cache.get(f) or {}
+                    if info.get("error"):
+                        out["population_check_errors"][f] = str(info["error"])
+                    elif not info.get("populated", False):
+                        out["unpopulated"].append(f)
+                out["population_checked"] = bool(fields)
+            return out
+
+        if max_workers and max_workers > 1 and len(active) > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                checks = list(pool.map(check, active))
+        else:
+            checks = [check(e) for e in active]
 
         assessments: List[RuleDecayAssessment] = []
-        broken_count = 0
-        silent_count = 0
-        stale_count = 0
-        unpopulated_count = 0
+        broken_count = silent_count = stale_count = unpopulated_count = 0
+        compile_checked = population_checked = 0
 
-        for r in target_rules:
-            curr_id = (
-                getattr(r, "rule_id", "")
-                or getattr(r, "id", "")
-                or (r.get("rule_id") if isinstance(r, dict) else "")
-                or (r.get("id") if isinstance(r, dict) else "")
-            )
-            if not curr_id:
-                raw_name = getattr(r, "name", "") or (r.get("name") if isinstance(r, dict) else "")
-                if raw_name:
-                    curr_id = raw_name.split("/")[-1].split("@")[0]
-
-            dep = deployment_map.get(curr_id)
-            is_archived = False
-            if dep:
-                is_archived = bool(
-                    getattr(dep, "archived", False)
-                    or (dep.get("archived", False) if isinstance(dep, dict) else False)
-                )
-            if not is_archived:
-                is_archived = bool(
-                    getattr(r, "archived", False)
-                    or (r.get("archived", False) if isinstance(r, dict) else False)
-                )
-
-            if is_archived:
-                continue
-
-            # Determine true live state
-            is_live = False
-            if dep:
-                # Only `enabled` means deployed. runFrequency is always present and
-                # "ACTIVE" is not an ExecutionState value (DEFAULT/LIMITED/PAUSED).
-                is_live = bool(
-                    dep.get("enabled", False) if isinstance(dep, dict) else getattr(dep, "enabled", False)
-                )
+        for (r, curr_id, dep), chk in zip(active, checks):
+            # Only `enabled` means deployed. runFrequency is always present and
+            # "ACTIVE" is not an ExecutionState value (DEFAULT/LIMITED/PAUSED).
+            if dep is not None:
+                is_live = bool(_get(dep, "enabled"))
             else:
-                is_live = bool(getattr(r, "live_mode_enabled", False) or (r.get("live_mode_enabled") if isinstance(r, dict) else False))
+                is_live = bool(_get(r, "live_mode_enabled"))
+            curr_name = _get(r, "displayName", "display_name", "rule_name") or _get(r, "name") or curr_id
 
-            curr_name = (
-                getattr(r, "display_name", "")
-                or (r.get("display_name") if isinstance(r, dict) else "")
-                or getattr(r, "name", "")
-                or (r.get("name") if isinstance(r, dict) else "")
-            )
-            curr_text = getattr(r, "rule_text", "") or getattr(r, "text", "") or (r.get("rule_text", "") if isinstance(r, dict) else "")
-
-            syntax_verified = True
-            compiler_diags: List[str] = []
-            if curr_text:
-                try:
-                    val_res = self.adapter.verify_rule_text(rule_text=curr_text)
-                    syntax_verified = bool(getattr(val_res, "success", True))
-                    compiler_diags = [str(d) for d in getattr(val_res, "diagnostics", [])]
-                except Exception as comp_err:
-                    syntax_verified = False
-                    compiler_diags = [str(comp_err)]
-
-            unpopulated: List[str] = []
-            if check_population and curr_text:
-                extracted_fields = extract_udm_fields_from_yaral(curr_text)
-                if extracted_fields:
-                    pop_wf = AuditUdmFieldPopulationWorkflow(self.adapter)
-                    pop_results = pop_wf.execute(
-                        field_paths=extracted_fields[:10],
-                        lookback_days=30,
-                        schema_cache=schema_cache,
-                    )
-                    for f_path, f_info in pop_results.items():
-                        if not f_info.get("populated", False):
-                            unpopulated.append(f_path)
+            if chk["compile_checked"]:
+                compile_checked += 1
+            if chk["compile_check_error"]:
+                check_errors.append(f"{curr_id}: {chk['compile_check_error']}")
+            if chk["population_checked"]:
+                population_checked += 1
+            for f_path, err in chk["population_check_errors"].items():
+                check_errors.append(f"{curr_id}: population check {f_path}: {err}")
 
             rule_telemetry = telemetry_map.get(curr_id)
-
             dps_score, flags, rec, days_stale = calculate_decay_score(
                 rule_detail=r,
                 detection_telemetry_90d=rule_telemetry,
-                unpopulated_fields=unpopulated,
-                syntax_verified=syntax_verified,
-                compiler_diagnostics=compiler_diags,
+                unpopulated_fields=chk["unpopulated"],
+                syntax_verified=chk["syntax_verified"],
+                compiler_diagnostics=chk["compiler_errors"],
                 is_live=is_live,
+                telemetry_available=telemetry_available,
             )
 
             if "BROKEN_COMPILATION" in flags:
@@ -562,27 +780,31 @@ class AuditRuleDecayWorkflow:
             if "UNPOPULATED" in flags:
                 unpopulated_count += 1
 
-            assessment = RuleDecayAssessment(
-                rule_id=curr_id,
-                rule_name=curr_name,
-                dps_score=dps_score,
-                decay_flags=flags,
-                is_live=is_live,
-                days_stale=days_stale,
-                detection_count_90d=rule_telemetry.get("count", 0) if rule_telemetry else 0,
-                first_seen=rule_telemetry.get("first_seen") if rule_telemetry else None,
-                last_seen=rule_telemetry.get("last_seen") if rule_telemetry else None,
-                unpopulated_fields=unpopulated,
-                compiler_errors=compiler_diags if not syntax_verified else [],
-                recommendation=rec,
-                raw={
-                    "rule_id": curr_id,
-                    "name": curr_name,
-                    "dps_score": dps_score,
-                    "flags": flags,
-                },
+            assessments.append(
+                RuleDecayAssessment(
+                    rule_id=curr_id,
+                    rule_name=str(curr_name),
+                    dps_score=dps_score,
+                    decay_flags=flags,
+                    is_live=is_live,
+                    days_stale=days_stale,
+                    detection_count_90d=rule_telemetry.get("count", 0) if rule_telemetry else 0,
+                    first_seen=rule_telemetry.get("first_seen") if rule_telemetry else None,
+                    last_seen=rule_telemetry.get("last_seen") if rule_telemetry else None,
+                    unpopulated_fields=chk["unpopulated"],
+                    compiler_errors=chk["compiler_errors"] if not chk["syntax_verified"] else [],
+                    recommendation=rec,
+                    compile_checked=chk["compile_checked"],
+                    compile_check_error=chk["compile_check_error"],
+                    population_check_errors=chk["population_check_errors"],
+                    raw={
+                        "rule_id": curr_id,
+                        "name": curr_name,
+                        "dps_score": dps_score,
+                        "flags": flags,
+                    },
+                )
             )
-            assessments.append(assessment)
 
         assessments.sort(key=lambda x: x.dps_score, reverse=True)
         avg_dps = sum(a.dps_score for a in assessments) / len(assessments) if assessments else 0.0
@@ -595,4 +817,11 @@ class AuditRuleDecayWorkflow:
             stale_count=stale_count,
             unpopulated_count=unpopulated_count,
             average_dps=round(avg_dps, 2),
+            lookback_days=lookback_days,
+            telemetry_available=telemetry_available,
+            telemetry_errors=telemetry_errors,
+            compile_checked_count=compile_checked,
+            population_checked_count=population_checked,
+            check_errors=check_errors,
+            duration_s=round((datetime.now(timezone.utc) - started).total_seconds(), 2),
         )

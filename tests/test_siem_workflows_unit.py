@@ -176,7 +176,14 @@ class TestSiemWorkflowsUnit(unittest.TestCase):
         with self.assertRaises(SecOpsConfigurationError):
             wf.execute("raw = /test/")
 
-        adapter.validate_raw_log_query.side_effect = RuntimeError("Syntax error at token 1")
+        # Adapter exceptions (network/auth/429) propagate; they are never
+        # reported as invalid syntax. Compile errors arrive as HTTP 200
+        # errorText (verified live 2026-10-10) and still yield is_valid=False.
+        adapter.validate_raw_log_query.side_effect = RuntimeError("Network error connecting to Google SecOps")
+        with self.assertRaises(RuntimeError):
+            wf.execute("raw = /test/")
+        adapter.validate_raw_log_query.side_effect = None
+        adapter.validate_raw_log_query.return_value = {"errorType": "INVALID_QUERY_TYPE", "errorText": "Syntax error at token 1"}
         res = wf.execute("raw = /test/")
         self.assertFalse(res.is_valid)
         self.assertIn("Syntax error", res.error_message)

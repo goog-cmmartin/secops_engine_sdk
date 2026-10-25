@@ -1,12 +1,22 @@
 """Workflow implementation for querying Google Cloud Logging for SecOps events, errors, and audit logs."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional
 
 from engine.domain import GcpLogEntry, GcpLogQueryResult
 
 logger = logging.getLogger(__name__)
+
+
+def _since_clause(hours: float, now: Optional[datetime] = None) -> str:
+    """``timestamp >= "<RFC 3339 start>"`` for the last ``hours``.
+
+    Cloud Logging's query language compares timestamps to literal times only; it has no date
+    arithmetic, so ``"<now>" - 24h`` is rejected (or silently matches nothing).
+    """
+    start = (now or datetime.now(timezone.utc)) - timedelta(hours=hours)
+    return f'timestamp >= "{start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}"'
 
 
 def _normalize_log_entry(raw: Dict[str, Any]) -> GcpLogEntry:
@@ -77,11 +87,11 @@ class GcpLoggingQueryWorkflow:
     ) -> GcpLogQueryResult:
         """Pre-packaged query for SecOps operational errors (Chronicle, forwarders, parsers)."""
         filter_parts = [
-            f'timestamp >= "{datetime.now(timezone.utc).isoformat()}" - {hours}h',
+            _since_clause(hours),
             'severity >= ERROR',
         ]
         if component:
-            filter_parts.append(f'jsonPayload.component = "{component}" OR textPayload =~ "{component}"')
+            filter_parts.append(f'(jsonPayload.component = "{component}" OR textPayload =~ "{component}")')
 
         combined_filter = " AND ".join(filter_parts)
         return self.execute(filter_str=combined_filter, page_size=page_size)
@@ -95,7 +105,7 @@ class GcpLoggingQueryWorkflow:
         """Pre-packaged query for SecOps Cloud Audit logs (cloudaudit.googleapis.com)."""
         filter_parts = [
             'logName =~ "cloudaudit.googleapis.com"',
-            f'timestamp >= "{datetime.now(timezone.utc).isoformat()}" - {hours}h',
+            _since_clause(hours),
         ]
         if human_only is True:
             # Filter for user accounts vs service accounts

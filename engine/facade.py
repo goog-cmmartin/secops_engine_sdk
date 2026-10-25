@@ -10,6 +10,7 @@ from engine.domain import (
     PlaybookInstanceStep,
     CaseCommentRecord,
     CaseInvestigation,
+    CaseListBatch,
     CaseSearchBatch,
     CaseSearchPrefix,
     CaseSearchQuery,
@@ -284,6 +285,7 @@ from engine.domain import (
     GcpLogQueryResult,
     MetricPoint,
     TimeSeriesData,
+    ChronicleIngestionMetricsResult,
     GcpMonitoringQueryResult,
     ChronicleCustomRole,
     ChronicleIamMember,
@@ -327,6 +329,7 @@ from engine.workflows.case_investigation import (
     AddCaseCommentWorkflow,
     InvestigateCaseWorkflow,
 )
+from engine.workflows.case_list import ListCasesWorkflow
 from engine.workflows.case_search import SearchCasesWorkflow
 from engine.workflows.case_triage import (
     CaseTriageWorkflow,
@@ -347,6 +350,9 @@ from engine.workflows.curated_detections import (
     GetCuratedDetectionMetricsWorkflow,
     GetCuratedRuleDetailWorkflow,
     GetCuratedRuleSetDetailWorkflow,
+    ListCuratedRuleSetDeploymentsWorkflow,
+    ListCuratedRuleSetsWorkflow,
+    ListCuratedRulesWorkflow,
     SearchCuratedRuleSetsWorkflow,
     SetCuratedRuleSetDeploymentWorkflow,
 )
@@ -356,6 +362,7 @@ from engine.workflows.detection_tuning import (
     DiagnoseAndTuneDetectionWorkflow,
     FindTopNoisyRulesWorkflow,
     ManageFindingsRefinementsWorkflow,
+    QueryRuleCaseEnvironmentsWorkflow,
     SampleDetectionEventsWorkflow,
     SynthesizeMultiFactorExclusionWorkflow,
     SynthesizeTuningProposalWorkflow,
@@ -452,6 +459,9 @@ from engine.workflows.refine_search import (
 )
 from engine.workflows.search_udm import SearchUDMWorkflow
 from engine.workflows.search_udm_stats import SearchUDMStatsWorkflow
+from engine.workflows.udm_aggregate import AggregateUdmWorkflow
+from engine.workflows.udm_query_assist import FindUdmFieldValuesWorkflow, TranslateUdmQueryWorkflow
+from engine.domain import UdmAggregateResult, UdmFieldValueMatches, UdmQueryTranslation
 from engine.workflows.siem_settings import (
     GetAgentSettingsWorkflow,
     GetEntityRiskConfigWorkflow,
@@ -541,11 +551,19 @@ from engine.workflows.identity_governance import IdentityGovernanceWorkflow
 from engine.workflows.rule_decay import (
     AuditRuleDecayWorkflow,
     QueryRuleDetectionCountsWorkflow,
+    QueryRuleDetectionSeriesWorkflow,
     AuditUdmFieldPopulationWorkflow,
     calculate_decay_score,
     extract_udm_fields_from_yaral,
 )
 from engine.domain import RuleDecayAssessment, RuleDecayReport
+from engine.domain import (
+    CuratedRuleListResult,
+    CuratedRuleSetDeploymentListResult,
+    CuratedRuleSetListResult,
+    RuleCaseEnvironmentResult,
+    RuleDetectionSeriesResult,
+)
 from engine.workflows.rule_conflict import (
     AuditRuleConflictWorkflow,
     BatchAuditRuleConflictsWorkflow,
@@ -654,6 +672,9 @@ class SecOpsEngine:
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
         "_search_udm_stats_wf": lambda e: SearchUDMStatsWorkflow(e.adapter),
+        "_aggregate_udm_wf": lambda e: AggregateUdmWorkflow(e.adapter),
+        "_find_udm_field_values_wf": lambda e: FindUdmFieldValuesWorkflow(e.adapter),
+        "_translate_udm_query_wf": lambda e: TranslateUdmQueryWorkflow(e.adapter),
         "_query_product_source_stats_wf": lambda e: QueryProductSourceStatsWorkflow(e.adapter),
         "_validate_raw_log_query_wf": lambda e: ValidateRawLogQueryWorkflow(e.adapter),
         "_search_raw_logs_wf": lambda e: SearchRawLogsWorkflow(e.adapter),
@@ -689,6 +710,7 @@ class SecOpsEngine:
         "_get_alert_latest_tina_investigation_wf": lambda e: GetAlertLatestTinaInvestigationWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
+        "_list_cases_wf": lambda e: ListCasesWorkflow(e.adapter),
         "_case_triage_wf": lambda e: CaseTriageWorkflow(e.adapter),
         "_get_case_timeline_wf": lambda e: GetCaseTimelineWorkflow(e.adapter),
         "_orchestrate_case_triage_wf": lambda e: OrchestrateCaseTriageWorkflow(e.adapter, triage_workflow=e._case_triage_wf),
@@ -725,6 +747,9 @@ class SecOpsEngine:
         "_get_content_pack_wf": lambda e: GetContentPackDetailWorkflow(e.adapter),
         "_list_content_pack_cats_wf": lambda e: ListContentPackCategoriesWorkflow(e.adapter),
         "_search_curated_rulesets_wf": lambda e: SearchCuratedRuleSetsWorkflow(e.adapter),
+        "_list_curated_rule_set_deployments_wf": lambda e: ListCuratedRuleSetDeploymentsWorkflow(e.adapter),
+        "_list_curated_rulesets_wf": lambda e: ListCuratedRuleSetsWorkflow(e.adapter),
+        "_list_curated_rules_wf": lambda e: ListCuratedRulesWorkflow(e.adapter),
         "_get_curated_ruleset_wf": lambda e: GetCuratedRuleSetDetailWorkflow(e.adapter),
         "_get_curated_rule_wf": lambda e: GetCuratedRuleDetailWorkflow(e.adapter),
         "_get_curated_metrics_wf": lambda e: GetCuratedDetectionMetricsWorkflow(e.adapter),
@@ -732,6 +757,7 @@ class SecOpsEngine:
         "_find_top_noisy_rules_wf": lambda e: FindTopNoisyRulesWorkflow(e.adapter),
         "_analyze_entity_cardinality_wf": lambda e: AnalyzeEntityCardinalityWorkflow(e.adapter),
         "_cross_reference_rule_cases_wf": lambda e: CrossReferenceRuleCasesWorkflow(e.adapter),
+        "_rule_case_environments_wf": lambda e: QueryRuleCaseEnvironmentsWorkflow(e.adapter),
         "_test_findings_refinement_wf": lambda e: TestFindingsRefinementWorkflow(e.adapter),
         "_manage_findings_refinements_wf": lambda e: ManageFindingsRefinementsWorkflow(e.adapter),
         "_diagnose_and_tune_detection_wf": lambda e: DiagnoseAndTuneDetectionWorkflow(
@@ -868,6 +894,7 @@ class SecOpsEngine:
         "_query_cloud_monitoring_wf": lambda e: GcpMonitoringQueryWorkflow(e.adapter),
         "_audit_rule_decay_wf": lambda e: AuditRuleDecayWorkflow(e.adapter),
         "_query_rule_detection_counts_wf": lambda e: QueryRuleDetectionCountsWorkflow(e.adapter),
+        "_query_rule_detection_series_wf": lambda e: QueryRuleDetectionSeriesWorkflow(e.adapter),
         "_audit_udm_population_wf": lambda e: AuditUdmFieldPopulationWorkflow(e.adapter),
         "_audit_rule_conflict_wf": lambda e: AuditRuleConflictWorkflow(e.adapter),
         "_batch_audit_rule_conflicts_wf": lambda e: BatchAuditRuleConflictsWorkflow(e.adapter),
@@ -917,6 +944,56 @@ class SecOpsEngine:
                 mcp_tool_name="search_udm_stats",
                 composed=False,
                 evidence_path="evidence/search/udm_stats",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.aggregate",
+                name="Aggregate UDM Events (Bounded Grid)",
+                description=(
+                    "Counts UDM events grouped by 0-2 allow-listed fields and an optional hour/day "
+                    "bucket in one synchronous dashboard SQL query; restricted, injection-safe filter "
+                    "grammar; lookback <= 168 h, limit <= 2000 rows with truncation flag."
+                ),
+                category="search",
+                handler=self.aggregate_udm,
+                mcp_tool_name="aggregate_udm",
+                composed=False,
+                # Explicit: "aggregate" is not a known read verb. One dashboard
+                # query with a hard row limit (<= 2000) -> bounded query.
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/search/udm_aggregate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.field_values",
+                name="Find UDM Field Values",
+                description="Finds UDM field paths whose recent values match a text fragment (:findUdmFieldValues), for query autocomplete.",
+                category="search",
+                handler=self.find_udm_field_values,
+                mcp_tool_name="find_udm_field_values",
+                composed=False,
+                # Explicit: read-only GET; one page capped by page_size (<= 1000).
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/search/udm_field_values",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="search.udm.translate",
+                name="Translate Natural Language to UDM Query",
+                description="Translates natural-language text into a UDM search query and optional time range (:translateUdmQuery). Does not run the query.",
+                category="search",
+                handler=self.translate_udm_query,
+                mcp_tool_name="translate_udm_query",
+                composed=False,
+                # Explicit: read-only POST returning one translation.
+                kind="query",
+                cardinality="single",
+                evidence_path="evidence/search/udm_translate",
             )
         )
         self.registry.register(
@@ -1323,6 +1400,18 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.list",
+                name="SOAR Case Listing (Exact Status Filter)",
+                description="Lists SOAR cases from the native cases collection with exact open/closed status, environment, priority, stage, assignee, important and incident filters, no time window, paginated up to a caller bound.",
+                category="case",
+                handler=self.list_cases,
+                mcp_tool_name="list_cases",
+                composed=False,
+                evidence_path="discovery/observations/04_case_list_native_collection.md",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="case.orchestrate_triage",
                 name="Orchestrate Case Triage",
                 description="Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases.",
@@ -1618,6 +1707,42 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="curated_detections.deployments.list",
+                name="List Curated Rule Set Deployments",
+                description="Lists every curated rule set BROAD/PRECISE deployment (enabled, alerting) in one bulk call, optionally joined with rule set display names.",
+                category="curated_detections",
+                handler=self.list_curated_rule_set_deployments,
+                mcp_tool_name="list_curated_rule_set_deployments",
+                composed=False,
+                evidence_path="evidence/curated_detections/deployments_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.rulesets.list",
+                name="List Curated Rule Sets",
+                description="Lists Curated Rule Sets with page-token pagination (all_pages / max_results).",
+                category="curated_detections",
+                handler=self.list_curated_rulesets,
+                mcp_tool_name="list_curated_rulesets",
+                composed=False,
+                evidence_path="evidence/curated_detections/rulesets_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="curated_detections.rules.list",
+                name="List Curated Rules",
+                description="Lists individual Google-curated rules with page-token pagination (slow endpoint; cache results).",
+                category="curated_detections",
+                handler=self.list_curated_rules,
+                mcp_tool_name="list_curated_rules",
+                composed=False,
+                evidence_path="evidence/curated_detections/rules_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="curated_detections.get_ruleset",
                 name="Curated Rule Set Deep Inspection",
                 description="Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry.",
@@ -1763,6 +1888,23 @@ class SecOpsEngine:
                 mcp_tool_name="cross_reference_rule_cases",
                 composed=False,
                 evidence_path="evidence/curated_detections/tuning_case_history",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.case_environments",
+                name="Rule to SOAR Environment Join",
+                description="Counts distinct SOAR cases per (detection rule_id, case.environment) over a lookback window in one dashboard query.",
+                category="rule",
+                handler=self.get_rule_case_environments,
+                mcp_tool_name="get_rule_case_environments",
+                composed=False,
+                # Explicit: "case_environments" is not a known read verb. The
+                # result is one aggregated dashboard query with a fixed row
+                # limit, so it is bounded (same as rule.decay.telemetry).
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/rule/case_environments",
             )
         )
         self.registry.register(
@@ -3144,7 +3286,14 @@ class SecOpsEngine:
                 handler=self.audit_rule_health,
                 mcp_tool_name="audit_rule_health",
                 composed=True,
-                uses=("rule.list", "rule.errors", "dashboard.execute_query"),
+                uses=(
+                    "rule.list",
+                    "rule.errors",
+                    "rule.deployment.list",
+                    "rule.decay.telemetry",
+                    "curated_detections.deployments.list",
+                    "dashboard.execute_query",
+                ),
                 evidence_path="evidence/rule/audit_health",
             )
         )
@@ -3157,7 +3306,14 @@ class SecOpsEngine:
                 handler=self.audit_rule_decay,
                 mcp_tool_name="audit_rule_decay",
                 composed=True,
-                uses=("rule.list", "rule.get", "rule.verify", "dashboard.execute_query"),
+                uses=(
+                    "rule.list",
+                    "rule.get",
+                    "rule.verify",
+                    "rule.deployment.list",
+                    "rule.decay.telemetry",
+                    "dashboard.execute_query",
+                ),
                 evidence_path="evidence/rule/decay_audit",
             )
         )
@@ -3173,6 +3329,22 @@ class SecOpsEngine:
                 kind="query",
                 cardinality="bounded",
                 evidence_path="evidence/rule/decay_telemetry",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="rule.detection_series",
+                name="Query Bucketed Rule Detection Series",
+                description="Per-rule detection counts bucketed by hour or day (UTC) over a lookback window, in one dashboard query.",
+                category="rule",
+                handler=self.get_rule_detection_series,
+                mcp_tool_name="get_rule_detection_series",
+                composed=False,
+                # Explicit: "detection_series" is not a known read verb. One
+                # aggregated dashboard query with a fixed row limit -> bounded.
+                kind="query",
+                cardinality="bounded",
+                evidence_path="evidence/rule/detection_series",
             )
         )
         self.registry.register(
@@ -3648,6 +3820,12 @@ class SecOpsEngine:
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
+        case_insensitive: bool = True,
+        generate_ai_overview: bool = False,
+        max_values_per_field: int = 60,
+        include_detections: bool = True,
+        include_prevalence: bool = True,
+        aggregation_fields: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> SearchSession:
         """Executes the canonical UDM Search workflow.
@@ -3656,6 +3834,19 @@ class SecOpsEngine:
         - Passing a pre-built SearchRequest: `engine.search_udm(request)`
         - Passing a query string positionally: `engine.search_udm("metadata.log_type = ...", start_time=..., end_time=...)`
         - Passing flat keyword arguments: `engine.search_udm(query="...", start_time="...", end_time="...")`
+
+        The session carries ``search_stats`` (also exposed as
+        ``total_matched``, ``available_count``, ``too_many_events``/``capped``,
+        ``timeline``, ``activity_timeline``, ``field_aggregations`` and
+        ``aggregates_sampled``). The server materializes at most 30 000
+        matches; with ``capped`` every count and aggregate is a sample.
+
+        Options: ``generate_ai_overview`` (default False; the SDK never parsed
+        the overview), ``case_insensitive`` (default True, as before),
+        ``include_detections`` / ``include_prevalence`` (default True; set
+        False for a lean, cheaper request), ``max_values_per_field`` and
+        ``aggregation_fields`` (subset of field paths to keep in
+        ``field_aggregations``; None keeps all).
         """
         if isinstance(request, SearchRequest):
             req = request
@@ -3681,6 +3872,12 @@ class SecOpsEngine:
                 materialize_budget=materialize_budget,
                 dialect=dialect or kwargs.get("dialect"),
                 user_sql=user_sql or kwargs.get("user_sql"),
+                case_insensitive=case_insensitive,
+                generate_ai_overview=generate_ai_overview,
+                max_values_per_field=max_values_per_field,
+                include_detections=include_detections,
+                include_prevalence=include_prevalence,
+                aggregation_fields=list(aggregation_fields) if aggregation_fields is not None else None,
             )
 
         return self._search_udm_wf.execute(
@@ -3708,8 +3905,16 @@ class SecOpsEngine:
         cancel_token: Optional[Any] = None,
         poll_interval: float = 0.5,
         max_poll_seconds: float = 120.0,
+        include_detections: bool = True,
+        include_prevalence: bool = True,
     ) -> StatsSearchSession:
-        """Executes the canonical UDM Stats Search (Aggregation & Analytics) workflow."""
+        """Executes the canonical UDM Stats Search (Aggregation & Analytics) workflow.
+
+        ``case_insensitive``, ``generate_ai_overview``, ``max_values_per_field``,
+        ``include_detections`` and ``include_prevalence`` are sent to the
+        search view (they used to be ignored and hardcoded). With
+        ``case_insensitive=True`` grouped string values come back lower-cased.
+        """
         if isinstance(request, StatsSearchRequest):
             req = request
         else:
@@ -3731,6 +3936,8 @@ class SecOpsEngine:
                 max_values_per_field=max_values_per_field,
                 dialect=dialect,
                 user_sql=user_sql,
+                include_detections=include_detections,
+                include_prevalence=include_prevalence,
             )
 
         return self._search_udm_stats_wf.execute(
@@ -3741,6 +3948,70 @@ class SecOpsEngine:
             poll_interval=poll_interval,
             max_poll_seconds=max_poll_seconds,
         )
+
+    def aggregate_udm(
+        self,
+        filter: str = "",
+        group_by: Optional[List[str]] = None,
+        time_bucket: Optional[str] = None,
+        lookback_hours: int = 24,
+        limit: int = 500,
+        metric: str = "count",
+        distinct_field: Optional[str] = None,
+        start_time: Optional[Union[str, datetime]] = None,
+        end_time: Optional[Union[str, datetime]] = None,
+        clear_cache: Optional[bool] = None,
+    ) -> UdmAggregateResult:
+        """Counts UDM events by 0-2 allow-listed fields and an optional UTC hour/day bucket.
+
+        One synchronous ``dashboardQueries:execute`` call (GoogleSQL pipe
+        syntax). ``group_by`` defaults to ``["metadata.log_type"]``; pass ``[]``
+        for a single total. ``filter`` is a restricted UDM-search predicate
+        (``field = "value"``, ``!=``, ``<``/``<=``/``>``/``>=``, AND/OR/NOT,
+        parentheses) over the same allow-list, translated to SQL with escaped
+        literals; anything else raises ``UdmFilterError``. ``metric`` is
+        ``count`` or ``count_distinct`` (with a scalar ``distinct_field``).
+
+        Bounds (ValueError): lookback / window <= 168 h, 1 <= limit <= 2000,
+        at most 2 group_by fields. ``truncated`` is True when more than
+        ``limit`` rows exist (the SDK requests limit + 1). Query errors raise.
+        See ``engine/workflows/udm_aggregate.py`` for the allow-list and the
+        repeated-field (per-value) semantics.
+        """
+        return self._aggregate_udm_wf.execute(
+            filter=filter,
+            group_by=["metadata.log_type"] if group_by is None else group_by,
+            time_bucket=time_bucket,
+            lookback_hours=lookback_hours,
+            limit=limit,
+            metric=metric,
+            distinct_field=distinct_field,
+            start_time=start_time,
+            end_time=end_time,
+            clear_cache=clear_cache,
+        )
+
+    def find_udm_field_values(
+        self,
+        query: str,
+        page_size: int = 20,
+        page_token: Optional[str] = None,
+    ) -> UdmFieldValueMatches:
+        """Finds UDM field paths whose recent values match ``query`` (autocomplete).
+
+        Read-only ``GET :findUdmFieldValues``. Matches can come from any UDM
+        field (including user ids and registry values); project before showing
+        them to untrusted users.
+        """
+        return self._find_udm_field_values_wf.execute(query=query, page_size=page_size, page_token=page_token)
+
+    def translate_udm_query(self, text: str) -> UdmQueryTranslation:
+        """Translates natural language into a UDM search query (+ optional time range).
+
+        Read-only ``POST :translateUdmQuery``; does not run the query. Whether
+        it consumes Gemini quota is UNKNOWN.
+        """
+        return self._translate_udm_query_wf.execute(text=text)
 
     def query_product_source_stats(
         self,
@@ -4309,6 +4580,67 @@ class SecOpsEngine:
             page_number=page_number,
         )
 
+    def list_cases(
+        self,
+        status: Optional[Union[str, CaseStatus]] = None,
+        environments: Optional[Union[List[str], str]] = None,
+        priorities: Optional[Union[List[Union[str, CasePriority]], str, CasePriority]] = None,
+        stages: Optional[Union[List[str], str]] = None,
+        assignees: Optional[Union[List[str], str]] = None,
+        is_important: Optional[bool] = None,
+        is_incident: Optional[bool] = None,
+        filter: Optional[str] = None,
+        order_by: Optional[str] = "createTime desc",
+        max_results: int = 1000,
+        page_size: int = 1000,
+    ) -> CaseListBatch:
+        """Lists cases from the native cases collection with exact server-side filters.
+
+        Prefer this over :meth:`search_cases` when you need an exact open/closed
+        status filter or cases regardless of age: the legacy search has no status
+        filter and is bounded by a time window, so long-lived open cases are
+        invisible to it. Use :meth:`search_cases` for keyword / ``Entity:`` /
+        ``AlertName:`` DSL queries and tag filters, which this endpoint lacks.
+
+        Args:
+            status: ``"OPENED"``/``"OPEN"``/``CaseStatus.OPEN`` or the CLOSED forms.
+            environments, priorities, stages, assignees: one value or a list;
+                values within a facet are OR-ed, facets are AND-ed. Priorities
+                accept ``CasePriority``, ``"HIGH"`` or ``"PRIORITY_HIGH"``
+                (``INFO`` is also valid server-side).
+            is_important / is_incident: exact boolean filters.
+            filter: raw server filter AND-ed with the typed facets, e.g.
+                ``'createTime > 1791000000000'`` (epoch millis, unquoted).
+            order_by: e.g. ``"createTime desc"`` (default), ``"updateTime desc"``,
+                ``"priority desc"``; unknown fields raise HTTP 400.
+            max_results: upper bound on cases fetched across pages.
+            page_size: per-request size, 1..1000 (server maximum is 1000).
+
+        Returns:
+            :class:`CaseListBatch` with ``cases`` (:class:`CaseListItem`),
+            ``total_count`` (server ``totalSize`` for the filter),
+            ``next_page_token`` (set when ``max_results`` cut the listing short)
+            and ``provenance``.
+
+        Example::
+
+            batch = engine.list_cases(status="OPENED", environments="Demoverse", max_results=5000)
+            print(batch.total_count, len(batch.cases))
+        """
+        return self._list_cases_wf.execute(
+            status=status,
+            environments=environments,
+            priorities=priorities,
+            stages=stages,
+            assignees=assignees,
+            is_important=is_important,
+            is_incident=is_incident,
+            raw_filter=filter,
+            order_by=order_by,
+            max_results=max_results,
+            page_size=page_size,
+        )
+
     def triage_case(
         self,
         case_id: Union[str, int],
@@ -4503,16 +4835,25 @@ class SecOpsEngine:
         days: int = 7,
         clear_cache: bool = True,
         project_id: Optional[str] = None,
+        persist: bool = True,
     ) -> TimestampIntegrityReport:
-        """Audits log sources for ingestion latency bottlenecks and NTP clock skews."""
+        """Audits log sources for ingestion latency bottlenecks and NTP clock skews.
+
+        ``persist=False`` skips the Evidence Fabric write (read-only run). Writes
+        only happen when the engine was constructed with an ``evidence_store``.
+        """
         return self._timestamp_integrity_wf.execute(
             days=days,
             clear_cache=clear_cache,
             project_id=project_id,
+            persist=persist,
         )
 
     def get_latest_timestamp_integrity(self) -> Optional[Dict[str, Any]]:
-        """Retrieves the latest stored timestamp integrity report from Evidence Fabric."""
+        """Retrieves the latest stored timestamp integrity report from Evidence Fabric (read-only).
+
+        Returns None when no evidence store is wired or no report has been stored.
+        """
         if not self.evidence_store:
             return None
         return self.evidence_store.get_latest_timestamp_integrity()
@@ -4686,12 +5027,73 @@ class SecOpsEngine:
         )
         return self._search_curated_rulesets_wf.execute(q)
 
+    def list_curated_rule_set_deployments(
+        self,
+        include_display_names: bool = True,
+        page_size: int = 1000,
+        max_results: Optional[int] = None,
+    ) -> CuratedRuleSetDeploymentListResult:
+        """Lists every curated rule set precision deployment (all pages, one bulk endpoint).
+
+        Records: ``rule_set_id``, ``category_id``, ``precision`` (BROAD/PRECISE),
+        ``enabled``, ``alerting``, ``display_name`` (joined from the rule set
+        catalog when ``include_display_names``), ``resource_name``, ``raw``.
+        """
+        return self._list_curated_rule_set_deployments_wf.execute(
+            include_display_names=include_display_names,
+            page_size=page_size,
+            max_results=max_results,
+        )
+
+    def list_curated_rulesets(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+        category_id: Optional[str] = None,
+    ) -> CuratedRuleSetListResult:
+        """Lists Curated Rule Sets (single page by default; ``all_pages=True`` for every page)."""
+        return self._list_curated_rulesets_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            all_pages=all_pages,
+            max_results=max_results,
+            category_id=category_id,
+        )
+
+    def list_curated_rules(
+        self,
+        page_size: int = 1000,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+    ) -> CuratedRuleListResult:
+        """Lists individual curated rules (single page by default; slow, ~20 s per page)."""
+        return self._list_curated_rules_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            all_pages=all_pages,
+            max_results=max_results,
+        )
+
     def get_curated_ruleset(
         self,
         ruleset_id_or_title: str,
+        include_rules: bool = True,
+        include_detection_count: bool = True,
     ) -> CuratedRuleSetDetail:
-        """Deep-inspects a Curated Rule Set, its deployments, member rules, and detection telemetry."""
-        return self._get_curated_ruleset_wf.execute(ruleset_id_or_title)
+        """Deep-inspects a Curated Rule Set, its deployments, member rules, and detection telemetry.
+
+        IDs and resource names are fetched directly; titles must match exactly
+        or be a unique substring (ambiguity raises). ``include_rules=False``
+        skips the slow member-rule catalog scan.
+        """
+        return self._get_curated_ruleset_wf.execute(
+            ruleset_id_or_title,
+            include_rules=include_rules,
+            include_detection_count=include_detection_count,
+        )
 
     def get_curated_rule(
         self,
@@ -4743,9 +5145,17 @@ class SecOpsEngine:
     def list_findings_refinements(
         self,
         page_size: int = 100,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
     ) -> FindingsRefinementBatch:
         """Lists active tenant UDM findings refinements and detection exclusions."""
-        return self._manage_findings_refinements_wf.list_refinements(page_size=page_size)
+        return self._manage_findings_refinements_wf.list_refinements(
+            page_size=page_size,
+            page_token=page_token,
+            all_pages=all_pages,
+            max_results=max_results,
+        )
 
     def create_findings_refinement(
         self,
@@ -4818,13 +5228,27 @@ class SecOpsEngine:
         rule_id: str,
         lookback_days: int = 90,
         limit: int = 20,
+        environment: Optional[str] = None,
     ) -> RuleCaseHistoryBatch:
-        """Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes."""
+        """Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes.
+
+        Records include ``environment`` and the numeric ``soar_case_id``;
+        ``environment`` filters by exact SOAR environment name.
+        """
         return self._cross_reference_rule_cases_wf.execute(
             rule_id=rule_id,
             lookback_days=lookback_days,
             limit=limit,
+            environment=environment,
         )
+
+    def get_rule_case_environments(self, lookback_days: int = 30) -> RuleCaseEnvironmentResult:
+        """Rule -> SOAR environment join: distinct cases per (rule_id, environment).
+
+        Pairs carry ``rule_id``, ``rule_name``, ``environment``, ``case_count``.
+        One dashboard query (~15-20 s for 30 days). Raises on query error.
+        """
+        return self._rule_case_environments_wf.execute(lookback_days=lookback_days)
 
     def tune_detection(
         self,
@@ -5665,8 +6089,13 @@ class SecOpsEngine:
         end_time: Optional[str] = None,
         max_matches: int = 10000,
         add_mandiant_attributes: bool = True,
+        lookback_days: Optional[int] = None,
     ) -> EnterpriseIocBatch:
-        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator."""
+        """Searches enterprise-wide IoC matches and Mandiant threat intel for an indicator.
+
+        Without ``start_time`` the window is all time (epoch), or the last
+        ``lookback_days`` when given. IPs auto-detect to ``ASSET_IP_ADDRESS``.
+        """
         return self._search_enterprise_iocs_wf.execute(
             value=value,
             value_type=value_type,
@@ -5674,20 +6103,29 @@ class SecOpsEngine:
             end_time=end_time,
             max_matches=max_matches,
             add_mandiant_attributes=add_mandiant_attributes,
+            lookback_days=lookback_days,
         )
 
     def summarize_entity(
         self,
-        entity_id: str,
+        entity_id: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         return_alerts: bool = False,
         return_prevalence: bool = True,
         include_all_udm_event_types: bool = True,
+        field_value: Optional[str] = None,
+        value_type: Optional[str] = None,
     ) -> EntitySummaryResult:
-        """Retrieves entity summary profile, timeline intervals, and prevalence."""
+        """Retrieves entity summary profile, timeline intervals, and prevalence.
+
+        Look up by ``entity_id`` or by ``field_value`` (+ ``value_type``, e.g.
+        HOSTNAME / ASSET_IP_ADDRESS; auto-detected when omitted).
+        """
         return self._summarize_entity_wf.execute(
             entity_id=entity_id,
+            field_value=field_value,
+            value_type=value_type,
             start_time=start_time,
             end_time=end_time,
             return_alerts=return_alerts,
@@ -5852,13 +6290,21 @@ class SecOpsEngine:
         page_token: Optional[str] = None,
         filter_expr: Optional[str] = None,
         view: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
     ) -> RuleListResult:
-        """Lists custom YARA-L detection rules in Chronicle SIEM."""
+        """Lists custom YARA-L detection rules in Chronicle SIEM.
+
+        One page by default (backward compatible). ``all_pages=True`` follows
+        ``nextPageToken`` to the end; ``max_results`` caps the item count.
+        """
         return self._list_rules_wf.execute(
             page_size=page_size,
             page_token=page_token,
             filter_expr=filter_expr,
             view=view,
+            all_pages=all_pages,
+            max_results=max_results,
         )
 
     def get_rule(
@@ -5918,11 +6364,18 @@ class SecOpsEngine:
         self,
         page_size: int = 1000,
         page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
     ) -> RuleDeploymentListResult:
-        """Lists deployment, frequency, and alerting status for all detection rules."""
+        """Lists deployment, frequency, and alerting status for all detection rules.
+
+        ``all_pages=True`` follows ``nextPageToken`` to the end.
+        """
         return self._list_rule_deployments_wf.execute(
             page_size=page_size,
             page_token=page_token,
+            all_pages=all_pages,
+            max_results=max_results,
         )
 
     def get_rule_deployment(self, rule_id_or_name: str) -> RuleDeployment:
@@ -5951,12 +6404,23 @@ class SecOpsEngine:
         rule_id_or_name: Optional[str] = None,
         page_size: int = 100,
         page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+        since: Optional[Any] = None,
     ) -> RuleExecutionErrorListResult:
-        """Lists runtime and execution errors across detection rules."""
+        """Lists runtime and execution errors across detection rules.
+
+        The API has no time filter. ``since`` (datetime or RFC3339) keeps
+        errors whose ``timeRange.endTime`` is at or after it and implies
+        ``all_pages=True``.
+        """
         return self._list_rule_errors_wf.execute(
             rule_id_or_name=rule_id_or_name,
             page_size=page_size,
             page_token=page_token,
+            all_pages=all_pages,
+            max_results=max_results,
+            since=since,
         )
 
     def audit_rule_health(
@@ -5964,12 +6428,21 @@ class SecOpsEngine:
         include_curated: bool = True,
         latency_threshold_min: float = 30.0,
         page_size: int = 100,
+        error_lookback_days: Optional[int] = None,
     ) -> RuleHealthReport:
-        """Audits detection rule health, errors, latencies, and decay."""
+        """Audits detection rule health, errors, latencies, and decay.
+
+        Reads every page of rules, deployments and errors; curated rule sets
+        are classified from their real deployments. Telemetry failures are
+        reported in ``telemetry_errors`` / ``*_available``.
+        ``error_lookback_days`` limits which execution errors count (None =
+        full history, the previous behaviour).
+        """
         return self._audit_rule_health_wf.execute(
             include_curated=include_curated,
             latency_threshold_min=latency_threshold_min,
             page_size=page_size,
+            error_lookback_days=error_lookback_days,
         )
 
     def query_cloud_logging(
@@ -6042,18 +6515,39 @@ class SecOpsEngine:
 
     def get_chronicle_ingestion_metrics(
         self,
-        hours: int = 24,
-        log_type: Optional[str] = None,
-        alignment_period: str = "3600s",
-        per_series_aligner: str = "ALIGN_SUM",
+        metric: str = "ingestion/log/record_count",
+        lookback_hours: int = 24,
+        log_types: Optional[List[str]] = None,
+        group_by_log_type: bool = True,
+        alignment_period_s: int = 3600,
         project_id: Optional[str] = None,
-    ) -> GcpMonitoringQueryResult:
-        """Queries Chronicle log ingestion volume and count time series."""
-        return self._query_cloud_monitoring_wf.query_chronicle_ingestion_metrics(
-            hours=hours,
-            log_type=log_type,
-            alignment_period=alignment_period,
-            per_series_aligner=per_series_aligner,
+        hours: Optional[int] = None,
+        log_type: Optional[str] = None,
+    ) -> ChronicleIngestionMetricsResult:
+        """Queries one Chronicle ingestion metric from Cloud Monitoring, per log type.
+
+        Args:
+            metric: One of ``ingestion/log/record_count`` (default),
+                ``ingestion/log/bytes_count``, ``normalizer/log/record_count``.
+            lookback_hours: Window ending now.
+            log_types: Optional filter on ``resource.label.log_type``.
+            group_by_log_type: REDUCE_SUM grouped by log type (True) or one
+                ``"ALL"`` series (False).
+            alignment_period_s: ALIGN_SUM alignment period in seconds (default 3600).
+            project_id: Cloud project hosting the Chronicle metrics (default: adapter project).
+            hours: Backward-compatible alias for ``lookback_hours``.
+            log_type: Backward-compatible alias for ``log_types=[log_type]``.
+        """
+        if hours is not None:
+            lookback_hours = hours
+        if log_type:
+            log_types = list(log_types or []) + [log_type]
+        return self._query_cloud_monitoring_wf.query_chronicle_ingestion_series(
+            metric=metric,
+            lookback_hours=lookback_hours,
+            log_types=log_types,
+            group_by_log_type=group_by_log_type,
+            alignment_period_s=alignment_period_s,
             project_id=project_id,
         )
 
@@ -6135,21 +6629,50 @@ class SecOpsEngine:
         lookback_days: int = 90,
         check_population: bool = True,
         schema_cache: Optional[Any] = None,
+        max_workers: int = 4,
     ) -> RuleDecayReport:
-        """Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring."""
+        """Audits detection rules for compilation breakage, silence, staleness, and unpopulated UDM fields with DPS scoring.
+
+        Read-only when ``schema_cache`` is None. Telemetry and per-rule check
+        failures are reported (``telemetry_available``, ``telemetry_errors``,
+        ``check_errors``), never turned into SILENT / BROKEN_COMPILATION.
+        """
         return self._audit_rule_decay_wf.execute(
             rule_id=rule_id,
             lookback_days=lookback_days,
             check_population=check_population,
             schema_cache=schema_cache,
+            max_workers=max_workers,
         )
 
     def get_rule_detection_counts(
         self,
         lookback_days: int = 90,
     ) -> Dict[str, Dict[str, Any]]:
-        """Queries 90-day detection count aggregations using authoritative native detection schema."""
+        """Queries 90-day detection count aggregations using authoritative native detection schema.
+
+        Raises on query failure (an empty dict means no rule fired).
+        """
         return self._query_rule_detection_counts_wf.execute(lookback_days=lookback_days)
+
+    def get_rule_detection_series(
+        self,
+        lookback_hours: int = 24,
+        bucket: str = "hour",
+        rule_ids: Optional[Union[List[str], str]] = None,
+    ) -> RuleDetectionSeriesResult:
+        """Per-rule detection counts bucketed by ``"hour"`` or ``"day"`` (UTC), oldest first.
+
+        One dashboard query; raises on query error. Each series has
+        ``rule_id``, ``rule_name`` and ``buckets`` of ``(bucket_start, count)``;
+        empty buckets are omitted.
+        """
+        ids = parse_id_list(rule_ids, "rule_ids") if rule_ids else None
+        return self._query_rule_detection_series_wf.execute(
+            lookback_hours=lookback_hours,
+            bucket=bucket,
+            rule_ids=ids or None,
+        )
 
     def audit_udm_field_population(
         self,
@@ -6187,9 +6710,19 @@ class SecOpsEngine:
         self,
         rule_id: str,
         limit: int = 6,
+        auto_embed: bool = True,
+        persist: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Finds candidate overlapping or conflicting rules via vector similarity search."""
-        return self._find_similar_rules_wf.execute(rule_id=rule_id, limit=limit)
+        """Finds candidate overlapping or conflicting rules via vector similarity search.
+
+        On a cache miss the target rule is embedded (``auto_embed``) and, if
+        ``persist``, the embedding is saved. ``persist=False`` searches with
+        the fresh embedding without writing; ``auto_embed=False`` only reads
+        the existing vector store.
+        """
+        return self._find_similar_rules_wf.execute(
+            rule_id=rule_id, limit=limit, auto_embed=auto_embed, persist=persist
+        )
 
     def sync_rule_embeddings(
         self,
@@ -6330,13 +6863,19 @@ class SecOpsEngine:
         sync_cache_if_empty: bool = True,
         time_unit: str = "DAY",
         time_value: str = "7",
+        persist: bool = True,
     ) -> MitreCoverageAssessment:
-        """Evaluates detection rules and ingestion telemetry against MITRE ATT&CK matrix and threat profile."""
+        """Evaluates detection rules and ingestion telemetry against MITRE ATT&CK matrix and threat profile.
+
+        ``persist=False`` writes nothing: no cache sync (even when the cache is
+        empty and ``sync_cache_if_empty``) and no saved assessment.
+        """
         return self._analyze_mitre_coverage_wf.execute(
             profile_id=profile_id,
             sync_cache_if_empty=sync_cache_if_empty,
             time_unit=time_unit,
             time_value=time_value,
+            persist=persist,
         )
 
     def get_technique_rules(self, technique_id: str) -> List[Dict[str, Any]]:

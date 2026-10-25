@@ -20,8 +20,10 @@ Table of contents for project documentation and governance.
 - [reports/M1_CAPABILITY_REPORT.md](reports/M1_CAPABILITY_REPORT.md) — Milestone 1.1 capability & robustness report (UDM Search slice). Point-in-time record.
 - [discovery/observations/01_udm_search_discovery.md](discovery/observations/01_udm_search_discovery.md) — Live UDM search behavior/API observations.
 - [discovery/observations/udm_stats_search.md](discovery/observations/udm_stats_search.md) — Live UDM stats search behavior, LRO polling, and schema observations.
+- [discovery/observations/07_search_read_observations.md](discovery/observations/07_search_read_observations.md) — Live UDM search reads: aggregate_udm (dashboard SQL), streamed-chunk dedupe, search totals/timelines/field aggregations, validator errors, findUdmFieldValues, translateUdmQuery, IoC IP enum.
 - [discovery/observations/detection_tuning_observations.md](discovery/observations/detection_tuning_observations.md) — Live Detection Tuning and UDM Findings Refinements observations.
 - [discovery/observations/mitre_attack_coverage_observations.md](discovery/observations/mitre_attack_coverage_observations.md) — Live MITRE ATT&CK coverage mapping, rules caching, and telemetry correlation observations.
 - [discovery/observations/cloud_status_observations.md](discovery/observations/cloud_status_observations.md) — Live Google Cloud SecOps service status incident feed and outage correlation observations.
+- [discovery/observations/04_case_list_native_collection.md](discovery/observations/04_case_list_native_collection.md) — Live native cases collection listing (`case.list`): filter grammar, paging limits, payload shape.
 - [tests/UDM_SEARCH_TEST_INVENTORY.md](tests/UDM_SEARCH_TEST_INVENTORY.md) — UDM search test inventory.
 - [tests/evals/test_adk_prompts.json](tests/evals/test_adk_prompts.json) — ADK 2 Prompt & Skill evaluation benchmark dataset (ambiguity guardrails, routing precision, modular skills, conciseness constraints). Run via `python scripts/eval_adk_prompts.py`.

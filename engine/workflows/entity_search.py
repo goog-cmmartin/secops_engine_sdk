@@ -88,10 +88,13 @@ class SearchEnterpriseIocsWorkflow:
         end_time: Optional[str] = None,
         max_matches: int = 10000,
         add_mandiant_attributes: bool = True,
+        lookback_days: Optional[int] = None,
     ) -> EnterpriseIocBatch:
         """Executes enterprise IoC search.
 
         If `value_type` is omitted, auto-detects from the input `value`.
+        Without `start_time` the window starts at the epoch (all time), or
+        `lookback_days` before now when given.
         """
         val_clean = value.strip()
         if not value_type:
@@ -102,9 +105,21 @@ class SearchEnterpriseIocsWorkflow:
                 )
             value_type = detected.ioc_value_type
 
-        # Time range defaults: past 30 days if unspecified
-        st = start_time or "1970-01-01T00:00:00Z"
-        et = end_time or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Time range defaults: all time (epoch start) unless lookback_days or an
+        # explicit start_time is given. The previous comment claimed "past 30
+        # days" but the code always sent the epoch; that behaviour is kept
+        # because it is what callers observed (live 2026-10-10: the same IP had
+        # matches all-time and none in the last 30 days).
+        now = datetime.now(timezone.utc)
+        if start_time:
+            st = start_time
+        elif lookback_days is not None:
+            if lookback_days <= 0:
+                raise ValueError("lookback_days must be positive.")
+            st = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            st = "1970-01-01T00:00:00Z"
+        et = end_time or now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         raw_res = self.adapter.search_enterprise_iocs(
             value=val_clean,
@@ -152,14 +167,31 @@ class SummarizeEntityWorkflow:
 
     def execute(
         self,
-        entity_id: str,
+        entity_id: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         return_alerts: bool = False,
         return_prevalence: bool = True,
         include_all_udm_event_types: bool = True,
+        field_value: Optional[str] = None,
+        value_type: Optional[str] = None,
     ) -> EntitySummaryResult:
-        """Executes :summarizeEntity and returns structured EntitySummaryResult."""
+        """Executes :summarizeEntity and returns structured EntitySummaryResult.
+
+        Look up by ``entity_id``, or by ``field_value`` (+ optional
+        ``value_type``; auto-detected when omitted, e.g. an IP maps to
+        ASSET_IP_ADDRESS).
+        """
+        if not entity_id and not field_value:
+            raise ValueError("summarize_entity needs entity_id or field_value.")
+        if field_value and not entity_id and not value_type:
+            detected = detect_entity(field_value.strip())
+            value_type = detected.ioc_value_type
+            if not value_type:
+                raise ValueError(f"Cannot infer a FieldAndValue valueType for '{field_value}'; pass value_type.")
+        kwargs: Dict[str, Any] = {}
+        if field_value and not entity_id:
+            kwargs = {"field_value": field_value.strip(), "value_type": value_type}
         raw_res = self.adapter.summarize_entity(
             entity_id=entity_id,
             start_time=start_time,
@@ -167,6 +199,7 @@ class SummarizeEntityWorkflow:
             return_alerts=return_alerts,
             return_prevalence=return_prevalence,
             include_all_udm_event_types=include_all_udm_event_types,
+            **kwargs,
         )
 
         timeline = raw_res.get("timeline", []) if isinstance(raw_res, dict) else []
@@ -176,7 +209,7 @@ class SummarizeEntityWorkflow:
         entity_type = raw_res.get("entityType", "") if isinstance(raw_res, dict) else ""
 
         return EntitySummaryResult(
-            entity_id=entity_id,
+            entity_id=entity_id or (field_value or ""),
             entity_type=entity_type,
             timeline=timeline,
             prevalence=prevalence,

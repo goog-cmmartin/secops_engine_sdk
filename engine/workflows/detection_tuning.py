@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import difflib
+import logging
 import os
 import re
 import threading
@@ -27,12 +28,21 @@ from engine.domain import (
     MultiFactorExclusion,
     NoisyRuleRecord,
     NoisyRulesBatch,
+    RuleCaseEnvironment,
+    RuleCaseEnvironmentResult,
     RuleCaseHistoryBatch,
     RuleCaseHistoryRecord,
 )
+from engine.pagination import collect_pages
 
 
 from engine.schema import canonicalize_udm_field
+
+logger = logging.getLogger(__name__)
+
+NOISY_RULES_ROW_LIMIT = 10000
+RULE_CASE_ENVIRONMENTS_ROW_LIMIT = 5000
+_SAFE_LITERAL = re.compile(r'^[^"\\\n]*$')
 
 
 def translate_to_udm_refinement(field_name: str, value: str, is_regex: bool = True) -> str:
@@ -65,7 +75,10 @@ class FindTopNoisyRulesWorkflow:
         alert_state: str = "ALL",
         limit: int = 20,
     ) -> NoisyRulesBatch:
-        query_text = """
+        # Explicit row limit: alert_state filtering and `limit` are applied
+        # client-side, so the query must return every (rule, alert_state) row.
+        # A rule whose alert state changed in the window yields two rows.
+        query_text = f"""
 $rule_name = detection.detection.rule_name
 $rule_id = detection.detection.rule_id
 $alerting = detection.detection.alert_state 
@@ -75,12 +88,15 @@ outcome:
   $first_seen = min(detection.detection_time.seconds)
   $last_seen = max(detection.detection_time.seconds)
 order: $count desc
+limit: {NOISY_RULES_ROW_LIMIT}
 """
         res = self.adapter.execute_dashboard_query(
             query_text=query_text,
             time_unit="DAY",
             time_value=str(max(1, lookback_days)),
         )
+        if len(res.rows) >= NOISY_RULES_ROW_LIMIT:
+            logger.warning("Noisy-rules query hit the %d-row limit; the tail is truncated.", NOISY_RULES_ROW_LIMIT)
 
         desired_alert = alert_state.strip().upper()
         records: List[NoisyRuleRecord] = []
@@ -224,6 +240,7 @@ class AnalyzeEntityCardinalityWorkflow:
             target_dims.append((d_name, path))
 
         dimension_results: List[DimensionCardinality] = []
+        query_errors: List[str] = []
 
         for dim_name, subfield_path in target_dims:
             query = f"""$ruleId = detection.detection.rule_id
@@ -260,21 +277,31 @@ limit: {limit_per_dimension}
                         total_distinct_values=len(records),
                     )
                 )
-            except Exception:
-                # If a field is not indexed or supported for this event type, record empty
+            except Exception as exc:
+                # A field may be unsupported for this rule's event type; record
+                # the failure instead of reporting an empty distribution.
+                err = f"{type(exc).__name__}: {exc}"
+                query_errors.append(f"{dim_name}: {err}")
                 dimension_results.append(
                     DimensionCardinality(
                         dimension=dim_name,
                         subfield_path=subfield_path,
                         records=[],
                         total_distinct_values=0,
+                        error=err,
                     )
                 )
+
+        if target_dims and len(query_errors) == len(target_dims):
+            raise RuntimeError(
+                f"All {len(target_dims)} cardinality queries failed for rule {clean_rule_id}: {query_errors[0]}"
+            )
 
         return EntityCardinalityReport(
             rule_id=clean_rule_id,
             dimensions=dimension_results,
             time_window=f"{lookback_days}d",
+            query_errors=query_errors,
         )
 
 
@@ -289,8 +316,23 @@ class CrossReferenceRuleCasesWorkflow:
         rule_id: str,
         lookback_days: int = 90,
         limit: int = 20,
+        environment: Optional[str] = None,
     ) -> RuleCaseHistoryBatch:
+        """Cases whose alerts came from ``rule_id``.
+
+        Each record carries ``environment`` (``case.environment``) and
+        ``soar_case_id`` (``case.response_platform_info.response_platform_id``,
+        the numeric SOAR case ID). ``environment`` filters by exact SOAR
+        environment name.
+        """
         clean_rule_id = rule_id.split("/")[-1].strip()
+        if not _SAFE_LITERAL.match(clean_rule_id):
+            raise ValueError(f"invalid rule_id {rule_id!r}")
+        env_filter = ""
+        if environment is not None:
+            if not _SAFE_LITERAL.match(environment):
+                raise ValueError(f"invalid environment {environment!r}")
+            env_filter = f'\n$case_environment = "{environment}"'
 
         case_query = f"""
 $case_name = case.name
@@ -298,10 +340,13 @@ $case_display_name = case.display_name
 $case_status = case.status
 $case_closure_details_reason = case.closure_details.reason
 $case_closure_details_root_cause = case.closure_details.root_cause
+$case_environment = case.environment{env_filter}
+$soar_case_id = case.response_platform_info.response_platform_id
+$response_platform_type = case.response_platform_info.response_platform_type
 $rule_id = case.alerts.metadata.detection.rule_id 
 $rule_id = "{clean_rule_id}"
 match:
-    $case_name, $case_display_name, $case_status, $case_closure_details_reason, $case_closure_details_root_cause, $rule_id
+    $case_name, $case_display_name, $case_status, $case_closure_details_reason, $case_closure_details_root_cause, $case_environment, $soar_case_id, $response_platform_type, $rule_id
 limit: {limit}
 """
         res = self.adapter.execute_dashboard_query(
@@ -328,6 +373,9 @@ limit: {limit}
                     root_cause=c_root,
                     rule_id=r_id,
                     raw=row,
+                    environment=str(row.get("case_environment") or ""),
+                    soar_case_id=str(row.get("soar_case_id") or ""),
+                    response_platform_type=str(row.get("response_platform_type") or ""),
                 )
             )
 
@@ -336,6 +384,88 @@ limit: {limit}
             rule_id=clean_rule_id,
             total_cases=len(cases),
             raw=res.raw,
+        )
+
+
+RULE_CASE_ENVIRONMENTS_QUERY = f"""$rule_id = case.alerts.metadata.detection.rule_id
+$rule_name = case.alerts.metadata.detection.rule_name
+$env = case.environment
+match: $rule_id, $rule_name, $env
+outcome: $cases = count_distinct(case.name)
+order: $cases desc
+limit: {RULE_CASE_ENVIRONMENTS_ROW_LIMIT}"""
+
+
+def parse_rule_case_environment_rows(rows: List[Dict[str, Any]]) -> "tuple[List[RuleCaseEnvironment], int]":
+    """Merges rows into one record per (rule_id, environment).
+
+    A rule renamed inside the window yields one row per display name; those
+    counts are summed (an upper bound if one case carried alerts under both
+    names) and the number of merged rows is returned.
+    """
+    merged: Dict[tuple, RuleCaseEnvironment] = {}
+    merged_rows = 0
+    for row in rows:
+        rid = str(row.get("rule_id") or "")
+        if not rid:
+            continue
+        env = str(row.get("env") or "")
+        try:
+            count = int(row.get("cases") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Unexpected case count {row.get('cases')!r} for rule {rid}") from exc
+        key = (rid, env)
+        if key in merged:
+            merged[key].case_count += count
+            merged_rows += 1
+            continue
+        merged[key] = RuleCaseEnvironment(
+            rule_id=rid,
+            environment=env,
+            case_count=count,
+            rule_name=str(row.get("rule_name") or ""),
+            raw=row,
+        )
+    pairs = sorted(merged.values(), key=lambda p: (-p.case_count, p.rule_id, p.environment))
+    return pairs, merged_rows
+
+
+class QueryRuleCaseEnvironmentsWorkflow:
+    """Rule -> SOAR environment join: distinct cases per (rule_id, case.environment)."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(self, lookback_days: int = 30) -> RuleCaseEnvironmentResult:
+        """One dashboard query over the case schema (~15-20 s for 30 days live).
+
+        No regex filter on ``rule_id`` is used (``/^ru_/`` took 112 s live);
+        filter by prefix client-side. Raises on query error.
+        """
+        if lookback_days <= 0:
+            raise ValueError("lookback_days must be positive")
+        res = self.adapter.execute_dashboard_query(
+            query_text=RULE_CASE_ENVIRONMENTS_QUERY,
+            time_unit="DAY",
+            time_value=str(lookback_days),
+            dialect="YL2",
+        )
+        rows = list(getattr(res, "rows", []) or [])
+        truncated = len(rows) >= RULE_CASE_ENVIRONMENTS_ROW_LIMIT
+        if truncated:
+            logger.warning("Rule/environment join hit the %d-row limit; result truncated.", RULE_CASE_ENVIRONMENTS_ROW_LIMIT)
+        pairs, merged_rows = parse_rule_case_environment_rows(rows)
+        return RuleCaseEnvironmentResult(
+            pairs=pairs,
+            lookback_days=lookback_days,
+            query=RULE_CASE_ENVIRONMENTS_QUERY,
+            provenance={
+                "api": "dashboardQueries:execute",
+                "raw_rows": len(rows),
+                "rename_rows_merged": merged_rows,
+                "truncated": truncated,
+                "time_window": getattr(res, "time_window", {}),
+            },
         )
 
 
@@ -444,10 +574,37 @@ class ManageFindingsRefinementsWorkflow:
     def __init__(self, adapter: GoogleSecOpsAdapter):
         self.adapter = adapter
 
-    def list_refinements(self, page_size: int = 100) -> FindingsRefinementBatch:
-        res = self.adapter.list_findings_refinements(page_size=page_size)
+    def list_refinements(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        all_pages: bool = False,
+        max_results: Optional[int] = None,
+    ) -> FindingsRefinementBatch:
+        """Lists findings refinements; ``all_pages`` follows ``nextPageToken``."""
+
+        def fetch(tok: Optional[str]):
+            resp = self.adapter.list_findings_refinements(page_size=page_size, page_token=tok)
+            if not isinstance(resp, dict):
+                return [], None, resp
+            return list(resp.get("findingsRefinements", []) or []), resp.get("nextPageToken"), resp
+
+        if all_pages or max_results is not None:
+
+            def fetch_page(tok: Optional[str]):
+                items, nxt, _ = fetch(tok)
+                return items, nxt
+
+            raw_items, next_token, pages = collect_pages(fetch_page, page_token=page_token, max_results=max_results)
+            res: Dict[str, Any] = {"findingsRefinements": raw_items, "pages": pages}
+            if next_token:
+                res["nextPageToken"] = next_token
+        else:
+            raw_items, _, res = fetch(page_token)
+            if not isinstance(res, dict):
+                res = {}
         items: List[FindingsRefinementSummary] = []
-        for ref in res.get("findingsRefinements", []):
+        for ref in raw_items:
             name = ref.get("name", "")
             ref_id = name.split("/")[-1]
             disp = ref.get("displayName", "")
@@ -663,14 +820,16 @@ limit: {limit}
 """
         rule_name = clean_rule_id
         res = None
+        query_errors: List[str] = []
         try:
             res = self.adapter.execute_dashboard_query(
                 query_text=query_text,
                 time_unit="DAY",
                 time_value=str(max(1, lookback_days)),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            query_errors.append(f"primary (user/cmd/host) query: {type(exc).__name__}: {exc}")
+            logger.warning("sample_detection_events(%s): %s", clean_rule_id, query_errors[-1])
 
         rows = res.rows if res and res.rows else []
 
@@ -697,8 +856,14 @@ limit: {limit}
                 )
                 if f_res and f_res.rows:
                     rows = f_res.rows
-            except Exception:
-                pass
+            except Exception as exc:
+                query_errors.append(f"fallback (user/ip) query: {type(exc).__name__}: {exc}")
+                logger.warning("sample_detection_events(%s): %s", clean_rule_id, query_errors[-1])
+                if res is None:
+                    # Both queries failed: zero samples would be indistinguishable from a quiet rule.
+                    raise RuntimeError(
+                        f"All detection sample queries failed for rule {clean_rule_id}: {'; '.join(query_errors)}"
+                    ) from exc
 
         samples: List[CorrelatedDetectionSample] = []
         for row in rows:
@@ -733,6 +898,7 @@ limit: {limit}
             total_samples=len(samples),
             time_window=f"{lookback_days}d",
             raw=res.raw if res else {},
+            query_errors=query_errors,
         )
 
 

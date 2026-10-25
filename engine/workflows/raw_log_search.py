@@ -108,38 +108,45 @@ class ValidateRawLogQueryWorkflow:
             )
 
         clean_query = str(query).strip()
-        try:
-            raw_res = self.adapter.validate_raw_log_query(
-                raw_query=clean_query,
-                allow_unreplaced_placeholders=allow_unreplaced_placeholders,
-            )
-            q_type = str(raw_res.get("queryType", "")).strip() if isinstance(raw_res, dict) else ""
-            error_text = raw_res.get("errorText") or raw_res.get("error")
-            error_type = raw_res.get("errorType")
+        # HTTP failures (network, auth, 429, 5xx) propagate: only a compile
+        # error reported by the server is an invalid query.
+        raw_res = self.adapter.validate_raw_log_query(
+            raw_query=clean_query,
+            allow_unreplaced_placeholders=allow_unreplaced_placeholders,
+        )
+        if not isinstance(raw_res, dict):
+            raise RuntimeError(f"Unexpected :validateQuery response shape: {type(raw_res).__name__}")
+        q_type = str(raw_res.get("queryType", "")).strip()
+        error_text = raw_res.get("errorText") or raw_res.get("error")
+        error_type = raw_res.get("errorType")
+        if error_type == "BACKEND_ERROR_TYPE":
+            from adapters.google_secops import QueryValidationUnavailableError
 
-            if error_text or error_type:
-                msg = f"[{error_type}] {error_text}" if error_type and error_text else str(error_text or error_type)
-                return RawLogValidationResult(
-                    query_type=q_type,
-                    is_valid=False,
-                    error_message=msg,
-                )
+            raise QueryValidationUnavailableError(str(error_text or error_type), "DIALECT_UDM_SEARCH")
 
+        if error_text or error_type:
+            msg = f"[{error_type}] {error_text}" if error_type and error_text else str(error_text or error_type)
+            pos_raw = raw_res.get("errorPosition")
+            position = None
+            if isinstance(pos_raw, dict) and pos_raw:
+                position = {
+                    "start_line": int(pos_raw.get("startLine", 0) or 0),
+                    "start_column": int(pos_raw.get("startColumn", 0) or 0),
+                    "end_line": int(pos_raw.get("endLine", 0) or 0),
+                    "end_column": int(pos_raw.get("endColumn", 0) or 0),
+                }
             return RawLogValidationResult(
                 query_type=q_type,
-                is_valid=True,
-                error_message=None,
-            )
-        except Exception as ex:
-            from engine.config import SecOpsConfigurationError
-
-            if isinstance(ex, SecOpsConfigurationError):
-                raise
-            return RawLogValidationResult(
-                query_type="",
                 is_valid=False,
-                error_message=str(ex),
+                error_message=msg,
+                error_position=position,
             )
+
+        return RawLogValidationResult(
+            query_type=q_type,
+            is_valid=True,
+            error_message=None,
+        )
 
 
 class SearchRawLogsWorkflow:

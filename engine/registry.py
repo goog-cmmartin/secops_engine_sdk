@@ -108,6 +108,7 @@ class WorkflowCapability:
 
 _NON_FILTER_PARAM_NAMES = frozenset({
     "limit",
+    "max_results",
     "page_size",
     "page_number",
     "page_token",

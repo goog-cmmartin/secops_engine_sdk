@@ -22,13 +22,10 @@ from engine.domain import (
     ParserHealthStatus,
     ParserSummary,
 )
-from engine.workflows.dashboards import (
-    ExecuteDashboardQueryWorkflow,
-    GetDashboardDetailWorkflow,
-)
 from engine.workflows.health_utils import (
     HEALTH_HUB_DASHBOARD_ID,
     DeepDiveTelemetry,
+    collect_dashboard_chart_rows,
     fetch_deep_dive_telemetry,
     resolve_collector_name,
 )
@@ -37,12 +34,17 @@ from engine.workflows.parser import (
     SearchParsersWorkflow,
 )
 
+# Health Hub charts with per-log-type rows used by the parser audit.
+HEALTH_HUB_PARSER_CHART_KEYS = ["health status by parser", "latency status by log type"]
+
 
 class AuditParserHealthWorkflow:
     """Orchestrates comprehensive health assessment across all SIEM parsers and normalizers."""
 
     def __init__(self, adapter: GoogleSecOpsAdapter):
         self.adapter = adapter
+        # Set by _collect_health_hub_parser_telemetry on each run.
+        self.health_hub_available = False
 
     def execute(self, lookback_days: int = 7) -> ParserHealthReport:
         """Executes parser health assessment against live SecOps tenant.
@@ -71,8 +73,11 @@ class AuditParserHealthWorkflow:
         }
 
         # Step 3: Query Health Hub and Deep Dive parser telemetry
-        parser_telemetry = self._collect_health_hub_parser_telemetry()
+        telemetry_errors: List[str] = []
+        parser_telemetry = self._collect_health_hub_parser_telemetry(telemetry_errors)
+        health_hub_available = self.health_hub_available
         deep_dive_telemetry: DeepDiveTelemetry = fetch_deep_dive_telemetry(self.adapter)
+        telemetry_errors.extend(deep_dive_telemetry.errors)
 
         # Step 4: Evaluate each log type
         findings: List[ParserHealthFinding] = []
@@ -128,67 +133,56 @@ class AuditParserHealthWorkflow:
             extension_conflict_count=extension_conflict_count,
             quota_rejections_detected=quota_rejections,
             total_parsers_audited=len(findings),
+            health_hub_available=health_hub_available,
+            deep_dive_available=deep_dive_telemetry.available,
+            telemetry_errors=telemetry_errors,
             generated_at=datetime.now(timezone.utc),
         )
 
-    def _collect_health_hub_parser_telemetry(self) -> Dict[str, Dict[str, Any]]:
-        """Extracts telemetry per log type from Health Hub parser charts."""
+    def _collect_health_hub_parser_telemetry(
+        self, errors: Optional[List[str]] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Extracts telemetry per log type from Health Hub parser charts.
+
+        Chart/dashboard failures are appended to ``errors`` and logged rather
+        than swallowed; ``self.health_hub_available`` records whether any target
+        chart executed. The KPI tiles "Failed Parsers" / "Irregular Parsers"
+        only return a scalar count (no log_type column), so they are not queried.
+        """
         telemetry_map: Dict[str, Dict[str, Any]] = {}
+        charts = collect_dashboard_chart_rows(
+            self.adapter, HEALTH_HUB_DASHBOARD_ID, "Health Hub", HEALTH_HUB_PARSER_CHART_KEYS
+        )
+        self.health_hub_available = charts.available
+        if errors is not None:
+            errors.extend(charts.errors)
 
-        try:
-            get_dash_wf = GetDashboardDetailWorkflow(self.adapter)
-            dash_detail = get_dash_wf.execute(HEALTH_HUB_DASHBOARD_ID, include_queries=False)
-            exec_wf = ExecuteDashboardQueryWorkflow(self.adapter)
-
-            for chart in dash_detail.charts:
-                q_name = chart.query_name or chart.raw.get("chartDatasource", {}).get("dashboardQuery")
-                if not q_name:
+        for rows in charts.rows_by_key.values():
+            for row in rows:
+                lt = row.get("log_type") or row.get("logType") or ""
+                if not lt:
                     continue
+                lt = str(lt).strip()
 
-                c_name = (chart.display_name or "").lower()
-                is_parser_chart = any(
-                    k in c_name
-                    for k in [
-                        "health status by parser",
-                        "failed parsers",
-                        "irregular parsers",
-                        "latency status by log type",
-                    ]
-                )
-                if not is_parser_chart:
-                    continue
+                if lt not in telemetry_map:
+                    telemetry_map[lt] = {
+                        "status": None,
+                        "latest_drop_reason_code": None,
+                        "anomalous_since": None,
+                        "last_normalization_time": None,
+                        "event_latency": None,
+                    }
 
-                try:
-                    res = exec_wf.execute(query_name_or_id=q_name)
-                    for row in res.rows:
-                        lt = row.get("log_type") or row.get("logType") or ""
-                        if not lt:
-                            continue
-                        lt = str(lt).strip()
-
-                        if lt not in telemetry_map:
-                            telemetry_map[lt] = {
-                                "status": None,
-                                "latest_drop_reason_code": None,
-                                "anomalous_since": None,
-                                "last_normalization_time": None,
-                                "event_latency": None,
-                            }
-
-                        if "status" in row and row["status"]:
-                            telemetry_map[lt]["status"] = str(row["status"])
-                        if "latest_drop_reason_code" in row and row["latest_drop_reason_code"]:
-                            telemetry_map[lt]["latest_drop_reason_code"] = str(row["latest_drop_reason_code"])
-                        if "anomalous_since" in row and row["anomalous_since"]:
-                            telemetry_map[lt]["anomalous_since"] = str(row["anomalous_since"])
-                        if "last_normalization_time" in row and row["last_normalization_time"]:
-                            telemetry_map[lt]["last_normalization_time"] = str(row["last_normalization_time"])
-                        if "event_ingestion_latency" in row and row["event_ingestion_latency"]:
-                            telemetry_map[lt]["event_latency"] = str(row["event_ingestion_latency"])
-                except Exception:
-                    continue
-        except Exception:
-            pass
+                if "status" in row and row["status"]:
+                    telemetry_map[lt]["status"] = str(row["status"])
+                if "latest_drop_reason_code" in row and row["latest_drop_reason_code"]:
+                    telemetry_map[lt]["latest_drop_reason_code"] = str(row["latest_drop_reason_code"])
+                if "anomalous_since" in row and row["anomalous_since"]:
+                    telemetry_map[lt]["anomalous_since"] = str(row["anomalous_since"])
+                if "last_normalization_time" in row and row["last_normalization_time"]:
+                    telemetry_map[lt]["last_normalization_time"] = str(row["last_normalization_time"])
+                if "event_ingestion_latency" in row and row["event_ingestion_latency"]:
+                    telemetry_map[lt]["event_latency"] = str(row["event_ingestion_latency"])
 
         return telemetry_map
 

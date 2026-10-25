@@ -84,6 +84,7 @@ class TimestampIntegrityWorkflow:
         days: int = 7,
         clear_cache: bool = True,
         project_id: Optional[str] = None,
+        persist: bool = True,
     ) -> TimestampIntegrityReport:
         """Executes full timestamp integrity audit across all tenant log sources.
 
@@ -91,9 +92,16 @@ class TimestampIntegrityWorkflow:
             days: Lookback relative time window in days (default: 7).
             clear_cache: Whether to bypass cache for live telemetry freshness.
             project_id: Optional GCP project ID for GenAI brief synthesis.
+            persist: Whether to write the report to the Evidence Fabric store
+                (latest + history documents). Default True preserves the
+                original behaviour; it only has an effect when an evidence
+                store is wired. With ``persist=False`` the run performs no
+                writes (the baseline is still read for progression states).
 
         Returns:
             TimestampIntegrityReport with metrics, progression classifications, and narrative.
+            ``persisted`` / ``persistence_error`` / ``baseline_available`` /
+            ``baseline_error`` describe the Evidence Fabric interaction.
         """
         # 1. Execute Statistical YARA-L 2 Query
         query_result = self.adapter.execute_dashboard_query(
@@ -106,14 +114,18 @@ class TimestampIntegrityWorkflow:
 
         rows = query_result.rows if query_result and hasattr(query_result, "rows") else []
 
-        # 2. Retrieve Historical Baseline from Evidence Fabric
+        # 2. Retrieve Historical Baseline from Evidence Fabric (read-only)
         prev_data = {}
+        baseline_available = False
+        baseline_error: Optional[str] = None
         if self.evidence_store:
             try:
                 prev_report = self.evidence_store.get_latest_timestamp_integrity()
                 if prev_report and isinstance(prev_report, dict):
                     prev_data = prev_report.get("metrics", {})
+                    baseline_available = True
             except Exception as e:
+                baseline_error = f"{type(e).__name__}: {e}"
                 logger.warning("Failed to retrieve previous timestamp integrity baseline: %s", e)
 
         # 3. Classify State Progression and Compute Metrics
@@ -220,17 +232,27 @@ class TimestampIntegrityWorkflow:
             log_types=metric_rows,
             top_delayed_log_types=top_delayed,
             top_skewed_log_types=top_skewed,
+            persist_requested=bool(persist),
+            baseline_available=baseline_available,
+            baseline_error=baseline_error,
         )
 
         # 4. Synthesize GenAI Operational Brief
         report.narrative = self._synthesize_brief(report, project_id=project_id)
 
-        # 5. Dual-Document Persistence to Evidence Fabric
-        if self.evidence_store:
+        # 5. Dual-Document Persistence to Evidence Fabric (skipped when persist=False)
+        if persist and self.evidence_store:
             try:
-                self.evidence_store.save_timestamp_integrity_report(report.to_dict())
+                snapshot_id = self.evidence_store.save_timestamp_integrity_report(
+                    report.to_dict(include_run_metadata=False)
+                )
+                report.persisted = True
+                report.persisted_snapshot_id = str(snapshot_id) if snapshot_id else None
             except Exception as e:
+                report.persistence_error = f"{type(e).__name__}: {e}"
                 logger.error("Failed to persist timestamp integrity report to Evidence Fabric: %s", e)
+        elif persist:
+            report.persistence_error = "No evidence store configured; report was not persisted."
 
         return report
 
@@ -328,7 +350,8 @@ def run_timestamp_integrity_audit(
     evidence_store: Optional[EvidenceFabricStore] = None,
     days: int = 7,
     clear_cache: bool = True,
+    persist: bool = True,
 ) -> TimestampIntegrityReport:
     """Convenience functional runner for timestamp integrity audit."""
     workflow = TimestampIntegrityWorkflow(adapter=adapter, evidence_store=evidence_store)
-    return workflow.execute(days=days, clear_cache=clear_cache)
+    return workflow.execute(days=days, clear_cache=clear_cache, persist=persist)

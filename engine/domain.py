@@ -343,11 +343,23 @@ class RefinementProvenance:
 
 @dataclass
 class ValidationResult:
+    """Outcome of ``:validateQuery``.
+
+    ``valid=False`` means the server parsed the query and reported a compile
+    error (``errorType``/``errorText``). Transport, auth and quota failures are
+    raised, never folded into ``valid=False``.
+    """
 
     valid: bool
     dialect: str = "udm"
     raw_query_type: Optional[str] = None
     error_message: Optional[str] = None
+    # Server ``errorType`` enum (e.g. INVALID_QUERY_TYPE) when valid is False.
+    error_type: Optional[str] = None
+    # Server ``errorPosition``: {start_line, start_column, end_line, end_column}.
+    error_position: Optional[Dict[str, int]] = None
+    # Non-blocking ``warning`` returned for valid queries.
+    warning: Optional[str] = None
 
 
 def _to_camel_case(s: str) -> str:
@@ -512,11 +524,104 @@ class SearchBatchResult(UniversalBatchMixin):
     returned_end_index: int = 1
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     raw_response: Optional[Dict[str, Any]] = None
+    # Non-event part of the final streamSearch chunk (totals, timelines, field
+    # aggregations). Parsed into UdmSearchStats by the search workflow, which
+    # knows the request window needed to place timeline buckets.
+    search_stats_raw: Optional[Dict[str, Any]] = None
+    # True once the server reported the operation done / the event list
+    # complete; False while it is still running; None when the adapter does not
+    # report it (the workflow then consumes the batch as before).
+    operation_done: Optional[bool] = None
+    # Events dropped because the streamed chunks repeated them (same metadata.id).
+    duplicates_dropped: int = 0
 
     @property
     def batch_count(self) -> int:
         """Backward compatibility helper for emitted count."""
         return self.emitted_event_count
+
+
+# Server-side cap on the number of events a UDM search materializes. Observed
+# live 2026-10-10: availableResultCount/baselineEventsCount/filteredEventsCount
+# are all exactly 30000 with tooManyEvents=true for a query matching ~1.1 M events.
+UDM_SEARCH_SERVER_EVENT_CAP = 30000
+
+
+@dataclass
+class UdmTimelineBucket:
+    """One timeline bucket from a UDM search (start is UTC, aligned to the bucket size)."""
+
+    bucket_start: datetime
+    count: int = 0
+    baseline_count: int = 0
+
+
+@dataclass
+class UdmFieldValueCount:
+    """A value and its event count inside a UDM search field aggregation."""
+
+    value: Any = None
+    count: int = 0
+    baseline_count: int = 0
+
+
+@dataclass
+class UdmFieldAggregation:
+    """Top values for one UDM field, as returned by the search view.
+
+    ``values`` holds ``allValues`` when the server sent the full list, else
+    ``topValues`` (``too_many_values`` is then True). ``bottom_values`` is the
+    server's tail sample, kept separately.
+    """
+
+    field: str
+    event_count: int = 0
+    baseline_event_count: int = 0
+    value_count: int = 0
+    too_many_values: bool = False
+    values: List[UdmFieldValueCount] = field(default_factory=list)
+    bottom_values: List[UdmFieldValueCount] = field(default_factory=list)
+
+
+@dataclass
+class UdmSearchStats:
+    """Totals and aggregates the UDM search view returns alongside events.
+
+    All counts and aggregates are computed by the server over at most the first
+    ``UDM_SEARCH_SERVER_EVENT_CAP`` matching events. When ``too_many_events`` is
+    True the true match count is larger than ``total_matched`` and every
+    aggregate is a sample (``aggregates_sampled``).
+    """
+
+    total_matched: Optional[int] = None
+    baseline_count: Optional[int] = None
+    filtered_count: Optional[int] = None
+    available_count: Optional[int] = None
+    too_many_events: bool = False
+    timeline: List[UdmTimelineBucket] = field(default_factory=list)
+    timeline_bucket_seconds: Optional[int] = None
+    activity_timeline: List[UdmTimelineBucket] = field(default_factory=list)
+    activity_timeline_bucket_seconds: Optional[int] = None
+    field_aggregations: List[UdmFieldAggregation] = field(default_factory=list)
+    grouped_field_aggregations: List[UdmFieldAggregation] = field(default_factory=list)
+    server_event_cap: int = UDM_SEARCH_SERVER_EVENT_CAP
+
+    @property
+    def capped(self) -> bool:
+        """Alias: the server stopped materializing at its event cap."""
+        return self.too_many_events
+
+    @property
+    def aggregates_sampled(self) -> bool:
+        """Aggregates cover only the first ``server_event_cap`` matches."""
+        return self.too_many_events
+
+    def aggregation_for(self, name: str) -> Optional[UdmFieldAggregation]:
+        """Returns the aggregation for one field path, or None."""
+        for agg in self.field_aggregations:
+            if agg.field == name:
+                return agg
+        return None
 
 
 @dataclass
@@ -542,6 +647,18 @@ class SearchRequest:
     limit: Optional[int] = None
     dialect: Optional[str] = None
     user_sql: Optional[str] = None
+    # Search-view options (previously hardcoded in the adapter).
+    case_insensitive: bool = True
+    # The SDK never parsed aiOverview, so generating it was pure cost; off by default.
+    generate_ai_overview: bool = False
+    max_values_per_field: int = 60
+    # Ask the server for detections (1000) and 15-min prevalence. Neither is
+    # parsed by search_udm; set both False for a lean, cheaper request.
+    include_detections: bool = True
+    include_prevalence: bool = True
+    # Field paths to keep in session.search_stats.field_aggregations
+    # (None = every field the server returned).
+    aggregation_fields: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.limit is not None:
@@ -563,6 +680,14 @@ class SearchSession:
     error: Optional[str] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
+    # Totals, timelines and field aggregations from the search view (None until
+    # the first batch carrying them arrives).
+    search_stats: Optional[UdmSearchStats] = None
+    # Duplicate events dropped across streamed chunks / batches (same metadata.id).
+    duplicates_dropped: int = 0
+    # Transient-error retries (429/5xx/network) the adapter performed for this
+    # session: [{"status", "attempt", "sleep_s", "path", "at"}].
+    api_retries: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def results(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
@@ -573,6 +698,42 @@ class SearchSession:
     def rows(self) -> List[Union[UDMEvent, Dict[str, Any]]]:
         """Alias for events."""
         return self.events
+
+    @property
+    def total_matched(self) -> Optional[int]:
+        """Server match count (capped at UDM_SEARCH_SERVER_EVENT_CAP; see too_many_events)."""
+        return self.search_stats.total_matched if self.search_stats else None
+
+    @property
+    def available_count(self) -> Optional[int]:
+        """Events the server materialized and can page (availableResultCount)."""
+        return self.search_stats.available_count if self.search_stats else None
+
+    @property
+    def too_many_events(self) -> bool:
+        return bool(self.search_stats and self.search_stats.too_many_events)
+
+    @property
+    def capped(self) -> bool:
+        """True when the server hit its event cap; more events match than it returns."""
+        return self.too_many_events
+
+    @property
+    def aggregates_sampled(self) -> bool:
+        """True when timelines/field aggregations cover only the first capped events."""
+        return self.too_many_events
+
+    @property
+    def timeline(self) -> List[UdmTimelineBucket]:
+        return self.search_stats.timeline if self.search_stats else []
+
+    @property
+    def activity_timeline(self) -> List[UdmTimelineBucket]:
+        return self.search_stats.activity_timeline if self.search_stats else []
+
+    @property
+    def field_aggregations(self) -> List[UdmFieldAggregation]:
+        return self.search_stats.field_aggregations if self.search_stats else []
 
 
 @dataclass
@@ -688,6 +849,11 @@ class DashboardQueryResult(UniversalBatchMixin):
     last_cache_refreshed_time: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # The API has no "more rows" flag. Callers that control the query's row
+    # limit set these: ask for limit+1 rows, keep `limit`, and mark truncated.
+    # None means unknown (the query's limit was not set by the SDK).
+    requested_limit: Optional[int] = None
+    truncated: Optional[bool] = None
     
     @property
     def items(self) -> List[Dict[str, Any]]:
@@ -733,6 +899,88 @@ class DashboardQueryResult(UniversalBatchMixin):
 
 
 @dataclass
+class UdmAggregateRow:
+    """One cell of an aggregate_udm grid.
+
+    ``dims`` maps each group_by field path to its value (None when the event had
+    no value). ``bucket`` is the UTC start of the time bucket when a
+    ``time_bucket`` was requested. ``count`` is the event count, or the number
+    of distinct ``distinct_field`` values for ``metric="count_distinct"``.
+    """
+
+    dims: Dict[str, Optional[str]] = field(default_factory=dict)
+    bucket: Optional[datetime] = None
+    count: int = 0
+
+
+@dataclass
+class UdmAggregateResult:
+    """Grid returned by aggregate_udm (one synchronous dashboard SQL query)."""
+
+    dimensions: List[str] = field(default_factory=list)
+    rows: List[UdmAggregateRow] = field(default_factory=list)
+    # True when the server had more than `limit` rows (the SDK asks for limit+1).
+    truncated: bool = False
+    limit: int = 0
+    metric: str = "count"
+    distinct_field: Optional[str] = None
+    time_bucket: Optional[str] = None
+    filter: str = ""
+    query_text: str = ""
+    dialect: str = "SQL"
+    time_window: Dict[str, str] = field(default_factory=dict)
+    elapsed_s: float = 0.0
+    last_cache_refreshed_time: Optional[str] = None
+    api_retries: List[Dict[str, Any]] = field(default_factory=list)
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def total_count(self) -> int:
+        """Sum of row counts (per-value semantics for repeated fields; see aggregate_udm)."""
+        return sum(r.count for r in self.rows)
+
+
+@dataclass
+class UdmFieldValueMatch:
+    """One match from ``:findUdmFieldValues`` (a field path holding a matching value)."""
+
+    field_path: str
+    value: str
+    ingestion_time: Optional[datetime] = None
+    match_start: int = 0
+    match_end: int = 0
+
+
+@dataclass
+class UdmFieldValueMatches:
+    """Result of find_udm_field_values."""
+
+    query: str
+    matches: List[UdmFieldValueMatch] = field(default_factory=list)
+    has_more: bool = False
+    next_page_token: Optional[str] = None
+    field_match_regex: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UdmQueryTranslation:
+    """Result of translate_udm_query (natural language -> UDM search query)."""
+
+    text: str
+    query: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def time_range(self) -> Optional[Tuple[datetime, datetime]]:
+        if self.start_time and self.end_time:
+            return (self.start_time, self.end_time)
+        return None
+
+
+@dataclass
 class StatsSearchRequest:
     """Parameters for initiating a UDM Stats Search query."""
 
@@ -748,6 +996,10 @@ class StatsSearchRequest:
     location: Optional[str] = None
     dialect: Optional[str] = None
     user_sql: Optional[str] = None
+    # Detections / prevalence are never parsed by the stats workflow; set False
+    # for a lean request.
+    include_detections: bool = True
+    include_prevalence: bool = True
 
 
 @dataclass
@@ -803,6 +1055,8 @@ class RawLogValidationResult:
     query_type: str = ""
     is_valid: bool = True
     error_message: Optional[str] = None
+    # Server errorPosition {start_line, start_column, end_line, end_column}.
+    error_position: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -1285,6 +1539,78 @@ class CaseSearchBatch(UniversalBatchMixin):
     def items(self) -> List[CaseSearchResultItem]:
         """Uniform alias for batch results across all engine domains."""
         return self.results
+
+
+@dataclass
+class CaseListItem:
+    """One case from the native ``.../instances/{id}/cases`` collection (``case.list``).
+
+    Field mapping (verified live, see
+    ``discovery/observations/04_case_list_native_collection.md``):
+    ``name`` -> ``case_id`` (last path segment), ``displayName`` -> ``display_name``,
+    ``createTime``/``updateTime`` (epoch-millis strings) -> UTC datetimes,
+    ``priority`` (``PRIORITY_*``) -> :class:`CasePriority`, ``status``
+    (``OPENED``/``CLOSED``) -> :class:`CaseStatus` plus the raw string in
+    ``raw_status``, ``important``/``incident`` -> ``is_important``/``is_incident``.
+    """
+    case_id: str
+    name: str
+    display_name: str
+    create_time: Optional[datetime]
+    update_time: Optional[datetime]
+    priority: CasePriority
+    status: CaseStatus
+    raw_priority: str = ""
+    raw_status: str = ""
+    stage: str = ""
+    environment: str = ""
+    assignee: Optional[str] = None
+    alert_count: int = 0
+    is_important: bool = False
+    is_incident: bool = False
+    description: str = ""
+    case_type: str = ""
+    workflow_status: str = ""
+    source: str = ""
+    last_modifying_user_id: Optional[str] = None
+    involved_suspicious_entity: bool = False
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        return self.case_id
+
+    @property
+    def title(self) -> str:
+        return self.display_name
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status == CaseStatus.CLOSED
+
+
+@dataclass
+class CaseListBatch(UniversalBatchMixin):
+    """Result of ``case.list``: cases plus server ``totalSize`` and paging cursor.
+
+    ``total_count`` is the server-reported ``totalSize`` for the filter (all
+    matching cases), which can exceed ``len(cases)`` when ``max_results`` capped
+    the fetch. ``next_page_token`` is non-empty when more pages remain.
+    """
+    cases: List[CaseListItem]
+    total_count: int
+    next_page_token: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CaseListItem]:
+        """Uniform alias for batch results across all engine domains."""
+        return self.cases
+
+    @property
+    def truncated(self) -> bool:
+        """True when more matching cases exist than were fetched."""
+        return bool(self.next_page_token)
 
 
 class TriageVerdict(str, Enum):
@@ -2114,13 +2440,18 @@ class CuratedRuleSummary:
 
 @dataclass
 class CuratedRuleDetail:
-    """Complete composite for a Curated Rule, including raw YARA-L logic."""
+    """Complete composite for a Curated Rule, including raw YARA-L logic.
+
+    ``errors`` lists sub-reads that failed (e.g. the Content Hub rule text
+    lookup); the affected fields are then empty because they are unknown.
+    """
     rule: CuratedRuleSummary
     rule_text: str = ""
     live_status_enabled: bool = False
     tactics: List[MitreAttackMapping] = field(default_factory=list)
     techniques: List[MitreAttackMapping] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -2143,12 +2474,19 @@ class CuratedRuleSetSummary:
 
 @dataclass
 class CuratedRuleSetDetail:
-    """Deep-inspection composite for a Curated Rule Set."""
+    """Deep-inspection composite for a Curated Rule Set.
+
+    ``errors`` lists failed sub-reads (deployments, detection_count,
+    member_rules). ``rules_checked`` is False when member rules were not
+    requested or their read failed, so an empty ``rules`` is not "no members".
+    """
     rule_set: CuratedRuleSetSummary
     rules: List[CuratedRuleSummary] = field(default_factory=list)
     deployments: List[CuratedRuleSetDeployment] = field(default_factory=list)
     detection_count: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    rules_checked: bool = False
 
 
 @dataclass
@@ -2168,6 +2506,70 @@ class CuratedRuleSetBatch(UniversalBatchMixin):
     results: List[CuratedRuleSetSummary]
     total_count: int
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CuratedRuleSetDeploymentRecord:
+    """One precision deployment (BROAD/PRECISE) of a Curated Rule Set.
+
+    Read from the bulk ``curatedRuleSets/-/curatedRuleSetDeployments`` list.
+    The API omits false booleans (proto3), so a missing ``enabled`` /
+    ``alerting`` maps to False. The list response carries no display name;
+    ``display_name`` is filled from the rule set catalog when the caller asks
+    for the join, and is "" otherwise.
+    """
+    rule_set_id: str
+    category_id: str
+    precision: str
+    enabled: bool = False
+    alerting: bool = False
+    display_name: str = ""
+    resource_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def armed(self) -> bool:
+        """Enabled and alerting (detections create alerts)."""
+        return self.enabled and self.alerting
+
+
+@dataclass
+class CuratedRuleSetDeploymentListResult(UniversalBatchMixin):
+    """All curated rule set precision deployments in the tenant."""
+    deployments: List[CuratedRuleSetDeploymentRecord] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSetDeploymentRecord]:
+        return self.deployments
+
+
+@dataclass
+class CuratedRuleSetListResult(UniversalBatchMixin):
+    """Curated Rule Sets read from ``curatedRuleSetCategories/-/curatedRuleSets``."""
+    rule_sets: List[CuratedRuleSetSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSetSummary]:
+        return self.rule_sets
+
+
+@dataclass
+class CuratedRuleListResult(UniversalBatchMixin):
+    """Curated rules read from ``curatedRules`` (slow: ~20 s per 100-1000 page)."""
+    rules: List[CuratedRuleSummary] = field(default_factory=list)
+    next_page_token: Optional[str] = None
+    pages_fetched: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[CuratedRuleSummary]:
+        return self.rules
 
 
 @dataclass
@@ -2520,12 +2922,20 @@ class FeedBatch(UniversalBatchMixin):
 
 
 class FeedHealthStatus(str, Enum):
-    """Health classification status for an ingestion feed."""
+    """Health classification status for an ingestion feed.
+
+    ``INACTIVE`` covers feeds whose Chronicle ``Feed.state`` is ``INACTIVE``
+    (Health Hub reports these as ``Disabled_feed`` / "Feed is disabled"): the
+    feed is intentionally not collecting, so it is neither healthy nor failed.
+    ``UNKNOWN`` is used for ``STATE_UNSPECIFIED`` or any state value not in
+    the documented ``Feed.State`` enum.
+    """
     HEALTHY = "HEALTHY"
     IRREGULAR = "IRREGULAR"
     FAILED = "FAILED"
     HIGH_LATENCY = "HIGH_LATENCY"
     SILENT_PUSH_STOP = "SILENT_PUSH_STOP"
+    INACTIVE = "INACTIVE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -2547,20 +2957,43 @@ class FeedHealthFinding:
     quota_limit_mb_per_sec: float = 0.0
     anomaly_description: str = ""
     remediation_steps: List[str] = field(default_factory=list)
+    # Health Hub "Health Status by Data Source" row status for this feed
+    # (e.g. "Healthy" / "Warning" / "Critical"), None when no row matched.
+    health_hub_status: Optional[str] = None
+    # True when a Health Hub telemetry row was matched to this feed; False
+    # means the classification rests on Feed.state alone.
+    telemetry_observed: bool = False
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class FeedHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all ingestion feeds."""
+    """Comprehensive posture audit report for all ingestion feeds.
+
+    ``health_hub_available`` / ``deep_dive_available`` are False when the
+    corresponding curated dashboard could not be read or none of its target
+    charts executed; ``telemetry_errors`` lists every dashboard/chart failure.
+    A report with ``telemetry_available == False`` is a state-only audit, not
+    evidence that feeds are healthy.
+    """
     findings: List[FeedHealthFinding]
     healthy_count: int = 0
     irregular_count: int = 0
     failed_count: int = 0
     high_latency_count: int = 0
+    inactive_count: int = 0
+    unknown_count: int = 0
     quota_rejections_detected: int = 0
     total_feeds_audited: int = 0
+    health_hub_available: bool = False
+    deep_dive_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when both dashboards were read and no chart failed."""
+        return self.health_hub_available and self.deep_dive_available and not self.telemetry_errors
 
     @property
     def items(self) -> List[FeedHealthFinding]:
@@ -2610,7 +3043,11 @@ class ParserHealthFinding:
 
 @dataclass
 class ParserHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all SIEM parsers and extensions."""
+    """Comprehensive posture audit report for all SIEM parsers and extensions.
+
+    See ``FeedHealthReport`` for the meaning of the telemetry availability
+    fields; they are populated the same way for the parser charts.
+    """
     findings: List[ParserHealthFinding]
     healthy_count: int = 0
     irregular_count: int = 0
@@ -2619,7 +3056,15 @@ class ParserHealthReport(UniversalBatchMixin):
     extension_conflict_count: int = 0
     quota_rejections_detected: int = 0
     total_parsers_audited: int = 0
+    health_hub_available: bool = False
+    deep_dive_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when both dashboards were read and no chart failed."""
+        return self.health_hub_available and self.deep_dive_available and not self.telemetry_errors
 
     @property
     def items(self) -> List[ParserHealthFinding]:
@@ -2663,7 +3108,16 @@ class RuleHealthFinding:
 
 @dataclass
 class RuleHealthReport(UniversalBatchMixin):
-    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets."""
+    """Comprehensive posture audit report for all SIEM detection rules and curated rulesets.
+
+    ``total_detections_24h`` is the sum of per-rule detection counts over the
+    last day for every rule that fired (custom ``ru_`` and curated ``ur_``),
+    from one ``detection.detection.rule_id`` dashboard query.
+    ``detection_counts_available`` is False when that query failed; then every
+    ``detection_count_recent`` is 0 *because it is unknown*. The other
+    ``*_available`` flags cover the curated deployments/counts and the two
+    curated dashboards; ``telemetry_errors`` lists every failure.
+    """
     findings: List[RuleHealthFinding]
     healthy_count: int = 0
     failing_count: int = 0
@@ -2671,12 +3125,34 @@ class RuleHealthReport(UniversalBatchMixin):
     latency_alert_count: int = 0
     misconfigured_count: int = 0
     disabled_count: int = 0
+    unknown_count: int = 0
     total_rules_audited: int = 0
+    custom_rules_audited: int = 0
+    curated_rulesets_audited: int = 0
     total_detections_24h: int = 0
+    rules_firing_24h: int = 0
+    execution_errors_considered: int = 0
+    error_lookback_days: Optional[int] = None
     average_risk_score: float = 0.0
     top_mitre_tactics: List[Dict[str, Any]] = field(default_factory=list)
     top_threat_categories: List[Dict[str, Any]] = field(default_factory=list)
+    detection_counts_available: bool = False
+    overview_dashboard_available: bool = False
+    observability_dashboard_available: bool = False
+    curated_available: bool = False
+    telemetry_errors: List[str] = field(default_factory=list)
+    duration_s: float = 0.0
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def telemetry_available(self) -> bool:
+        """True only when per-rule counts and both dashboards were read without errors."""
+        return (
+            self.detection_counts_available
+            and self.overview_dashboard_available
+            and self.observability_dashboard_available
+            and not self.telemetry_errors
+        )
 
     @property
     def items(self) -> List[RuleHealthFinding]:
@@ -2685,7 +3161,14 @@ class RuleHealthReport(UniversalBatchMixin):
 
 @dataclass
 class RuleDecayAssessment:
-    """Detailed decay risk assessment and telemetry health evaluation for a single detection rule."""
+    """Detailed decay risk assessment and telemetry health evaluation for a single detection rule.
+
+    ``compile_checked`` is True only when ``verifyRuleText`` actually ran for
+    the rule; ``compile_check_error`` explains why it did not (API failure or
+    missing rule text). ``population_check_errors`` maps UDM fields whose
+    population query failed to the error; those fields are not counted as
+    unpopulated.
+    """
     rule_id: str
     rule_name: str
     dps_score: int
@@ -2698,12 +3181,21 @@ class RuleDecayAssessment:
     unpopulated_fields: List[str] = field(default_factory=list)
     compiler_errors: List[str] = field(default_factory=list)
     recommendation: str = "KEEP_ACTIVE"
+    compile_checked: bool = False
+    compile_check_error: Optional[str] = None
+    population_check_errors: Dict[str, str] = field(default_factory=dict)
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RuleDecayReport(UniversalBatchMixin):
-    """Tenant-wide report summarizing detection rule decay, DPS distribution, and telemetry health."""
+    """Tenant-wide report summarizing detection rule decay, DPS distribution, and telemetry health.
+
+    ``telemetry_available`` is False when the detection-count query failed
+    (``telemetry_errors`` says why); SILENT is then not evaluated and each
+    assessment carries ``TELEMETRY_UNAVAILABLE``. ``check_errors`` lists
+    per-rule compile/population check failures (API errors, not rule defects).
+    """
     assessments: List[RuleDecayAssessment]
     total_audited: int = 0
     broken_compilation_count: int = 0
@@ -2711,6 +3203,13 @@ class RuleDecayReport(UniversalBatchMixin):
     stale_count: int = 0
     unpopulated_count: int = 0
     average_dps: float = 0.0
+    lookback_days: int = 90
+    telemetry_available: bool = True
+    telemetry_errors: List[str] = field(default_factory=list)
+    compile_checked_count: int = 0
+    population_checked_count: int = 0
+    check_errors: List[str] = field(default_factory=list)
+    duration_s: float = 0.0
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -4357,6 +4856,79 @@ class RuleRevisionListResult(UniversalBatchMixin):
         return self.revisions
 
 
+@dataclass
+class RuleDetectionBucket:
+    """Detection count for one rule in one time bucket (UTC)."""
+    bucket_start: datetime
+    count: int
+
+
+@dataclass
+class RuleDetectionSeries:
+    """Per-rule bucketed detection counts, oldest bucket first.
+
+    Only buckets with at least one detection are present (the dashboard query
+    returns no row for an empty bucket); consumers that need a dense series
+    fill gaps with zero.
+    """
+    rule_id: str
+    rule_name: str = ""
+    buckets: List[RuleDetectionBucket] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return sum(b.count for b in self.buckets)
+
+
+@dataclass
+class RuleDetectionSeriesResult(UniversalBatchMixin):
+    """Bucketed detection counts for every rule (custom ``ru_`` and curated ``ur_``) that fired."""
+    series: List[RuleDetectionSeries] = field(default_factory=list)
+    bucket: str = "hour"
+    lookback_hours: int = 24
+    total_detections: int = 0
+    query: str = ""
+    raw_row_count: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleDetectionSeries]:
+        return self.series
+
+    def by_rule_id(self) -> Dict[str, RuleDetectionSeries]:
+        return {s.rule_id: s for s in self.series}
+
+
+@dataclass
+class RuleCaseEnvironment:
+    """Number of distinct SOAR cases a rule produced in one SOAR environment."""
+    rule_id: str
+    environment: str
+    case_count: int
+    rule_name: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RuleCaseEnvironmentResult(UniversalBatchMixin):
+    """Rule -> SOAR environment join from ``case.alerts.metadata.detection.rule_id`` x ``case.environment``."""
+    pairs: List[RuleCaseEnvironment] = field(default_factory=list)
+    lookback_days: int = 30
+    query: str = ""
+    provenance: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def items(self) -> List[RuleCaseEnvironment]:
+        return self.pairs
+
+    def environments_by_rule(self) -> Dict[str, Dict[str, int]]:
+        """``{rule_id: {environment: case_count}}``."""
+        out: Dict[str, Dict[str, int]] = {}
+        for p in self.pairs:
+            out.setdefault(p.rule_id, {})[p.environment] = p.case_count
+        return out
+
+
 class DashboardHealthStatus(str, Enum):
     """Classification states for Google SecOps Native Dashboards."""
     HEALTHY = "HEALTHY"
@@ -4504,21 +5076,34 @@ class EntityCardinalityRecord:
 
 @dataclass
 class DimensionCardinality:
-    """Distribution for a specific UDM entity subfield dimension."""
+    """Distribution for a specific UDM entity subfield dimension.
+
+    ``error`` is set when the dimension query failed; ``records`` is then
+    empty because the distribution is unknown, not because it is empty.
+    """
     dimension: str  # e.g. "principal_ip", "target_hostname", "user_id"
     subfield_path: str
     records: List[EntityCardinalityRecord] = field(default_factory=list)
     total_distinct_values: int = 0
+    error: Optional[str] = None
 
 
 @dataclass
 class EntityCardinalityReport(UniversalBatchMixin):
-    """Multi-dimensional entity cardinality distribution for a detection rule."""
+    """Multi-dimensional entity cardinality distribution for a detection rule.
+
+    ``query_errors`` lists every failed dimension query (``dimension: error``).
+    """
     rule_id: str
     rule_name: str = ""
     dimensions: List[DimensionCardinality] = field(default_factory=list)
     time_window: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+    query_errors: List[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> List[DimensionCardinality]:
+        return self.dimensions
 
     def __iter__(self):
         return iter(self.dimensions)
@@ -4529,7 +5114,13 @@ class EntityCardinalityReport(UniversalBatchMixin):
 
 @dataclass
 class RuleCaseHistoryRecord:
-    """SOAR case record associated with a detection rule."""
+    """SOAR case record associated with a detection rule.
+
+    ``case_name`` is the case resource UUID (``case.name``). ``soar_case_id``
+    is the numeric SOAR case ID shown in the UI, read from
+    ``case.response_platform_info.response_platform_id`` (verified live:
+    platform type ``RESPONSE_PLATFORM_TYPE_SIEMPLIFY``, values like ``19950``).
+    """
     case_name: str
     display_name: str
     status: str
@@ -4537,6 +5128,9 @@ class RuleCaseHistoryRecord:
     root_cause: str
     rule_id: str
     raw: Dict[str, Any] = field(default_factory=dict)
+    environment: str = ""
+    soar_case_id: str = ""
+    response_platform_type: str = ""
 
 
 @dataclass
@@ -4799,13 +5393,18 @@ class CorrelatedDetectionSample:
 
 @dataclass
 class CorrelatedSamplingBatch(UniversalBatchMixin):
-    """Batch of correlated detection event samples for a rule."""
+    """Batch of correlated detection event samples for a rule.
+
+    ``query_errors`` lists failed sample queries (primary process-tuple query,
+    network fallback). If every query fails the workflow raises instead.
+    """
     rule_id: str
     rule_name: str
     samples: List[CorrelatedDetectionSample] = field(default_factory=list)
     total_samples: int = 0
     time_window: str = "14d"
     raw: Dict[str, Any] = field(default_factory=dict)
+    query_errors: List[str] = field(default_factory=list)
 
     @property
     def items(self) -> List[CorrelatedDetectionSample]:
@@ -4974,6 +5573,79 @@ class GcpMonitoringQueryResult(UniversalBatchMixin):
         return self.time_series
 
 
+@dataclass
+class IngestionMetricPoint:
+    """One aligned Cloud Monitoring point: [start, end) interval and its value."""
+    start: str
+    end: str
+    value: Any  # int for INT64 DELTA metrics, float for DOUBLE
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"start": self.start, "end": self.end, "value": self.value}
+
+
+@dataclass
+class LogTypeIngestionSeries:
+    """Aligned points for one log type (``"ALL"`` when not grouped), sorted by start time."""
+    log_type: str
+    points: List[IngestionMetricPoint] = field(default_factory=list)
+
+    @property
+    def total(self) -> float:
+        return sum(p.value for p in self.points if isinstance(p.value, (int, float)))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"log_type": self.log_type, "total": self.total, "points": [p.to_dict() for p in self.points]}
+
+
+@dataclass
+class ChronicleIngestionMetricsResult(UniversalBatchMixin):
+    """Chronicle ingestion metric time series per log type with call provenance.
+
+    ``time_series`` / ``total_series`` keep the raw normalized Cloud Monitoring
+    streams for consumers written against ``GcpMonitoringQueryResult``.
+    """
+    metric_type: str
+    filter_applied: str
+    project_id: str
+    start_time: str
+    end_time: str
+    alignment_period: str
+    per_series_aligner: str
+    cross_series_reducer: Optional[str] = None
+    group_by_fields: List[str] = field(default_factory=list)
+    called_at: str = ""
+    call_duration_s: float = 0.0
+    pages_fetched: int = 0
+    series: List[LogTypeIngestionSeries] = field(default_factory=list)
+    time_series: List[TimeSeriesData] = field(default_factory=list)
+
+    @property
+    def total_series(self) -> int:
+        return len(self.time_series)
+
+    @property
+    def items(self) -> List[LogTypeIngestionSeries]:
+        return self.series
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "metric_type": self.metric_type,
+            "filter_applied": self.filter_applied,
+            "project_id": self.project_id,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "alignment_period": self.alignment_period,
+            "per_series_aligner": self.per_series_aligner,
+            "cross_series_reducer": self.cross_series_reducer,
+            "group_by_fields": list(self.group_by_fields),
+            "called_at": self.called_at,
+            "call_duration_s": self.call_duration_s,
+            "pages_fetched": self.pages_fetched,
+            "series": [s.to_dict() for s in self.series],
+        }
+
+
 class TimestampProgressionState(str, Enum):
     """Classification states for telemetry timestamp and latency progression."""
     NEW = "NEW"
@@ -5029,6 +5701,13 @@ class TimestampIntegrityReport(UniversalBatchMixin):
     top_skewed_log_types: List[TimestampMetricRow] = field(default_factory=list)
     narrative: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
+    # Run metadata (not part of the persisted Evidence Fabric document).
+    persist_requested: bool = False
+    persisted: bool = False
+    persisted_snapshot_id: Optional[str] = None
+    persistence_error: Optional[str] = None
+    baseline_available: bool = False
+    baseline_error: Optional[str] = None
 
     def __post_init__(self):
         if not self.metrics and self.log_types:
@@ -5047,8 +5726,8 @@ class TimestampIntegrityReport(UniversalBatchMixin):
     def items(self) -> List[TimestampMetricRow]:
         return self.log_types
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    def to_dict(self, include_run_metadata: bool = True) -> Dict[str, Any]:
+        data = {
             "timestamp": self.timestamp,
             "days": self.days,
             "total_log_types_audited": self.total_log_types_audited,
@@ -5065,6 +5744,16 @@ class TimestampIntegrityReport(UniversalBatchMixin):
             "top_skewed_log_types": [lt.to_dict() for lt in self.top_skewed_log_types],
             "narrative": self.narrative,
         }
+        if include_run_metadata:
+            data["run_metadata"] = {
+                "persist_requested": self.persist_requested,
+                "persisted": self.persisted,
+                "persisted_snapshot_id": self.persisted_snapshot_id,
+                "persistence_error": self.persistence_error,
+                "baseline_available": self.baseline_available,
+                "baseline_error": self.baseline_error,
+            }
+        return data
 
 
 @dataclass

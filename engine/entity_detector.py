@@ -77,7 +77,11 @@ def _build_ip(val: str) -> DetectedEntity:
         graph_field="graph.entity.ip",
         graph_query=f'graph.entity.ip = "{ev}"',
         event_query=f'principal.ip = "{ev}" OR target.ip = "{ev}" OR src.ip = "{ev}"',
-        ioc_value_type="IP_ADDRESS",
+        # FieldAndValue.ValueType has no plain IP value; IP_ADDRESS is rejected
+        # with HTTP 400. ASSET_IP_ADDRESS is the documented IP enum and is
+        # accepted by legacySearchEnterpriseWideIoCs and summarizeEntity
+        # (verified live 2026-10-10).
+        ioc_value_type="ASSET_IP_ADDRESS",
     )
 
 

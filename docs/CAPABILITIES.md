@@ -5,7 +5,7 @@
 
 _Generated 2026-10-25 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**214 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**223 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -18,14 +18,14 @@ _Generated 2026-10-25 from `engine/registry.py` via `scripts/generate_capabiliti
 | :--- | ----: |
 | workflow | 43 |
 | primitive | 29 |
-| query | 142 |
-| **total** | **214** |
+| query | 151 |
+| **total** | **223** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 61 |
-| bounded | 15 |
-| unbounded | 66 |
+| single | 62 |
+| bounded | 19 |
+| unbounded | 70 |
 | (n/a — workflows/primitive) | 72 |
 
 ## Workflows
@@ -86,7 +86,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (23: workflow=8, primitive=10, query=5)
+### case  (24: workflow=8, primitive=10, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -109,6 +109,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.set_priority` | primitive | — | `set_case_alert_priority` | Updates the priority level of a specific case alert. |
 | `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
 | `case.get_wall` | query | `unbounded` | `get_case_wall` | Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps. |
+| `case.list` | query | `unbounded` | `list_cases` | Lists SOAR cases from the native cases collection with exact open/closed status, environment, priority, stage, assignee, important and incident filters, no time window, paginated up to a caller bound. |
 | `case.list_comments` | query | `unbounded` | `list_case_comments` | Lists all analyst comments and AI assessment notes for a SOAR case. |
 | `case.remediation_plan.get` | query | `single` | `get_remediation_plan` | Fetches a specific AI-generated agentic response / remediation plan by plan ID or resource name. |
 | `case.remediation_plan.list` | query | `unbounded` | `list_remediation_plans` | Lists AI-generated agentic response / remediation plans for cases and alerts. |
@@ -141,7 +142,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
 | `content_pack.search` | query | `unbounded` | `search_content_packs` | Searches, lists, and filters Content Hub Marketplace Content Packs across categories and pack types. |
 
-### curated_detections  (16: workflow=3, primitive=7, query=6)
+### curated_detections  (19: workflow=3, primitive=7, query=9)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -155,10 +156,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `curated_detections.tuning.case_history` | primitive | — | `cross_reference_rule_cases` | Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes. |
 | `curated_detections.tuning.entity_cardinality` | primitive | — | `analyze_entity_cardinality` | Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule. |
 | `curated_detections.tuning.top_noisy_rules` | primitive | — | `find_top_noisy_rules` | Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification. |
+| `curated_detections.deployments.list` | query | `unbounded` | `list_curated_rule_set_deployments` | Lists every curated rule set BROAD/PRECISE deployment (enabled, alerting) in one bulk call, optionally joined with rule set display names. |
 | `curated_detections.get_rule` | query | `single` | `get_curated_rule` | Retrieves an individual Curated Rule, its MITRE techniques, false positives, and raw YARA-L logic. |
 | `curated_detections.get_ruleset` | query | `single` | `get_curated_ruleset` | Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry. |
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
 | `curated_detections.refinements.list` | query | `unbounded` | `list_findings_refinements` | Lists active UDM findings refinements and detection exclusions across the tenant. |
+| `curated_detections.rules.list` | query | `unbounded` | `list_curated_rules` | Lists individual Google-curated rules with page-token pagination (slow endpoint; cache results). |
+| `curated_detections.rulesets.list` | query | `unbounded` | `list_curated_rulesets` | Lists Curated Rule Sets with page-token pagination (all_pages / max_results). |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
 | `curated_detections.tuning.samples` | query | `bounded` | `sample_detection_events` | Pulls correlated multi-attribute detection tuples (user + command + host + IP) from detection collection elements. |
 
@@ -366,7 +370,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `preview_feature.get` | query | `single` | `get_preview_feature` | Retrieves specific preview feature configuration, documentation, and retirement dates. |
 | `preview_feature.list` | query | `unbounded` | `list_preview_features` | Discovers customer preview feature flags, enablement states, retirement schedules, and docs. |
 
-### rule  (19: workflow=5, primitive=5, query=9)
+### rule  (21: workflow=5, primitive=5, query=11)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -380,9 +384,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `rule.deployment.update` | primitive | — | `update_rule_deployment` | Updates deployment properties (enabled, alerting, frequency) of a rule. |
 | `rule.embeddings.sync` | primitive | — | `sync_rule_embeddings` | Batch computes and stores text-embedding-004 vector embeddings for all active tenant rules. |
 | `rule.patch` | primitive | — | `patch_rule` | Updates the YARA-L logic of an existing detection rule. |
+| `rule.case_environments` | query | `bounded` | `get_rule_case_environments` | Counts distinct SOAR cases per (detection rule_id, case.environment) over a lookback window in one dashboard query. |
 | `rule.decay.telemetry` | query | `bounded` | `get_rule_detection_counts` | Queries 90-day detection count aggregations using authoritative native detection schema. |
 | `rule.deployment.get` | query | `single` | `get_rule_deployment` | Retrieves deployment, frequency, and alerting status of a rule. |
 | `rule.deployment.list` | query | `unbounded` | `list_rule_deployments` | Lists deployment, frequency, and alerting status for all detection rules. |
+| `rule.detection_series` | query | `bounded` | `get_rule_detection_series` | Per-rule detection counts bucketed by hour or day (UTC) over a lookback window, in one dashboard query. |
 | `rule.errors` | query | `unbounded` | `list_rule_errors` | Lists runtime and execution errors across detection rules. |
 | `rule.get` | query | `single` | `get_rule` | Retrieves full details and YARA-L logic of a detection rule. |
 | `rule.list` | query | `unbounded` | `list_rules` | Lists custom YARA-L detection rules in Chronicle SIEM. |
@@ -390,14 +396,17 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `rule.similarity.search` | query | `bounded` | `find_similar_rules` | Finds semantically similar detection rules using 768-d text-embedding-004 vectors and cosine similarity. |
 | `rule.verify` | query | `bounded` | `verify_rule_text` | Validates YARA-L 2.0 rule syntax against the Chronicle compiler. |
 
-### search  (4: workflow=3, query=1)
+### search  (7: workflow=3, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `search.from_entity` | workflow | — | `search_from_entity` | Translates high-level entity artifacts into canonical UDM query expressions. |
 | `search.refine` | workflow | — | `refine_search` | Refines existing queries by applying structured inclusion/exclusion filters on UDM paths. |
 | `search.udm` | workflow | — | `search_udm` | Validates, initiates, incrementally streams, and manages lifecycle of UDM search queries. |
+| `search.udm.aggregate` | query | `bounded` | `aggregate_udm` | Counts UDM events grouped by 0-2 allow-listed fields and an optional hour/day bucket in one synchronous dashboard SQL query; restricted, injection-safe filter grammar; lookback <= 168 h, limit <= 2000 rows with truncation flag. |
+| `search.udm.field_values` | query | `bounded` | `find_udm_field_values` | Finds UDM field paths whose recent values match a text fragment (:findUdmFieldValues), for query autocomplete. |
 | `search.udm.stats` | query | `unbounded` | `search_udm_stats` | Validates, initiates, streams, and aggregates UDM statistics, match/outcome metrics, and multi-field grouping operations via LRO. |
+| `search.udm.translate` | query | `single` | `translate_udm_query` | Translates natural-language text into a UDM search query and optional time range (:translateUdmQuery). Does not run the query. |
 
 ### siem_settings  (7: workflow=1, query=6)
 

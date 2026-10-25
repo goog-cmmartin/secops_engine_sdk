@@ -1,0 +1,44 @@
+id: integration.instance.delete
+version: 1.0.0
+title: Delete SOAR Integration Instance
+description: >
+  Deletes a configured integration instance with pre-flight downstream playbook dependency checks.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}/integrationInstances/{instance}
+  method: DELETE
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  integration_id:
+    type: string
+    required: true
+    description: Identifier of the parent integration.
+  instance_id:
+    type: string
+    required: true
+    description: Identifier or UUID of the instance.
+  force:
+    type: boolean
+    required: false
+    default: false
+    description: If true, proceeds with deletion even when active playbooks depend on the instance.
+
+outputs:
+  result:
+    type: IntegrationInstanceDeleteResult
+    properties:
+      integration_identifier: string
+      instance_identifier: string
+      success: boolean
+      message: string
+      affected_playbooks_count: integer
+      deleted_at: timestamp
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - Pre-flight guard preventing inadvertent deletion of instances attached to active playbooks unless force=True.
+  - Explicit error propagation on API failures.

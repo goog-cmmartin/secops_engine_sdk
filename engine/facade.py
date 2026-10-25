@@ -31,6 +31,14 @@ from engine.domain import (
     CaseAlertRecommendationJob,
     CaseAlertRecommendation,
     CaseSummary,
+    RemediationAction,
+    RemediationPlan,
+    RemediationPlanBatch,
+    AgenticResponseAction,
+    AgenticResponsePlan,
+    AgenticResponsePlanBatch,
+    TinaInvestigation,
+    TinaInvestigationBatch,
     DataTable,
     DataTableColumnInfo,
     DataTableHealthFinding,
@@ -115,6 +123,8 @@ from engine.domain import (
     IntegrationBatch,
     IntegrationDetail,
     IntegrationInstance,
+    IntegrationInstanceAffectedItems,
+    IntegrationInstanceDeleteResult,
     IntegrationSearchQuery,
     IntegrationSummary,
     IntegrationType,
@@ -301,6 +311,18 @@ from engine.workflows.case_actions import (
     UpdateCaseAlertWorkflow,
     UpdateCaseWorkflow,
 )
+from engine.workflows.remediation_plan import (
+    GetAgenticResponsePlanWorkflow,
+    GetRemediationActionWorkflow,
+    GetRemediationPlanWorkflow,
+    ListRemediationActionsWorkflow,
+    ListRemediationPlansWorkflow,
+)
+from engine.workflows.tina_investigation import (
+    GetAlertLatestTinaInvestigationWorkflow,
+    GetTinaInvestigationWorkflow,
+    ListTinaInvestigationsWorkflow,
+)
 from engine.workflows.case_investigation import (
     AddCaseCommentWorkflow,
     InvestigateCaseWorkflow,
@@ -375,6 +397,8 @@ from engine.workflows.feed import (
 )
 from engine.workflows.feed_health import AuditFeedHealthWorkflow
 from engine.workflows.integration import (
+    DeleteIntegrationInstanceWorkflow,
+    FetchIntegrationInstanceAffectedItemsWorkflow,
     GetIntegrationDetailWorkflow,
     ListIntegrationInstancesWorkflow,
     ListRemoteAgentsWorkflow,
@@ -651,6 +675,18 @@ class SecOpsEngine:
         "_get_case_alert_recommendation_wf": lambda e: GetCaseAlertRecommendationWorkflow(e.adapter),
         "_get_or_create_case_summary_wf": lambda e: GetOrCreateCaseSummaryWorkflow(e.adapter),
         "_get_case_summary_wf": lambda e: GetCaseSummaryWorkflow(e.adapter),
+        "_list_remediation_plans_wf": lambda e: ListRemediationPlansWorkflow(e.adapter),
+        "_get_remediation_plan_wf": lambda e: GetRemediationPlanWorkflow(e.adapter),
+        "_get_agentic_response_plan_wf": lambda e: GetAgenticResponsePlanWorkflow(
+            e.adapter,
+            list_workflow=e._list_remediation_plans_wf,
+            get_workflow=e._get_remediation_plan_wf,
+        ),
+        "_list_remediation_actions_wf": lambda e: ListRemediationActionsWorkflow(e.adapter),
+        "_get_remediation_action_wf": lambda e: GetRemediationActionWorkflow(e.adapter),
+        "_list_tina_investigations_wf": lambda e: ListTinaInvestigationsWorkflow(e.adapter),
+        "_get_tina_investigation_wf": lambda e: GetTinaInvestigationWorkflow(e.adapter),
+        "_get_alert_latest_tina_investigation_wf": lambda e: GetAlertLatestTinaInvestigationWorkflow(e.adapter),
         "_investigate_alert_wf": lambda e: InvestigateAlertWorkflow(e.adapter),
         "_search_cases_wf": lambda e: SearchCasesWorkflow(e.adapter),
         "_case_triage_wf": lambda e: CaseTriageWorkflow(e.adapter),
@@ -675,6 +711,11 @@ class SecOpsEngine:
         "_search_integrations_wf": lambda e: SearchIntegrationsWorkflow(e.adapter),
         "_get_integration_wf": lambda e: GetIntegrationDetailWorkflow(e.adapter),
         "_list_integration_instances_wf": lambda e: ListIntegrationInstancesWorkflow(e.adapter),
+        "_get_integration_instance_affected_items_wf": lambda e: FetchIntegrationInstanceAffectedItemsWorkflow(e.adapter),
+        "_delete_integration_instance_wf": lambda e: DeleteIntegrationInstanceWorkflow(
+            e.adapter,
+            affected_items_workflow=e._get_integration_instance_affected_items_wf,
+        ),
         "_list_remote_agents_wf": lambda e: ListRemoteAgentsWorkflow(e.adapter),
         "_search_jobs_wf": lambda e: SearchJobsWorkflow(e.adapter),
         "_get_job_wf": lambda e: GetJobDetailWorkflow(e.adapter),
@@ -1188,6 +1229,76 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.remediation_plan.list",
+                name="List Case Remediation Plans",
+                description="Lists AI-generated agentic response / remediation plans for cases and alerts.",
+                category="case",
+                handler=self.list_remediation_plans,
+                mcp_tool_name="list_remediation_plans",
+                composed=False,
+                evidence_path="evidence/case/remediation_plan_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.remediation_plan.get",
+                name="Get Case Remediation Plan",
+                description="Fetches a specific AI-generated agentic response / remediation plan by plan ID or resource name.",
+                category="case",
+                handler=self.get_remediation_plan,
+                mcp_tool_name="get_remediation_plan",
+                composed=False,
+                evidence_path="evidence/case/remediation_plan_get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.agentic_response_plan.get",
+                name="Get Agentic Response Plan",
+                description="Resolves an AI-driven agentic response plan by either case ID or plan ID.",
+                category="case",
+                handler=self.get_agentic_response_plan,
+                mcp_tool_name="get_agentic_response_plan",
+                composed=True,
+                uses=("case.remediation_plan.list", "case.remediation_plan.get"),
+                evidence_path="evidence/case/remediation_plan_get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="investigation.tina.list",
+                name="List Gemini TINA Investigations",
+                description="Lists and paginates autonomous Gemini Triage & Investigation Agent (TINA) investigations with verdicts and metadata.",
+                category="investigation",
+                handler=self.list_tina_investigations,
+                mcp_tool_name="list_tina_investigations",
+                evidence_path="evidence/investigation/tina_list",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="investigation.tina.get",
+                name="Get Gemini TINA Investigation",
+                description="Retrieves a complete Gemini TINA investigation report including verdict, summary, confidence, and all executed reasoning and search steps.",
+                category="investigation",
+                handler=self.get_tina_investigation,
+                mcp_tool_name="get_tina_investigation",
+                evidence_path="evidence/investigation/tina_get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="alert.tina.latest",
+                name="Get Latest Gemini TINA Investigation for Alert",
+                description="Retrieves the most recent Gemini TINA investigation associated with a specific alert ID.",
+                category="investigation",
+                handler=self.get_alert_latest_tina_investigation,
+                mcp_tool_name="get_alert_latest_tina_investigation",
+                evidence_path="evidence/investigation/tina_alert_latest",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="alert.investigate",
                 name="SOAR Security Alert Deep Investigation",
                 description="Retrieves security alert details with root-cause entities and raw log attachments.",
@@ -1370,6 +1481,31 @@ class SecOpsEngine:
                 mcp_tool_name="list_integration_instances",
                 composed=False,
                 evidence_path="evidence/integration/instances",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="integration.instance.affected_items",
+                name="SOAR Integration Instance Affected Items",
+                description="Resolves affected playbooks and downstream items before instance deletion.",
+                category="integration",
+                handler=self.get_integration_instance_affected_items,
+                mcp_tool_name="get_integration_instance_affected_items",
+                composed=False,
+                evidence_path="evidence/integration/instance_affected_items",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="integration.instance.delete",
+                name="Delete SOAR Integration Instance",
+                description="Deletes a configured integration instance with pre-flight dependency guard.",
+                category="integration",
+                handler=self.delete_integration_instance,
+                mcp_tool_name="delete_integration_instance",
+                composed=True,
+                uses=("integration.instance.affected_items",),
+                evidence_path="evidence/integration/instance_delete",
             )
         )
         self.registry.register(
@@ -3507,6 +3643,8 @@ class SecOpsEngine:
         project_id: Optional[str] = None,
         location: Optional[str] = None,
         materialize_budget: Optional[int] = None,
+        dialect: Optional[str] = None,
+        user_sql: Optional[str] = None,
         on_batch: Optional[Callable[[SearchBatchResult, SearchSession], None]] = None,
         on_state_change: Optional[Callable[[SearchSession], None]] = None,
         cancel_token: Optional[Callable[[], bool]] = None,
@@ -3541,6 +3679,8 @@ class SecOpsEngine:
                 project_id=project_id,
                 location=location,
                 materialize_budget=materialize_budget,
+                dialect=dialect or kwargs.get("dialect"),
+                user_sql=user_sql or kwargs.get("user_sql"),
             )
 
         return self._search_udm_wf.execute(
@@ -3561,6 +3701,8 @@ class SecOpsEngine:
         case_insensitive: bool = True,
         generate_ai_overview: bool = True,
         max_values_per_field: int = 60,
+        dialect: Optional[str] = None,
+        user_sql: Optional[str] = None,
         on_batch: Optional[Callable[[StatsSearchResult, StatsSearchSession], None]] = None,
         on_state_change: Optional[Callable[[Any, Any, StatsSearchSession], None]] = None,
         cancel_token: Optional[Any] = None,
@@ -3587,6 +3729,8 @@ class SecOpsEngine:
                 case_insensitive=case_insensitive,
                 generate_ai_overview=generate_ai_overview,
                 max_values_per_field=max_values_per_field,
+                dialect=dialect,
+                user_sql=user_sql,
             )
 
         return self._search_udm_stats_wf.execute(
@@ -3998,6 +4142,93 @@ class SecOpsEngine:
             poll_interval_sec=poll_interval_sec,
         )
 
+    def list_remediation_plans(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        filter: Optional[str] = None,
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> RemediationPlanBatch:
+        """Lists AI-generated agentic response / remediation plans for cases or alerts."""
+        return self._list_remediation_plans_wf.execute(
+            case_id=case_id,
+            filter=filter,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def get_remediation_plan(self, plan_id: Union[str, int]) -> RemediationPlan:
+        """Fetches a specific AI-generated agentic response / remediation plan by ID."""
+        return self._get_remediation_plan_wf.execute(plan_id=str(plan_id))
+
+    def get_agentic_response_plan(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        plan_id: Optional[Union[str, int]] = None,
+    ) -> Optional[RemediationPlan]:
+        """Resolves an AI-generated agentic response plan by either case ID or plan ID."""
+        return self._get_agentic_response_plan_wf.execute(case_id=case_id, plan_id=plan_id)
+
+    def get_agentic_response_plans(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        filter: Optional[str] = None,
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> RemediationPlanBatch:
+        """Alias for list_remediation_plans."""
+        return self.list_remediation_plans(
+            case_id=case_id,
+            filter=filter,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def list_remediation_actions(
+        self,
+        plan_id: Union[str, int],
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> List[RemediationAction]:
+        """Lists actions belonging to an AI-generated remediation plan."""
+        return self._list_remediation_actions_wf.execute(
+            plan_id=plan_id,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+    def get_remediation_action(
+        self,
+        plan_id: Union[str, int],
+        action_id: Union[str, int],
+    ) -> RemediationAction:
+        """Fetches an individual remediation action from a remediation plan."""
+        return self._get_remediation_action_wf.execute(plan_id=plan_id, action_id=action_id)
+
+    def list_tina_investigations(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        filter: Optional[str] = None,
+        order_by: Optional[str] = "start_time desc",
+    ) -> TinaInvestigationBatch:
+        """Lists Gemini TINA investigations with pagination and optional filtering."""
+        return self._list_tina_investigations_wf.execute(
+            page_size=page_size,
+            page_token=page_token,
+            filter=filter,
+            order_by=order_by,
+        )
+
+    def get_tina_investigation(self, investigation_id: Union[str, int]) -> TinaInvestigation:
+        """Retrieves a specific Gemini TINA investigation by ID or resource name."""
+        return self._get_tina_investigation_wf.execute(investigation_id=str(investigation_id))
+
+    def get_alert_latest_tina_investigation(self, alert_id: str) -> Optional[TinaInvestigation]:
+        """Retrieves the latest Gemini TINA investigation for a specific alert ID."""
+        return self._get_alert_latest_tina_investigation_wf.execute(alert_id=alert_id)
+
+
     def investigate_alert(self, alert_name: str) -> AlertInvestigation:
         """Executes the Alert Deep-Dive Investigation workflow."""
         return self._investigate_alert_wf.execute(alert_name=alert_name)
@@ -4320,6 +4551,31 @@ class SecOpsEngine:
             integration_id=integration_id,
             environment=environment,
         )
+
+    def get_integration_instance_affected_items(
+        self,
+        integration_id: str,
+        instance_id: str,
+    ) -> IntegrationInstanceAffectedItems:
+        """Retrieves downstream playbooks and items affected by an integration instance."""
+        return self._get_integration_instance_affected_items_wf.execute(
+            integration_id=integration_id,
+            instance_id=instance_id,
+        )
+
+    def delete_integration_instance(
+        self,
+        integration_id: str,
+        instance_id: str,
+        force: bool = False,
+    ) -> IntegrationInstanceDeleteResult:
+        """Deletes a configured integration instance with pre-flight dependency guard."""
+        return self._delete_integration_instance_wf.execute(
+            integration_id=integration_id,
+            instance_id=instance_id,
+            force=force,
+        )
+
 
     def list_remote_agents(
         self,

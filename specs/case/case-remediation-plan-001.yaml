@@ -1,0 +1,39 @@
+schema_version: "2.0"
+metadata:
+  capability_id: "case.remediation_plan.list"
+  name: "List Case Remediation Plans"
+  description: "Lists AI-generated agentic response / remediation plans for cases and alerts."
+  category: "case"
+  kind: "query"
+  domain: "case"
+  cardinality: "unbounded"
+  status: "VERIFIED"
+  evidence_path: "evidence/case/remediation_plan_list"
+
+endpoints:
+  - method: "GET"
+    path: "/v1alpha/projects/{project_number}/locations/{location}/instances/{customer_id}/remediationPlans"
+    parameters:
+      filter: "string (e.g. caseId = 108188)"
+      pageSize: "integer"
+      pageToken: "string"
+
+capabilities:
+  - id: "case.remediation_plan.list"
+    name: "List Case Remediation Plans"
+    kind: "query"
+    cardinality: "unbounded"
+    description: "Lists AI-generated agentic response / remediation plans for cases and alerts."
+  - id: "case.remediation_plan.get"
+    name: "Get Case Remediation Plan"
+    kind: "query"
+    cardinality: "single"
+    description: "Fetches a specific AI-generated agentic response / remediation plan by plan ID or resource name."
+  - id: "case.agentic_response_plan.get"
+    name: "Get Agentic Response Plan"
+    kind: "workflow"
+    composed: true
+    uses:
+      - "case.remediation_plan.list"
+      - "case.remediation_plan.get"
+    description: "Workflow to resolve an agentic response plan by either case ID or plan ID."

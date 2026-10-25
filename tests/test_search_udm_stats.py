@@ -346,6 +346,48 @@ class TestUDMStatsSearchLive(unittest.TestCase):
         self.assertIsNotNone(session.result)
         self.assertGreaterEqual(len(session.result.columns), 1)
 
+    def test_live_google_sql_pipe_query(self):
+        """Executes a live GoogleSQL pipe syntax query (DIALECT_SQL) against cases."""
+        now = datetime.now(timezone.utc)
+        start = (now - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        query = (
+            "FROM cases\n"
+            "|> EXTEND\n"
+            "    FORMAT_TIMESTAMP('%F %T ', TIMESTAMP_SECONDS(create_time.seconds)) AS Case_Creation_Time,\n"
+            "    CONCAT(last_modifying_user.given_name, ' ', last_modifying_user.family_name) AS Last_Handled_Analyst\n"
+            "|> SELECT\n"
+            "    response_platform_info.response_platform_id AS Case_ID,\n"
+            "    display_name AS Case_Name,\n"
+            "    Case_Creation_Time,\n"
+            "    stage AS Last_Stage,\n"
+            "    status AS Case_Status,\n"
+            "    Last_Handled_Analyst,\n"
+            "    closure_details.reason AS Case_Closed,\n"
+            "    closure_details.root_cause AS Root_Cause\n"
+            "|> DISTINCT\n"
+            "|> ORDER BY Case_Creation_Time DESC;"
+        )
+
+        session = self.engine.search_udm_stats(
+            query=query,
+            start_time=start,
+            end_time=end,
+            dialect="DIALECT_SQL",
+            poll_interval=1.0,
+            max_poll_seconds=60.0,
+        )
+
+        if session.lifecycle == LifecycleState.FAILED:
+            self.skipTest(f"Live SecOps query returned failure: {session.error}")
+
+        self.assertEqual(session.lifecycle, LifecycleState.COMPLETED)
+        self.assertIsNotNone(session.result)
+        self.assertIn("Case_ID", session.result.column_names())
+        self.assertIn("Case_Name", session.result.column_names())
+        self.assertGreaterEqual(len(session.result.rows), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

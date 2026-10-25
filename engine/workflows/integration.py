@@ -5,6 +5,8 @@ from engine.domain import (
     IntegrationBatch,
     IntegrationDetail,
     IntegrationInstance,
+    IntegrationInstanceAffectedItems,
+    IntegrationInstanceDeleteResult,
     IntegrationSearchQuery,
     IntegrationSummary,
     IntegrationType,
@@ -338,3 +340,74 @@ class ListRemoteAgentsWorkflow:
                 )
             )
         return agents
+
+
+class FetchIntegrationInstanceAffectedItemsWorkflow:
+    """Retrieves downstream playbooks and items affected by an integration instance."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(self, integration_id: str, instance_id: str) -> IntegrationInstanceAffectedItems:
+        clean_int = integration_id.strip().split("/")[-1]
+        clean_inst = instance_id.strip().split("/")[-1]
+        if not clean_int or not clean_inst:
+            raise ValueError("Both integration_id and instance_id must be provided.")
+
+        raw = self.adapter.get_integration_instance_affected_items(clean_int, clean_inst)
+        raw_playbooks = raw.get("playbooks") or raw.get("affectedPlaybooks") or []
+        playbook_names: List[str] = []
+        for pb in raw_playbooks:
+            if isinstance(pb, dict):
+                name = pb.get("displayName") or pb.get("name") or pb.get("identifier") or ""
+                if name:
+                    playbook_names.append(name)
+            elif isinstance(pb, str):
+                playbook_names.append(pb)
+
+        return IntegrationInstanceAffectedItems(
+            integration_identifier=clean_int,
+            instance_identifier=clean_inst,
+            affected_playbooks=playbook_names,
+            raw=raw,
+        )
+
+
+class DeleteIntegrationInstanceWorkflow:
+    """Orchestrates deletion of an integration instance with pre-flight dependency guard."""
+
+    def __init__(self, adapter: Any, affected_items_workflow: Optional[FetchIntegrationInstanceAffectedItemsWorkflow] = None):
+        self.adapter = adapter
+        self.affected_items_workflow = affected_items_workflow or FetchIntegrationInstanceAffectedItemsWorkflow(adapter)
+
+    def execute(
+        self,
+        integration_id: str,
+        instance_id: str,
+        force: bool = False,
+    ) -> IntegrationInstanceDeleteResult:
+        clean_int = integration_id.strip().split("/")[-1]
+        clean_inst = instance_id.strip().split("/")[-1]
+        if not clean_int or not clean_inst:
+            raise ValueError("Both integration_id and instance_id must be provided.")
+
+        # Pre-flight check
+        affected = self.affected_items_workflow.execute(clean_int, clean_inst)
+        if affected.has_affected_items and not force:
+            pb_list = ", ".join(f"'{p}'" for p in affected.affected_playbooks)
+            raise ValueError(
+                f"Cannot delete instance '{clean_inst}' for integration '{clean_int}': "
+                f"{len(affected.affected_playbooks)} playbook(s) depend on it ({pb_list}). "
+                f"Pass force=True to delete anyway."
+            )
+
+        self.adapter.delete_integration_instance(clean_int, clean_inst)
+
+        return IntegrationInstanceDeleteResult(
+            integration_identifier=clean_int,
+            instance_identifier=clean_inst,
+            success=True,
+            message=f"Successfully deleted instance '{clean_inst}' of integration '{clean_int}'.",
+            affected_playbooks_count=len(affected.affected_playbooks),
+        )
+

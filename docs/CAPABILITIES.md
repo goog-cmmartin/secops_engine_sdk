@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-09-26 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-10-25 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**206 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**214 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-09-26 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 41 |
+| workflow | 43 |
 | primitive | 29 |
-| query | 136 |
-| **total** | **206** |
+| query | 142 |
+| **total** | **214** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 58 |
+| single | 61 |
 | bounded | 15 |
-| unbounded | 63 |
-| (n/a — workflows/primitive) | 70 |
+| unbounded | 66 |
+| (n/a — workflows/primitive) | 72 |
 
 ## Workflows
 
@@ -35,6 +35,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | capability_id | domain | description |
 | :--- | :--- | :--- |
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
+| `case.agentic_response_plan.get` | case | Resolves an AI-driven agentic response plan by either case ID or plan ID. |
 | `case.ai_investigate` | case | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
 | `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
@@ -55,6 +56,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `feed.audit_health` | feed | Audits and correlates ingestion feed states, Health Hub telemetry, and transport latency. |
 | `feed.timestamp_integrity_audit` | feed | Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief. |
 | `ingestion.labels_and_namespaces.analyze` | ingestion | Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes. |
+| `integration.instance.delete` | integration | Deletes a configured integration instance with pre-flight dependency guard. |
 | `log_cost.analyze` | log | Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations. |
 | `mitre.analyze_coverage` | threat_intelligence | Evaluates cached detection rules and live ingestion telemetry against MITRE ATT&CK matrix and threat profiles to determine coverage score and gaps. |
 | `mitre.generate_report` | threat_intelligence | Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture. |
@@ -84,10 +86,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (20: workflow=7, primitive=10, query=3)
+### case  (23: workflow=8, primitive=10, query=5)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `case.agentic_response_plan.get` | workflow | — | `get_agentic_response_plan` | Resolves an AI-driven agentic response plan by either case ID or plan ID. |
 | `case.ai_investigate` | workflow | — | `ai_investigate_case` | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
 | `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
@@ -107,6 +110,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
 | `case.get_wall` | query | `unbounded` | `get_case_wall` | Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps. |
 | `case.list_comments` | query | `unbounded` | `list_case_comments` | Lists all analyst comments and AI assessment notes for a SOAR case. |
+| `case.remediation_plan.get` | query | `single` | `get_remediation_plan` | Fetches a specific AI-generated agentic response / remediation plan by plan ID or resource name. |
+| `case.remediation_plan.list` | query | `unbounded` | `list_remediation_plans` | Lists AI-generated agentic response / remediation plans for cases and alerts. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
 
 ### case_config  (14: query=14)
@@ -268,14 +273,24 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `ingestion.namespaces.analyze` | query | `single` | `analyze_namespaces` | Analyzes active UDM namespaces and flags potential RFC 1918 overlapping IP collisions across network telemetry. |
 | `ingestion.rbac_alignment.audit` | query | `single` | `audit_data_rbac_alignment` | Audits Data Access Labels against active telemetry tags and namespaces, detecting unreferenced or broken scoping rules. |
 
-### integration  (4: query=4)
+### integration  (6: workflow=1, query=5)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `integration.instance.delete` | workflow | — | `delete_integration_instance` | Deletes a configured integration instance with pre-flight dependency guard. |
 | `integration.get` | query | `single` | `get_integration` | Retrieves complete integration details, instances, remote agents, and documentation. |
+| `integration.instance.affected_items` | query | `unbounded` | `get_integration_instance_affected_items` | Resolves affected playbooks and downstream items before instance deletion. |
 | `integration.instances` | query | `unbounded` | `list_integration_instances` | Lists configured integration instances across environments or specific integrations. |
 | `integration.remote_agents` | query | `unbounded` | `list_remote_agents` | Lists remote proxy execution agents and their supported environments. |
 | `integration.search` | query | `unbounded` | `search_integrations` | Searches, lists, and filters SOAR integrations across environments, status, and certification. |
+
+### investigation  (3: query=3)
+
+| capability_id | kind | cardinality | mcp_tool (proposed) | description |
+| :--- | :--- | :--- | :--- | :--- |
+| `alert.tina.latest` | query | `single` | `get_alert_latest_tina_investigation` | Retrieves the most recent Gemini TINA investigation associated with a specific alert ID. |
+| `investigation.tina.get` | query | `single` | `get_tina_investigation` | Retrieves a complete Gemini TINA investigation report including verdict, summary, confidence, and all executed reasoning and search steps. |
+| `investigation.tina.list` | query | `unbounded` | `list_tina_investigations` | Lists and paginates autonomous Gemini Triage & Investigation Agent (TINA) investigations with verdicts and metadata. |
 
 ### ioc  (1: query=1)
 

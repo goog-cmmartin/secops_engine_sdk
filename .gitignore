@@ -137,3 +137,5 @@ references/
 
 # Generated on demand by the web server (engine/knowledge_graph.py)
 knowledge/viz.html
+
+.extension_keys/

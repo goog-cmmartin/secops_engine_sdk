@@ -51,6 +51,8 @@ SINGLE_RESULT_VERBS = frozenset({
     "diff",
     "metrics",
     "summarize",
+    "get_latest",
+    "latest",
 })
 
 # Terminal verbs whose result set is bounded by a required caller argument
@@ -117,6 +119,8 @@ READ_VERB_SUFFIXES = frozenset({
     "errors",
     "list_comments",
     "get_wall",
+    "get_latest",
+    "latest",
 })
 
 

@@ -540,6 +540,8 @@ class SearchRequest:
     # search_udm.py). The client-side loop still trims to `receive_limit`, so raising
     materialize_budget: Optional[int] = None
     limit: Optional[int] = None
+    dialect: Optional[str] = None
+    user_sql: Optional[str] = None
 
     def __post_init__(self):
         if self.limit is not None:
@@ -744,6 +746,8 @@ class StatsSearchRequest:
     customer_id: Optional[str] = None
     project_id: Optional[str] = None
     location: Optional[str] = None
+    dialect: Optional[str] = None
+    user_sql: Optional[str] = None
 
 
 @dataclass
@@ -1785,6 +1789,31 @@ class IntegrationInstance:
     @property
     def is_global(self) -> bool:
         return self.environment == "*"
+
+
+@dataclass
+class IntegrationInstanceAffectedItems:
+    """Represents downstream playbooks and resources affected by an integration instance."""
+    integration_identifier: str
+    instance_identifier: str
+    affected_playbooks: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_affected_items(self) -> bool:
+        return len(self.affected_playbooks) > 0
+
+
+@dataclass
+class IntegrationInstanceDeleteResult:
+    """Result of deleting an integration instance."""
+    integration_identifier: str
+    instance_identifier: str
+    success: bool
+    message: str
+    affected_playbooks_count: int = 0
+    deleted_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 @dataclass
@@ -4582,6 +4611,176 @@ class DetectionTuningReport:
     @property
     def is_curated(self) -> bool:
         return self.rule_type in ("GOOGLE_MANAGED", "GOOGLE_CURATED") or self.rule_id.startswith("ur_")
+
+
+@dataclass
+class RemediationAction:
+    """An action within an AI-generated agentic response/remediation plan."""
+    name: str
+    action_id: str
+    integration_id: Optional[str] = None
+    integration_instance: Optional[str] = None
+    display_name: Optional[str] = None
+    type: Optional[str] = None
+    creator: Optional[str] = None
+    action_reasoning: Optional[str] = None
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    target_entities: List[Dict[str, Any]] = field(default_factory=list)
+    additional_data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RemediationPlan:
+    """An AI-generated agentic response/remediation plan for a case alert."""
+    name: str
+    plan_id: str
+    alert_name: Optional[str] = None
+    case_id: Optional[int] = None
+    alert_id: Optional[str] = None
+    siem_alert_id: Optional[str] = None
+    agent_session_id: Optional[str] = None
+    state: str = "REMEDIATION_PLAN_STATE_UNSPECIFIED"
+    trigger_type: Optional[str] = None
+    status_details: Optional[str] = None
+    agent_classified_use_case: Optional[str] = None
+    plan_data: Dict[str, Any] = field(default_factory=dict)
+    planning_summary: Optional[str] = None
+    usage_metadata: Dict[str, Any] = field(default_factory=dict)
+    involved_entities: List[Dict[str, Any]] = field(default_factory=list)
+    actions: List[RemediationAction] = field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        return self.plan_id
+
+
+@dataclass
+class RemediationPlanBatch:
+    """Batch list of AI-generated remediation plans."""
+    plans: List[RemediationPlan] = field(default_factory=list)
+    total_size: int = 0
+    next_page_token: Optional[str] = None
+    case_id: Optional[int] = None
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __iter__(self):
+        return iter(self.plans)
+
+    def __len__(self) -> int:
+        return len(self.plans)
+
+    def __getitem__(self, index: int) -> RemediationPlan:
+        return self.plans[index]
+
+
+# Ergonomic Aliases
+AgenticResponseAction = RemediationAction
+AgenticResponsePlan = RemediationPlan
+AgenticResponsePlanBatch = RemediationPlanBatch
+
+
+# ==============================================================================
+# Gemini Triage & Investigation Agent (TINA) Domain Models
+# ==============================================================================
+
+class TinaVerdict(str, Enum):
+    """Verdict classification of a Gemini TINA investigation."""
+    TRUE_POSITIVE = "TRUE_POSITIVE"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    BENIGN = "BENIGN"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    UNSPECIFIED = "UNSPECIFIED"
+
+
+class TinaConfidence(str, Enum):
+    """Confidence level assigned by the Gemini Triage & Investigation Agent."""
+    HIGH_CONFIDENCE = "HIGH_CONFIDENCE"
+    LOW_CONFIDENCE = "LOW_CONFIDENCE"
+    MEDIUM_CONFIDENCE = "MEDIUM_CONFIDENCE"
+    UNSPECIFIED = "UNSPECIFIED"
+
+
+@dataclass
+class TinaStepSourceMetadata:
+    """Telemetry search and query metadata executed during an investigation step."""
+    source_type: Optional[str] = None
+    query_code: Optional[str] = None
+    time_range_start: Optional[datetime] = None
+    time_range_end: Optional[datetime] = None
+    unique_results_count: Optional[int] = None
+    total_results_count: Optional[int] = None
+    operation: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TinaInvestigationStep:
+    """An individual autonomous reasoning and search step executed by TINA."""
+    name: str
+    step_id: str
+    analysis_summary: str
+    description: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    source_metadata: Optional[TinaStepSourceMetadata] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TinaNextStep:
+    """Recommended follow-up analyst or automated action."""
+    title: str
+    step_type: str  # SEARCHABLE or MANUAL
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TinaInvestigation:
+    """Complete Gemini Triage & Investigation Agent (TINA) investigation report."""
+    name: str
+    id: str
+    display_name: str
+    verdict: Optional[str] = None
+    summary: str = ""
+    status: Optional[str] = None
+    confidence: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    notebook: Optional[str] = None
+    trigger_type: Optional[str] = None
+    publish_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
+    next_steps: List[TinaNextStep] = field(default_factory=list)
+    investigation_steps: List[TinaInvestigationStep] = field(default_factory=list)
+    alert_ids: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TinaInvestigationBatch:
+    """Paginated collection of Gemini TINA investigations."""
+    investigations: List[TinaInvestigation] = field(default_factory=list)
+    total_count: int = 0
+    next_page_token: Optional[str] = None
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __iter__(self):
+        return iter(self.investigations)
+
+    def __len__(self) -> int:
+        return len(self.investigations)
+
+    def __getitem__(self, index: int) -> TinaInvestigation:
+        return self.investigations[index]
+
+
 
 
 

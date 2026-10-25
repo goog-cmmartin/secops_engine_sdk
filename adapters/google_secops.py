@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from engine.auth import CredentialProvider
 from engine.config import SecOpsConfig, SecOpsConfigurationError, load_config
@@ -154,11 +154,24 @@ class GoogleSecOpsAdapter:
 
         raise RuntimeError(f"Google SecOps API request to {url} failed after {max_retries} attempts.")
 
-    def validate_query(self, query: str, dialect: str = "udm") -> ValidationResult:
+    def validate_query(self, query: str, dialect: Optional[str] = None) -> ValidationResult:
         """Translates query.validate domain operation to :validateQuery API."""
+        resolved_dialect = dialect
+        if not resolved_dialect:
+            if isinstance(query, str) and ("|>" in query or query.strip().startswith("FROM ")):
+                resolved_dialect = "DIALECT_SQL"
+            else:
+                resolved_dialect = "DIALECT_UDM_SEARCH"
+        elif resolved_dialect.lower() in ("udm", "dialect_udm_search"):
+            resolved_dialect = "DIALECT_UDM_SEARCH"
+        elif resolved_dialect.lower() in ("sql", "dialect_sql"):
+            resolved_dialect = "DIALECT_SQL"
+        elif resolved_dialect.lower() in ("stats", "dialect_stats"):
+            resolved_dialect = "DIALECT_STATS"
+
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:validateQuery"
         params = {
-            "dialect": "DIALECT_UDM_SEARCH",
+            "dialect": resolved_dialect,
             "allowUnreplacedPlaceholders": "false",
             "rawQuery": query,
         }
@@ -169,7 +182,7 @@ class GoogleSecOpsAdapter:
             is_valid = query_type in ["QUERY_TYPE_UDM_QUERY", "QUERY_TYPE_ENTITY_GRAPH_QUERY", "QUERY_TYPE_STATS_QUERY"] and not err_text
             return ValidationResult(
                 valid=is_valid,
-                dialect="udm",
+                dialect=resolved_dialect,
                 raw_query_type=query_type,
                 error_message=err_text if not is_valid else None,
             )
@@ -178,7 +191,7 @@ class GoogleSecOpsAdapter:
         except Exception as e:
             return ValidationResult(
                 valid=False,
-                dialect="udm",
+                dialect=resolved_dialect or "DIALECT_UDM_SEARCH",
                 error_message=str(e),
             )
 
@@ -188,6 +201,8 @@ class GoogleSecOpsAdapter:
         start_time: str,
         end_time: str,
         max_events: int = 10000,
+        dialect: Optional[str] = None,
+        user_sql: Optional[str] = None,
     ) -> str:
         """Translates search.start domain operation to legacyFetchUdmSearchView API.
 
@@ -217,6 +232,13 @@ class GoogleSecOpsAdapter:
             "generateAiOverview": True,
             "returnOperationIdOnly": True,
         }
+        if user_sql:
+            body["userSql"] = user_sql
+        elif (
+            (dialect and dialect.upper() in ("DIALECT_SQL", "SQL"))
+            or (isinstance(query, str) and ("|>" in query or query.strip().startswith("FROM ")))
+        ):
+            body["userSql"] = query
 
         res = self._request("POST", path, body=body)
         # Observed response: [{"operation": "projects/.../operations/s-udm-..."}]
@@ -762,6 +784,110 @@ class GoogleSecOpsAdapter:
             raise RuntimeError(f"Failed to get/create summary for case {case_id}: invalid response.")
         return res
 
+    def list_remediation_plans(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        filter: Optional[str] = None,
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists AI-generated agentic response / remediation plans for cases or alerts.
+
+        Args:
+            case_id: Optional case ID or case resource name to filter by.
+            filter: Optional Chronicle filter expression (e.g. 'caseId = 108188').
+            page_size: Optional max number of results per page.
+            page_token: Optional pagination page token.
+
+        Returns:
+            Dict containing 'remediationPlans' list and 'totalSize'.
+        """
+        proj = self.project_number or self.project_id
+        path = f"/v1alpha/projects/{proj}/locations/{self.location}/instances/{self.customer_id}/remediationPlans"
+        params: Dict[str, Any] = {}
+        if filter:
+            params["filter"] = filter
+        elif case_id is not None:
+            raw_case_id = str(case_id).split("/")[-1]
+            params["filter"] = f"caseId = {raw_case_id}"
+        if page_size is not None:
+            params["pageSize"] = int(page_size)
+        if page_token is not None:
+            params["pageToken"] = str(page_token)
+        res = self._request("GET", path, params=params)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to list remediation plans: invalid response {type(res)}.")
+        return res
+
+    def get_remediation_plan(self, plan_id: str) -> Dict[str, Any]:
+        """Fetches a specific AI-generated agentic response / remediation plan.
+
+        Args:
+            plan_id: The remediation plan ID (e.g. '45') or full resource path.
+
+        Returns:
+            Dict containing the remediation plan details and embedded actions.
+        """
+        raw_plan_id = str(plan_id).split("/")[-1]
+        plan_id_clean = urllib.parse.quote(raw_plan_id, safe="")
+        proj = self.project_number or self.project_id
+        path = f"/v1alpha/projects/{proj}/locations/{self.location}/instances/{self.customer_id}/remediationPlans/{plan_id_clean}"
+        res = self._request("GET", path)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to get remediation plan {plan_id}: invalid response {type(res)}.")
+        return res
+
+    def list_remediation_actions(
+        self,
+        plan_id: str,
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists actions belonging to an AI-generated remediation plan.
+
+        Args:
+            plan_id: The remediation plan ID or resource path.
+            page_size: Optional pagination page size.
+            page_token: Optional pagination token.
+
+        Returns:
+            Dict containing 'remediationActions' list and 'totalSize'.
+        """
+        raw_plan_id = str(plan_id).split("/")[-1]
+        plan_id_clean = urllib.parse.quote(raw_plan_id, safe="")
+        proj = self.project_number or self.project_id
+        path = f"/v1alpha/projects/{proj}/locations/{self.location}/instances/{self.customer_id}/remediationPlans/{plan_id_clean}/remediationActions"
+        params: Dict[str, Any] = {}
+        if page_size is not None:
+            params["pageSize"] = int(page_size)
+        if page_token is not None:
+            params["pageToken"] = str(page_token)
+        res = self._request("GET", path, params=params)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to list remediation actions for plan {plan_id}: invalid response {type(res)}.")
+        return res
+
+    def get_remediation_action(self, plan_id: str, action_id: str) -> Dict[str, Any]:
+        """Fetches an individual remediation action from a remediation plan.
+
+        Args:
+            plan_id: The remediation plan ID or resource path.
+            action_id: The remediation action ID or resource path.
+
+        Returns:
+            Dict containing the action details.
+        """
+        raw_plan_id = str(plan_id).split("/")[-1]
+        raw_action_id = str(action_id).split("/")[-1]
+        plan_id_clean = urllib.parse.quote(raw_plan_id, safe="")
+        action_id_clean = urllib.parse.quote(raw_action_id, safe="")
+        proj = self.project_number or self.project_id
+        path = f"/v1alpha/projects/{proj}/locations/{self.location}/instances/{self.customer_id}/remediationPlans/{plan_id_clean}/remediationActions/{action_id_clean}"
+        res = self._request("GET", path)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to get remediation action {action_id} for plan {plan_id}: invalid response {type(res)}.")
+        return res
+
     def list_alert_entities(self, alert_name: str) -> List[Dict[str, Any]]:
         """Lists all involved entities for a specific alert."""
         clean_name = alert_name.lstrip("/")
@@ -1014,7 +1140,8 @@ class GoogleSecOpsAdapter:
     ) -> List[Dict[str, Any]]:
         """Lists configured integration instances across environments or for a specific integration."""
         if integration_id:
-            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{integration_id}/integrationInstances"
+            clean_id = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_id}/integrationInstances"
         else:
             path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/-/integrationInstances"
         params: Dict[str, Any] = {"pageSize": page_size}
@@ -1033,12 +1160,75 @@ class GoogleSecOpsAdapter:
         instance_id: str,
     ) -> Dict[str, Any]:
         """Retrieves a specific configured integration instance."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{integration_id}/integrationInstances/{instance_id}"
+        clean_int = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+        clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}"
         res = self._request("GET", path)
         if isinstance(res, dict):
             return res
         return {}
 
+    def get_integration_instance_affected_items(
+        self,
+        integration_id: str,
+        instance_id: str,
+    ) -> Dict[str, Any]:
+        """Retrieves downstream playbooks and items affected by an integration instance."""
+        clean_int = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+        clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}:fetchAffectedItems"
+        res = self._request("GET", path)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def delete_integration_instance(
+        self,
+        integration_id: str,
+        instance_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a configured integration instance."""
+        clean_int = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+        clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}"
+        res = self._request("DELETE", path)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+
+    def list_remote_agents(
+        self,
+        state_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Lists remote proxy execution agents."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/remoteAgents"
+        params: Dict[str, Any] = {"pageSize": 100}
+        if state_filter:
+            params["filter"] = f'agentState = "{state_filter}"'
+        res = self._request("GET", path, params=params)
+        if isinstance(res, dict) and "remoteAgents" in res and isinstance(res["remoteAgents"], list):
+            return res["remoteAgents"]
+        elif isinstance(res, list):
+            return res
+        return []
+
+    def get_marketplace_integration(
+        self,
+        identifier: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieves marketplace metadata and documentation for an integration."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations"
+        params = {
+            "filter": f"identifier = '{identifier}'",
+            "pageSize": 50,
+        }
+        res = self._request("GET", path, params=params)
+        if isinstance(res, dict) and "marketplaceIntegrations" in res:
+            mp_list = res.get("marketplaceIntegrations", [])
+            if mp_list and isinstance(mp_list, list):
+                return mp_list[0]
+        return None
     # =========================================================================
     # Milestone 5.5: SOAR Scheduled Jobs, Instances & Execution Logs
     # =========================================================================
@@ -1456,7 +1646,7 @@ class GoogleSecOpsAdapter:
 
     def get_integration_affected_items(self, identifier: str) -> Dict[str, Any]:
         """Retrieves downstream environment instances and playbooks affected by an integration."""
-        clean_id = identifier.split("/")[-1]
+        clean_id = urllib.parse.quote(identifier.split("/")[-1], safe="")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_id}:fetchAffectedItems"
         res = self._request("GET", path)
         if isinstance(res, dict):
@@ -2040,6 +2230,41 @@ class GoogleSecOpsAdapter:
         """Retrieves Gemini Triage & Investigation Agent settings."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/agentSettings"
         return self._request("GET", path)
+
+    def list_investigations(
+        self,
+        page_size: int = 100,
+        page_token: Optional[str] = None,
+        filter: Optional[str] = None,
+        order_by: Optional[str] = "start_time desc",
+    ) -> Dict[str, Any]:
+        """Lists Gemini Triage & Investigation Agent (TINA) investigations."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/investigations"
+        params: Dict[str, Any] = {"pageSize": page_size}
+        if page_token:
+            params["pageToken"] = page_token
+        if filter:
+            params["filter"] = filter
+        if order_by:
+            params["orderBy"] = order_by
+        return self._request("GET", path, params=params)
+
+    def get_investigation(self, investigation_id: str) -> Dict[str, Any]:
+        """Retrieves a specific Gemini TINA investigation report by ID or resource name."""
+        clean_id = urllib.parse.quote(investigation_id.split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/investigations/{clean_id}"
+        return self._request("GET", path)
+
+    def get_alert_latest_investigation(self, alert_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest Gemini TINA investigation associated with a specific alert ID."""
+        clean_alert_id = alert_id.split("/")[-1]
+        filter_expr = f'alert_id = "{clean_alert_id}"'
+        res = self.list_investigations(page_size=1, filter=filter_expr, order_by="start_time desc")
+        investigations = res.get("investigations", [])
+        if investigations:
+            return investigations[0]
+        return None
+
 
     def get_risk_config(self) -> Dict[str, Any]:
         """Retrieves UEBA entity risk scoring configuration."""

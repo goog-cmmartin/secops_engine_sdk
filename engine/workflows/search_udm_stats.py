@@ -59,7 +59,11 @@ class SearchUDMStatsWorkflow:
         _notify_state()
 
         # Step 1: Query Validation
-        val_res = self.adapter.validate_query(request.query)
+        try:
+            val_res = self.adapter.validate_query(request.query, dialect=getattr(request, "dialect", None))
+        except TypeError:
+            val_res = self.adapter.validate_query(request.query)
+
         if not val_res.valid:
             session.lifecycle = LifecycleState.FAILED
             session.completeness = CompletenessState.EMPTY
@@ -80,12 +84,22 @@ class SearchUDMStatsWorkflow:
         _notify_state()
 
         try:
-            operation_id = self.adapter.start_search(
-                query=request.query,
-                start_time=request.start_time,
-                end_time=request.end_time,
-                max_events=request.max_events,
-            )
+            try:
+                operation_id = self.adapter.start_search(
+                    query=request.query,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    max_events=request.max_events,
+                    dialect=getattr(request, "dialect", None),
+                    user_sql=getattr(request, "user_sql", None),
+                )
+            except TypeError:
+                operation_id = self.adapter.start_search(
+                    query=request.query,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    max_events=request.max_events,
+                )
             session.session_id = operation_id
         except Exception as e:
             session.lifecycle = LifecycleState.FAILED

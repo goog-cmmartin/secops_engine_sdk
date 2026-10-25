@@ -232,6 +232,18 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     case_summary_cmd.add_argument("--no-wait", action="store_false", dest="wait", help="Fetch or initiate asynchronously without polling")
     case_summary_cmd.add_argument("--timeout", type=float, default=45.0, help="Polling timeout in seconds (default: 45)")
 
+    case_plans_cmd = case_sub.add_parser("remediation-plans", help="List AI-generated agentic response / remediation plans")
+    case_plans_cmd.add_argument("--case-id", help="Case ID to filter plans for (e.g. 108188)")
+    case_plans_cmd.add_argument("--filter", help="Chronicle filter expression (e.g. 'caseId = 108188')")
+    case_plans_cmd.add_argument("--page-size", type=int, default=50, help="Max number of plans to return")
+
+    case_plan_cmd = case_sub.add_parser("remediation-plan", help="Get a specific AI-generated agentic response / remediation plan")
+    case_plan_cmd.add_argument("plan_id", help="Remediation Plan ID (e.g. 45)")
+
+    case_response_plan_cmd = case_sub.add_parser("response-plan", help="Retrieve an agentic response plan by case ID or plan ID")
+    case_response_plan_cmd.add_argument("identifier", help="Case ID or Plan ID")
+    case_response_plan_cmd.add_argument("--is-plan-id", action="store_true", help="Treat identifier as Plan ID instead of Case ID")
+
     # Alert Investigate command
     alert_parser = subparsers.add_parser("alert", help="Investigate specific SecOps alert")
     alert_sub = alert_parser.add_subparsers(dest="alert_action", required=True)
@@ -303,6 +315,16 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
 
     int_agents = int_sub.add_parser("agents", help="List remote execution proxy agents")
     int_agents.add_argument("--active-only", action="store_true", default=False, help="Filter only active agents")
+
+    int_affected = int_sub.add_parser("affected-items", help="Inspect downstream playbooks affected by an integration instance")
+    int_affected.add_argument("integration", help="Integration identifier (e.g. GoogleChronicle, AWSEC2)")
+    int_affected.add_argument("instance", help="Integration instance ID or resource name")
+
+    int_del = int_sub.add_parser("delete-instance", help="Delete a configured integration instance")
+    int_del.add_argument("integration", help="Integration identifier (e.g. GoogleChronicle, AWSEC2)")
+    int_del.add_argument("instance", help="Integration instance ID or resource name")
+    int_del.add_argument("--force", "-f", action="store_true", default=False, help="Force deletion even if downstream playbooks are affected")
+
 
     # Job command
     job_parser = subparsers.add_parser("job", help="Search scheduled jobs, inspect instances, and view execution logs")
@@ -650,6 +672,25 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
     siem_agent = siem_sub.add_parser("agent-settings", help="Get Gemini Triage & Investigation Agent settings")
     siem_risk = siem_sub.add_parser("risk-config", help="Get UEBA Entity Risk Scoring configuration")
     siem_tenant = siem_sub.add_parser("tenant", help="Get root tenant instance details and configuration")
+    siem_tinas = siem_sub.add_parser("tina-investigations", aliases=["investigations", "tinas"], help="List Gemini Triage & Investigation Agent (TINA) reports")
+    siem_tinas.add_argument("--limit", type=int, default=25, help="Maximum number of investigations to display (default: 25)")
+    siem_tinas.add_argument("--filter", help="Filter expression (e.g. 'verdict = \"TRUE_POSITIVE\"')")
+    siem_tinas.add_argument("--order-by", default="start_time desc", help="Sort order (default: 'start_time desc')")
+
+    siem_tina = siem_sub.add_parser("tina-investigation", aliases=["investigation", "tina"], help="Retrieve detailed Gemini TINA investigation report")
+    siem_tina.add_argument("investigation_id", help="Investigation UUID or full resource path")
+
+    # Gemini TINA Investigation command
+    tina_cmd = subparsers.add_parser("tina", help="Gemini Triage & Investigation Agent (TINA) reports and steps")
+    tina_sub = tina_cmd.add_subparsers(dest="tina_action", required=True)
+
+    tina_list = tina_sub.add_parser("list", help="List Gemini TINA investigation reports")
+    tina_list.add_argument("--limit", type=int, default=25, help="Maximum number of investigations to display (default: 25)")
+    tina_list.add_argument("--filter", help="Filter expression (e.g. 'verdict = \"TRUE_POSITIVE\"')")
+    tina_list.add_argument("--order-by", default="start_time desc", help="Sort order (default: 'start_time desc')")
+
+    tina_get = tina_sub.add_parser("get", help="Retrieve detailed Gemini TINA investigation report")
+    tina_get.add_argument("investigation_id", help="Investigation UUID or full resource path")
 
     # Raw Logs command
     logs_cmd = subparsers.add_parser("logs", help="Raw log search, source discovery, and query syntax validation")
@@ -1236,6 +1277,8 @@ See docs/UDM_STATS_SYNTAX.md for the complete query language reference and docum
         run_enrichment_cli(args)
     elif args.command == "siem":
         run_siem_cli(args)
+    elif args.command == "tina":
+        run_tina_cli(args)
     elif args.command == "logs":
         run_logs_cli(args)
     elif args.command == "soar-users":
@@ -2655,6 +2698,90 @@ def run_case_cli(args):
             for idx, s in enumerate(summary.next_steps, 1):
                 print(f" [{idx}] {s}")
 
+    elif args.case_action == "remediation-plans":
+        print(f"\n[CLI] Listing Remediation Plans (case_id={args.case_id}, filter={args.filter})...")
+        batch = engine.list_remediation_plans(
+            case_id=args.case_id,
+            filter=args.filter,
+            page_size=args.page_size,
+        )
+        print(f" [✓] Retrieved {len(batch.plans)} plan(s) (total: {batch.total_size})")
+        for idx, plan in enumerate(batch.plans, 1):
+            print(f"\n--- PLAN [{idx}] ID: {plan.plan_id} ---")
+            print(f"     State         : {plan.state}")
+            print(f"     Alert Name    : {plan.alert_name}")
+            print(f"     Case ID       : {plan.case_id}")
+            print(f"     Trigger Type  : {plan.trigger_type}")
+            print(f"     Use Case      : {plan.agent_classified_use_case}")
+            if plan.planning_summary:
+                print(f"     Summary       : {plan.planning_summary}")
+            if plan.status_details:
+                print(f"     Details       : {plan.status_details}")
+
+    elif args.case_action == "remediation-plan":
+        print(f"\n[CLI] Retrieving Remediation Plan {args.plan_id}...")
+        plan = engine.get_remediation_plan(args.plan_id)
+        print(f" [✓] Plan ID: {plan.plan_id}")
+        print(f"     State         : {plan.state}")
+        print(f"     Alert Name    : {plan.alert_name}")
+        print(f"     Case ID       : {plan.case_id}")
+        print(f"     Trigger Type  : {plan.trigger_type}")
+        print(f"     Use Case      : {plan.agent_classified_use_case}")
+        if plan.status_details:
+            print(f"\n--- STATUS DETAILS ---")
+            print(plan.status_details)
+        if plan.planning_summary:
+            print(f"\n--- PLANNING SUMMARY ---")
+            print(plan.planning_summary)
+        if plan.involved_entities:
+            print(f"\n--- INVOLVED ENTITIES ({len(plan.involved_entities)}) ---")
+            for ent in plan.involved_entities:
+                print(f"     - {ent.get('entity_type')}: {ent.get('entity_identifier')}")
+        if plan.actions:
+            print(f"\n--- REMEDIATION ACTIONS ({len(plan.actions)}) ---")
+            for a_idx, act in enumerate(plan.actions, 1):
+                print(f" [{a_idx}] {act.display_name} (ID: {act.action_id}, Type: {act.type})")
+                if act.integration_id:
+                    print(f"       Integration : {act.integration_id}")
+                if act.action_reasoning:
+                    print(f"       Reasoning   : {act.action_reasoning}")
+
+    elif args.case_action == "response-plan":
+        print(f"\n[CLI] Retrieving Agentic Response Plan for {args.identifier}...")
+        if args.is_plan_id:
+            plan = engine.get_agentic_response_plan(plan_id=args.identifier)
+        else:
+            plan = engine.get_agentic_response_plan(case_id=args.identifier)
+
+        if not plan:
+            print(f" [!] No agentic response plan found for {args.identifier}.")
+            return
+
+        print(f" [✓] Response Plan ID: {plan.plan_id}")
+        print(f"     State         : {plan.state}")
+        print(f"     Alert Name    : {plan.alert_name}")
+        print(f"     Case ID       : {plan.case_id}")
+        print(f"     Trigger Type  : {plan.trigger_type}")
+        print(f"     Use Case      : {plan.agent_classified_use_case}")
+        if plan.status_details:
+            print(f"\n--- STATUS DETAILS ---")
+            print(plan.status_details)
+        if plan.planning_summary:
+            print(f"\n--- PLANNING SUMMARY ---")
+            print(plan.planning_summary)
+        if plan.involved_entities:
+            print(f"\n--- INVOLVED ENTITIES ({len(plan.involved_entities)}) ---")
+            for ent in plan.involved_entities:
+                print(f"     - {ent.get('entity_type')}: {ent.get('entity_identifier')}")
+        if plan.actions:
+            print(f"\n--- REMEDIATION ACTIONS ({len(plan.actions)}) ---")
+            for a_idx, act in enumerate(plan.actions, 1):
+                print(f" [{a_idx}] {act.display_name} (ID: {act.action_id}, Type: {act.type})")
+                if act.integration_id:
+                    print(f"       Integration : {act.integration_id}")
+                if act.action_reasoning:
+                    print(f"       Reasoning   : {act.action_reasoning}")
+
 
 def run_alert_cli(args):
     engine = SecOpsEngine()
@@ -2926,6 +3053,59 @@ def run_integration_cli(args):
             if a.installer_link:
                 print(f"      Installer    : {a.installer_link[:70]}...")
             print()
+
+    elif args.integration_action == "affected-items":
+        print(f"\n[CLI] Inspecting Affected Items for Instance {args.instance} ({args.integration})...")
+        try:
+            affected = engine.get_integration_instance_affected_items(
+                integration_id=args.integration,
+                instance_id=args.instance,
+            )
+            print(f"\n=======================================================")
+            print(f" INTEGRATION INSTANCE: {affected.instance_identifier} ({affected.integration_identifier})")
+            print(f" Affected Playbooks: {len(affected.affected_playbooks)}")
+            print(f"=======================================================")
+            if affected.affected_playbooks:
+                print("\n Downstream Playbooks Depending On This Instance:")
+                for idx, pb_name in enumerate(affected.affected_playbooks, 1):
+                    print(f"  [{idx}] {pb_name}")
+            else:
+                print("\n  [✓] No active playbooks depend on this instance.")
+            print()
+        except Exception as e:
+            print(f"Error checking affected items: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.integration_action == "delete-instance":
+        print(f"\n[CLI] Preparing deletion for Instance {args.instance} ({args.integration})...")
+        try:
+            affected = engine.get_integration_instance_affected_items(
+                integration_id=args.integration,
+                instance_id=args.instance,
+            )
+            if affected.has_affected_items:
+                print(f"\n[WARNING] This instance is currently used by {len(affected.affected_playbooks)} active playbook(s):")
+                for pb in affected.affected_playbooks:
+                    print(f"  - {pb}")
+                if not args.force:
+                    print("\nDeletion aborted for safety. Re-run with --force to delete anyway.")
+                    sys.exit(1)
+                else:
+                    print("\n--force flag supplied. Proceeding with deletion...")
+
+            result = engine.delete_integration_instance(
+                integration_id=args.integration,
+                instance_id=args.instance,
+                force=args.force,
+            )
+            print(f"\n[✓] {result.message}")
+            print(f"    Integration: {result.integration_identifier}")
+            print(f"    Instance   : {result.instance_identifier}")
+            print(f"    Time       : {result.deleted_at.isoformat()}")
+            print()
+        except Exception as e:
+            print(f"Error deleting integration instance: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def run_job_cli(args):
@@ -4716,6 +4896,96 @@ def run_siem_cli(args):
             print()
         except Exception as e:
             print(f"Error retrieving tenant details: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.siem_action in ("tina-investigations", "tinas", "investigations", "tina-investigation", "tina", "investigation"):
+        run_tina_cli(args)
+
+
+def run_tina_cli(args):
+    engine = SecOpsEngine()
+    action = getattr(args, "tina_action", None) or getattr(args, "siem_action", None)
+
+    def _fmt_ts(val):
+        if val is None:
+            return "N/A"
+        return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+    if action in ("list", "tina-investigations", "tinas", "investigations"):
+        limit = getattr(args, "limit", 25) or 25
+        filt = getattr(args, "filter", None)
+        order = getattr(args, "order_by", "start_time desc") or "start_time desc"
+        print(f"\n[CLI] Retrieving Gemini TINA Investigation Reports (limit={limit})...")
+        try:
+            batch = engine.list_tina_investigations(page_size=limit, filter=filt, order_by=order)
+            print(f"\n=== GEMINI TINA INVESTIGATIONS ({len(batch.investigations)} found) ===")
+            if not batch.investigations:
+                print("  No investigations found matching the criteria.")
+                return
+
+            for idx, inv in enumerate(batch.investigations, 1):
+                conf_str = f" ({inv.confidence})" if inv.confidence else ""
+                alerts_str = f" [Alerts: {', '.join(inv.alert_ids)}]" if inv.alert_ids else ""
+                time_span = f"{_fmt_ts(inv.start_time)} to {_fmt_ts(inv.end_time)}"
+                print(f"\n  [{idx}] ID: {inv.id}")
+                print(f"      Display Name : {inv.display_name}")
+                print(f"      Verdict      : {inv.verdict or 'N/A'}{conf_str}")
+                print(f"      Status       : {inv.status or 'N/A'}")
+                print(f"      Time Window  : {time_span}{alerts_str}")
+                if inv.summary:
+                    summary_first_line = inv.summary.strip().split("\n")[0][:120]
+                    print(f"      Summary      : {summary_first_line}...")
+            print()
+        except Exception as e:
+            print(f"Error retrieving investigations: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action in ("get", "tina-investigation", "tina", "investigation"):
+        inv_id = getattr(args, "investigation_id", None)
+        if not inv_id:
+            print("Error: investigation_id is required", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n[CLI] Retrieving Gemini TINA Investigation: {inv_id}...")
+        try:
+            inv = engine.get_tina_investigation(inv_id)
+            print(f"\n=== GEMINI TINA INVESTIGATION: {inv.id} ===")
+            print(f"  Name        : {inv.name}")
+            print(f"  Display Name: {inv.display_name}")
+            print(f"  Verdict     : {inv.verdict or 'N/A'}")
+            print(f"  Confidence  : {inv.confidence or 'N/A'}")
+            print(f"  Status      : {inv.status or 'N/A'}")
+            print(f"  Trigger     : {inv.trigger_type or 'N/A'}")
+            print(f"  Time Window : {_fmt_ts(inv.start_time)} to {_fmt_ts(inv.end_time)}")
+            if inv.alert_ids:
+                print(f"  Alert IDs   : {', '.join(inv.alert_ids)}")
+            if inv.notebook:
+                print(f"  Notebook    : {inv.notebook}")
+
+            if inv.summary:
+                print("\n--- Executive Summary ---")
+                print(inv.summary)
+
+            if inv.next_steps:
+                print(f"\n--- Recommended Next Steps ({len(inv.next_steps)}) ---")
+                for i, ns in enumerate(inv.next_steps, 1):
+                    print(f"  {i}. [{ns.step_type}] {ns.title}")
+
+            if inv.investigation_steps:
+                print(f"\n--- Autonomous Investigation Steps ({len(inv.investigation_steps)}) ---")
+                for i, step in enumerate(inv.investigation_steps, 1):
+                    dur = f"{_fmt_ts(step.start_time)} to {_fmt_ts(step.end_time)}"
+                    print(f"\n  [Step {i}] {step.description or step.name}")
+                    print(f"    Interval : {dur}")
+                    if step.analysis_summary:
+                        print(f"    Summary  : {step.analysis_summary}")
+                    if step.source_metadata and step.source_metadata.query_code:
+                        print(f"    Query    : {step.source_metadata.query_code}")
+                        if step.source_metadata.unique_results_count is not None:
+                            print(f"    Results  : {step.source_metadata.unique_results_count} unique / {step.source_metadata.total_results_count} total")
+            print()
+        except Exception as e:
+            print(f"Error retrieving investigation: {e}", file=sys.stderr)
             sys.exit(1)
 
 

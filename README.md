@@ -40,7 +40,8 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
     * `@log-cost-agent`: Multi-tier FinOps pricing analysis and telemetry volume bloat optimizer.
     * `@raw-log-agent`: Unparsed log discovery, product source volume profiling, and raw payload investigator.
     * `@namespace-label-agent`: Ingestion label consistency, UDM namespace hygiene, and Data RBAC alignment auditor.
-  * **Universal Capability Registry (`engine.facade`)**: 206 modular registered capabilities across 52 workflow modules for direct Python SDK and AI agent integration.
+  * **TUI (`clients/tui/`, `run_tui.py`)**: Textual-based two-pane terminal UI for case triage with responsive threading, offline demo mode, and clean domain/presentation separation.
+  * **Universal Capability Registry (`engine.facade`)**: Modular registered capabilities for direct Python SDK and AI agent integration.
   * **Agent-Safe Metadata**: each capability is classified by `kind`, `domain`, and result-set `cardinality`; collection-returning (`unbounded`) queries carry a `require_filter_for_unbounded_query` policy so MCP tools and autonomous agents cannot enumerate an entire tenant unfiltered.
 
 ---
@@ -68,7 +69,7 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 │   ├── registry.py           # Capability registry, taxonomy & agent-safety metadata
 │   ├── taxonomy.py           # kind/domain/cardinality derivation & safety policy
 │   ├── schema.py             # Canonical UDM schemas & field mappings
-│   └── workflows/            # Modular workflow implementations (41 workflow modules)
+│   └── workflows/            # Modular workflow implementations
 ├── clients/                  # Multi-tier frontends
 │   ├── cli/                  # Terminal CLI executable (secops.py)
 │   ├── desktop/              # Qt / PySide6 Native Desktop application

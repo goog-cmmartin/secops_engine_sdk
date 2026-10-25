@@ -63,7 +63,11 @@ class SearchUDMWorkflow:
         _notify_state()
 
         # Step 1: Query Validation
-        val_res = self.adapter.validate_query(request.query)
+        try:
+            val_res = self.adapter.validate_query(request.query, dialect=getattr(request, "dialect", None))
+        except TypeError:
+            val_res = self.adapter.validate_query(request.query)
+
         if not val_res.valid:
             session.lifecycle = LifecycleState.FAILED
             session.completeness = CompletenessState.EMPTY
@@ -93,12 +97,22 @@ class SearchUDMWorkflow:
                 if request.materialize_budget is not None
                 else max(request.receive_limit, MATERIALIZE_BUDGET_FLOOR)
             )
-            operation_id = self.adapter.start_search(
-                query=request.query,
-                start_time=request.start_time,
-                end_time=request.end_time,
-                max_events=materialize_budget,
-            )
+            try:
+                operation_id = self.adapter.start_search(
+                    query=request.query,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    max_events=materialize_budget,
+                    dialect=getattr(request, "dialect", None),
+                    user_sql=getattr(request, "user_sql", None),
+                )
+            except TypeError:
+                operation_id = self.adapter.start_search(
+                    query=request.query,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    max_events=materialize_budget,
+                )
             session.session_id = operation_id
         except Exception as e:
             session.lifecycle = LifecycleState.FAILED
@@ -111,6 +125,59 @@ class SearchUDMWorkflow:
         # Step 3: Incremental Retrieval Loop
         session.lifecycle = LifecycleState.RUNNING
         _notify_state()
+
+        is_stats_query = (
+            val_res.raw_query_type == "QUERY_TYPE_STATS_QUERY"
+            or getattr(request, "dialect", None) == "DIALECT_SQL"
+            or getattr(request, "user_sql", None) is not None
+            or (isinstance(request.query, str) and ("|>" in request.query or request.query.strip().startswith("FROM ")))
+        )
+
+        if is_stats_query:
+            while True:
+                if _is_cancelled(cancel_token):
+                    session.lifecycle = LifecycleState.CANCELLING
+                    _notify_state()
+                    self.adapter.cancel_operation(session.session_id)
+                    session.lifecycle = LifecycleState.CANCELLED
+                    session.completeness = (
+                        CompletenessState.PARTIAL if session.received_count > 0 else CompletenessState.EMPTY
+                    )
+                    session.completed_at = datetime.now(timezone.utc)
+                    _notify_state()
+                    return session
+
+                try:
+                    stats_res = self.adapter.get_stats(
+                        operation_id=session.session_id,
+                        start_index=1,
+                        batch_size=request.receive_limit,
+                    )
+                except Exception as e:
+                    session.lifecycle = LifecycleState.FAILED
+                    session.completeness = (
+                        CompletenessState.PARTIAL if session.received_count > 0 else CompletenessState.EMPTY
+                    )
+                    session.error = f"Stream retrieval failed: {e}"
+                    session.completed_at = datetime.now(timezone.utc)
+                    _notify_state()
+                    return session
+
+                rows = stats_res.rows[:request.receive_limit]
+                session.events = [UDMEvent(r) if isinstance(r, dict) and not isinstance(r, UDMEvent) else r for r in rows]
+                session.received_count = len(session.events)
+
+                if stats_res.complete:
+                    session.more_data_available = False
+                    session.lifecycle = LifecycleState.COMPLETED
+                    session.completeness = (
+                        CompletenessState.COMPLETE if session.received_count > 0 else CompletenessState.EMPTY
+                    )
+                    session.completed_at = datetime.now(timezone.utc)
+                    _notify_state()
+                    return session
+
+                time.sleep(0.5)
 
         while session.more_data_available and session.received_count < request.receive_limit:
             # Check cancellation before requesting batch

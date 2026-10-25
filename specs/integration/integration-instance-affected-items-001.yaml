@@ -1,0 +1,35 @@
+id: integration.instance.affected_items
+version: 1.0.0
+title: SOAR Integration Instance Affected Items
+description: >
+  Retrieves downstream playbooks and items that depend on a configured integration instance.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}/integrationInstances/{instance}:fetchAffectedItems
+  method: GET
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+
+inputs:
+  integration_id:
+    type: string
+    required: true
+    description: Identifier of the parent integration.
+  instance_id:
+    type: string
+    required: true
+    description: Identifier or UUID of the instance.
+
+outputs:
+  affected_items:
+    type: IntegrationInstanceAffectedItems
+    properties:
+      integration_identifier: string
+      instance_identifier: string
+      affected_playbooks: list[string]
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - Explicit error propagation on API failures.

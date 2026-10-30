@@ -513,3 +513,192 @@ class GetAlertPlaybookInstancesWorkflow:
                 f"Playbook instance '{def_id}' not found for alert on case {clean_case}."
             )
         return self._parse_run(raw, clean_case, resolved)
+
+
+class SavePlaybookWorkflow:
+    """Creates or updates a SOAR Playbook definition with automatic category ID/name synchronization."""
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def _sync_category_fields(
+        self,
+        payload: Dict[str, Any],
+        category_name_override: Optional[str] = None,
+    ) -> None:
+        """Ensures categoryId and categoryName are consistent so SOAR UI folder assignment is preserved."""
+        target_name = category_name_override or payload.get("categoryName")
+        target_id = payload.get("categoryId")
+        try:
+            categories = self.adapter.get_playbook_categories() or []
+        except Exception:
+            categories = []
+
+        if target_name and categories:
+            for cat in categories:
+                if str(cat.get("name", "")).strip().lower() == str(target_name).strip().lower():
+                    payload["categoryName"] = cat.get("name")
+                    if cat.get("id") is not None:
+                        payload["categoryId"] = int(cat["id"])
+                    return
+        if target_id is not None and categories:
+            for cat in categories:
+                if str(cat.get("id")) == str(target_id):
+                    if not payload.get("categoryName") and cat.get("name"):
+                        payload["categoryName"] = cat.get("name")
+                    return
+
+    def execute(
+        self,
+        playbook_payload: Dict[str, Any],
+        category_name: Optional[str] = None,
+        is_enabled: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        if not isinstance(playbook_payload, dict) or not playbook_payload:
+            raise ValueError("playbook_payload must be a non-empty dictionary.")
+
+        import copy
+        payload = copy.deepcopy(playbook_payload)
+        if is_enabled is not None:
+            payload["isEnabled"] = bool(is_enabled)
+        self._sync_category_fields(payload, category_name_override=category_name)
+        return self.adapter.save_playbook(payload)
+
+
+class UpdatePlaybookWidgetWorkflow:
+    """Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook."""
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def execute(
+        self,
+        identifier_or_id: str,
+        html_content: str,
+        step_name_or_id: Optional[str] = None,
+        widget_title: Optional[str] = None,
+        widget_index: Optional[int] = None,
+        update_step_parameter: Optional[str] = None,
+        update_step_parameter_value: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        import json
+
+        pb_detail = GetPlaybookWorkflow(self.adapter).execute(identifier_or_id)
+        raw_pb = pb_detail.raw
+        if not isinstance(raw_pb, dict) or not raw_pb:
+            raise RuntimeError(f"Unable to load raw playbook payload for '{identifier_or_id}'.")
+
+        target_step_id: Optional[str] = None
+        if step_name_or_id:
+            q = step_name_or_id.strip().lower()
+            for s in raw_pb.get("steps", []):
+                s_id = str(s.get("identifier", ""))
+                s_orig = str(s.get("originalStepIdentifier", ""))
+                s_name = str(s.get("name", ""))
+                s_inst = str(s.get("instanceName", ""))
+                if q in (s_id.lower(), s_orig.lower(), s_name.lower(), s_inst.lower()):
+                    target_step_id = s_id
+                    if update_step_parameter is not None and update_step_parameter_value is not None:
+                        for p in s.get("parameters", []):
+                            if str(p.get("name", "")).lower() == update_step_parameter.strip().lower():
+                                p["value"] = update_step_parameter_value
+                    break
+
+        updated_widgets = 0
+        for vt in raw_pb.get("viewsTemplates", []):
+            cards = vt.get("cards", [])
+            if widget_index is not None and 0 <= widget_index < len(cards):
+                candidate_cards = [cards[widget_index]]
+            else:
+                candidate_cards = cards
+
+            for card in candidate_cards:
+                wdef_str = card.get("widgetDefinition")
+                wdef: Dict[str, Any] = {}
+                if isinstance(wdef_str, str) and wdef_str.strip():
+                    try:
+                        wdef = json.loads(wdef_str)
+                    except Exception:
+                        wdef = {}
+                elif isinstance(wdef_str, dict):
+                    wdef = wdef_str
+
+                card_title = str(card.get("title") or wdef.get("title") or "")
+                card_step_id = str(card.get("stepIdentifier") or wdef.get("stepIdentifier") or "")
+
+                matches = False
+                if widget_index is not None:
+                    matches = True
+                elif widget_title and widget_title.strip().lower() in card_title.lower():
+                    matches = True
+                elif target_step_id and card_step_id == target_step_id:
+                    matches = True
+                elif not widget_title and not target_step_id and ("htmlContent" in wdef or card.get("type") == 3):
+                    matches = True
+
+                if matches:
+                    wdef["htmlContent"] = html_content
+                    if widget_title:
+                        wdef["title"] = widget_title
+                        card["title"] = widget_title
+                    card["widgetDefinition"] = json.dumps(wdef) if isinstance(wdef_str, str) else wdef
+                    updated_widgets += 1
+
+        if updated_widgets == 0:
+            raise ValueError(
+                f"No matching HTML widget found in playbook '{pb_detail.name}' "
+                f"(step={step_name_or_id}, widget_title={widget_title}, widget_index={widget_index})."
+            )
+
+        saved = SavePlaybookWorkflow(self.adapter).execute(raw_pb)
+        return {
+            "playbook_id": pb_detail.id,
+            "playbook_identifier": pb_detail.identifier,
+            "playbook_name": pb_detail.name,
+            "updated_widgets_count": updated_widgets,
+            "saved_playbook": saved,
+        }
+
+
+class DeletePlaybooksWorkflow:
+    """Deletes one or more SOAR Playbooks by UUID identifier, numeric ID, or exact name."""
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def execute(self, identifiers_or_ids: List[str]) -> Dict[str, Any]:
+        if not identifiers_or_ids:
+            raise ValueError("identifiers_or_ids must be a non-empty list.")
+        resolved_uuids: List[str] = []
+        cards: Optional[List[Dict[str, Any]]] = None
+        for item in identifiers_or_ids:
+            target = str(item).strip()
+            if not target:
+                continue
+            if target.isdigit() or "-" not in target:
+                if cards is None:
+                    cards = self.adapter.get_playbook_menu_cards() or []
+                matched_uuid = None
+                for c in cards:
+                    if str(c.get("id")) == target or str(c.get("name", "")).lower() == target.lower():
+                        matched_uuid = c.get("identifier")
+                        break
+                resolved_uuids.append(matched_uuid or target)
+            else:
+                resolved_uuids.append(target)
+
+        res = self.adapter.delete_playbooks(resolved_uuids)
+        return {
+            "deleted_identifiers": resolved_uuids,
+            "raw": res,
+        }
+

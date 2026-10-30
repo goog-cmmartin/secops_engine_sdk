@@ -1053,6 +1053,82 @@ class GoogleSecOpsAdapter:
             raise RuntimeError(f"Failed to get/create summary for case {case_id}: invalid response.")
         return res
 
+    def batch_attach_case_evidence(
+        self,
+        case_id: Union[str, int],
+        evidence_requests: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Batch attaches evidence items (e.g. EVIDENCE_TYPE_DETECTION, EVIDENCE_TYPE_EVENT) to a case.
+
+        Args:
+            case_id: The ID or resource name of the case.
+            evidence_requests: List of evidence items or requests. Each item should have 'evidenceId'
+                and 'evidenceType', e.g.
+                {'evidenceId': '...', 'evidenceType': 'EVIDENCE_TYPE_DETECTION'}
+                or wrapped as {'attachCaseEvidenceRequest': {'evidenceId': ..., 'evidenceType': ...}}.
+
+        Returns:
+            Dict containing 'caseEvidences' list.
+        """
+        raw_case_id = str(case_id).split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:batchAttachEvidence"
+
+        formatted_requests = []
+        for req in evidence_requests:
+            if "attachCaseEvidenceRequest" in req:
+                formatted_requests.append(req)
+            elif "evidenceId" in req and "evidenceType" in req:
+                formatted_requests.append({
+                    "attachCaseEvidenceRequest": {
+                        "evidenceId": req["evidenceId"],
+                        "evidenceType": req["evidenceType"],
+                    }
+                })
+            else:
+                formatted_requests.append(req)
+
+        body = {"requests": formatted_requests}
+        res = self._request("POST", path, body=body)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to attach evidence to case {case_id}: invalid provider response.")
+        return res
+
+    def batch_detach_case_evidence(
+        self,
+        case_id: Union[str, int],
+        evidence_requests: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Batch detaches evidence items from a case.
+
+        Args:
+            case_id: The ID or resource name of the case.
+            evidence_requests: List of items. Each item must have 'evidenceId' and 'evidenceType',
+                e.g. {'evidenceId': '...', 'evidenceType': 'EVIDENCE_TYPE_DETECTION'}.
+
+        Returns:
+            Dict response (empty on success).
+        """
+        raw_case_id = str(case_id).split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_case_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:batchDetachEvidence"
+
+        formatted_requests = []
+        for req in evidence_requests:
+            if "evidenceId" in req and "evidenceType" in req:
+                formatted_requests.append({
+                    "evidenceId": req["evidenceId"],
+                    "evidenceType": req["evidenceType"],
+                })
+            else:
+                formatted_requests.append(req)
+
+        body = {"requests": formatted_requests}
+        res = self._request("POST", path, body=body)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"Failed to detach evidence from case {case_id}: invalid provider response.")
+        return res
+
     def list_remediation_plans(
         self,
         case_id: Optional[Union[str, int]] = None,
@@ -1167,6 +1243,49 @@ class GoogleSecOpsAdapter:
         if isinstance(res, dict):
             return res.get("involvedEntities", [])
         return []
+
+    def add_case_alert_entity(
+        self,
+        case_id: str,
+        case_alert_id: str,
+        identifier: str,
+        entity_type: str = "IP",
+    ) -> Dict[str, Any]:
+        """Manually attaches an involved entity to a specific case alert."""
+        if not identifier or not str(identifier).strip():
+            raise ValueError("Entity identifier cannot be empty.")
+        clean_case_id = str(case_id).strip().split("/")[-1]
+        clean_alert_id = str(case_alert_id).strip().split("/")[-1]
+        path = (
+            f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/"
+            f"cases/{clean_case_id}/caseAlerts/{clean_alert_id}/involvedEntities"
+        )
+        body = {
+            "identifier": str(identifier).strip(),
+            "type": str(entity_type).strip(),
+        }
+        res = self._request("POST", path, body=body)
+        return res if isinstance(res, dict) else {}
+
+    def search_unique_entities(
+        self,
+        filter_expr: Optional[str] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Searches or lists unique entities across the SecOps instance."""
+        path = (
+            f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/"
+            f"uniqueEntities"
+        )
+        params: Dict[str, Any] = {"pageSize": min(page_size, 500)}
+        if filter_expr and str(filter_expr).strip():
+            params["filter"] = str(filter_expr).strip()
+        if page_token and str(page_token).strip():
+            params["pageToken"] = str(page_token).strip()
+        res = self._request("GET", path, params=params)
+        return res if isinstance(res, dict) else {}
+
 
     def list_case_comments(self, case_id: str) -> List[Dict[str, Any]]:
         """Lists all comments associated with a case."""
@@ -1380,6 +1499,74 @@ class GoogleSecOpsAdapter:
             return res
         return {}
 
+    def save_playbook(
+        self,
+        playbook_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Creates or updates a SOAR playbook or block workflow definition.
+
+        Wraps ``legacyPlaybooks:legacySaveWorkflowDefinitions``. Note that the
+        v1alpha REST endpoint expects the workflow definition dictionary directly
+        as the top-level JSON request body (not wrapped in ``workflowDefinitions``).
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacySaveWorkflowDefinitions"
+        res = self._request("POST", path, body=playbook_payload)
+        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], dict):
+            return res["payload"]
+        elif isinstance(res, dict):
+            return res
+        return {}
+
+    def delete_playbooks(
+        self,
+        identifiers: List[str],
+    ) -> Dict[str, Any]:
+        """Deletes one or more SOAR playbooks by UUID identifier.
+
+        Wraps ``legacyPlaybooks:legacyDeleteWorkflows``.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyDeleteWorkflows"
+        res = self._request("POST", path, body={"identifiers": list(identifiers)})
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def export_playbooks(
+        self,
+        identifiers: List[str],
+    ) -> Dict[str, Any]:
+        """Exports one or more SOAR playbooks into a portable package payload.
+
+        Wraps ``legacyPlaybooks:legacyExportWorkflows``.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyExportWorkflows"
+        res = self._request("POST", path, body={"identifiers": list(identifiers)})
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def import_playbooks(
+        self,
+        blob_base64: str,
+        import_as_duplicates: bool = False,
+        environments_map: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Imports a base64-encoded SOAR playbook package payload.
+
+        Wraps ``legacyPlaybooks:legacyImportWorkflows``.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyImportWorkflows"
+        body: Dict[str, Any] = {
+            "blob": blob_base64,
+            "importAsDuplicates": bool(import_as_duplicates),
+        }
+        if environments_map:
+            body["environmentsMap"] = environments_map
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict):
+            return res
+        return {}
+
     # =========================================================================
     # Milestone 5.4: SOAR Integrations, Instances & Remote Agents API Methods
     # =========================================================================
@@ -1584,6 +1771,57 @@ class GoogleSecOpsAdapter:
         if isinstance(res, dict):
             return res
         return {"logs": [], "totalSize": 0}
+
+    def update_job(
+        self,
+        integration: str,
+        job_id: str,
+        job_payload: Dict[str, Any],
+        update_mask: str = "script",
+    ) -> Dict[str, Any]:
+        """Updates a SOAR scheduled job definition via PATCH with updateMask."""
+        clean_int = urllib.parse.quote(str(integration).strip().split("/")[-1], safe="")
+        clean_job = urllib.parse.quote(str(job_id).strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/jobs/{clean_job}"
+        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
+        res = self._request("PATCH", path, params=params, body=job_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def update_job_instance(
+        self,
+        integration: str,
+        job_id: str,
+        instance_id: str,
+        instance_payload: Dict[str, Any],
+        update_mask: str = "script",
+    ) -> Dict[str, Any]:
+        """Updates a configured runtime SOAR job instance via PATCH with updateMask."""
+        clean_int = urllib.parse.quote(str(integration).strip().split("/")[-1], safe="")
+        clean_job = urllib.parse.quote(str(job_id).strip().split("/")[-1], safe="")
+        clean_inst = urllib.parse.quote(str(instance_id).strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/jobs/{clean_job}/jobInstances/{clean_inst}"
+        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
+        res = self._request("PATCH", path, params=params, body=instance_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def create_job_instance(
+        self,
+        integration: str,
+        job_id: str,
+        instance_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Creates a new runtime SOAR job instance under a job definition."""
+        clean_int = urllib.parse.quote(str(integration).strip().split("/")[-1], safe="")
+        clean_job = urllib.parse.quote(str(job_id).strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/jobs/{clean_job}/jobInstances"
+        res = self._request("POST", path, body=instance_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
 
     # ==========================================================================
     # Milestone 5.6: Content Hub (Marketplace) - Content Packs Methods
@@ -2214,6 +2452,146 @@ class GoogleSecOpsAdapter:
             last_cache_refreshed_time=raw_response.get('lastBackendCacheRefreshedTime'),
             raw=raw_response,
         )
+
+    def create_native_dashboard(
+        self,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+        filters: Optional[List[Dict[str, Any]]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Creates a new Native Dashboard via v1alpha REST API."""
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards"
+        definition: Dict[str, Any] = {}
+        if filters is not None:
+            definition["filters"] = filters
+        if charts is not None:
+            definition["charts"] = charts
+        body: Dict[str, Any] = {
+            "displayName": display_name,
+            "type": dashboard_type,
+            "definition": definition,
+        }
+        if description is not None:
+            body["description"] = description
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def patch_native_dashboard(
+        self,
+        dashboard_id: str,
+        dashboard_payload: Dict[str, Any],
+        update_mask: str,
+    ) -> Dict[str, Any]:
+        """Updates a Native Dashboard's metadata, filters, or chart layouts via PATCH."""
+        clean_id = str(dashboard_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}"
+        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
+        res = self._request("PATCH", path, params=params, body=dashboard_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def delete_native_dashboard(
+        self,
+        dashboard_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a Native Dashboard by ID or resource name."""
+        clean_id = str(dashboard_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}"
+        res = self._request("DELETE", path)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def duplicate_native_dashboard(
+        self,
+        dashboard_id: str,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+    ) -> Dict[str, Any]:
+        """Duplicates an existing Native Dashboard under a new display name."""
+        clean_id = str(dashboard_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}:duplicate"
+        inner: Dict[str, Any] = {
+            "displayName": display_name,
+            "type": dashboard_type,
+        }
+        if description is not None:
+            inner["description"] = description
+        res = self._request("POST", path, body={"nativeDashboard": inner})
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def add_dashboard_chart(
+        self,
+        dashboard_id: str,
+        dashboard_chart: Dict[str, Any],
+        dashboard_query: Optional[Dict[str, Any]] = None,
+        chart_layout: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Adds a new chart (and optional query + layout) to a Native Dashboard."""
+        clean_id = str(dashboard_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}:addChart"
+        body: Dict[str, Any] = {"dashboardChart": dashboard_chart}
+        if dashboard_query is not None:
+            body["dashboardQuery"] = dashboard_query
+        if chart_layout is not None:
+            body["chartLayout"] = chart_layout
+        res = self._request("POST", path, body=body)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def remove_dashboard_chart(
+        self,
+        dashboard_id: str,
+        chart_id: str,
+    ) -> Dict[str, Any]:
+        """Removes a chart from a Native Dashboard."""
+        clean_dash = str(dashboard_id).strip().split("/")[-1]
+        clean_chart = str(chart_id).strip().split("/")[-1]
+        full_chart_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_chart}"
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_dash}:removeChart"
+        res = self._request("POST", path, body={"dashboardChart": full_chart_name})
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def patch_dashboard_chart(
+        self,
+        chart_id: str,
+        chart_payload: Dict[str, Any],
+        update_mask: str,
+    ) -> Dict[str, Any]:
+        """Updates an existing DashboardChart resource via PATCH."""
+        clean_id = str(chart_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
+        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
+        res = self._request("PATCH", path, params=params, body=chart_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
+
+    def patch_dashboard_query(
+        self,
+        query_id: str,
+        query_payload: Dict[str, Any],
+        update_mask: str,
+    ) -> Dict[str, Any]:
+        """Updates an existing DashboardQuery resource via PATCH."""
+        clean_id = str(query_id).strip().split("/")[-1]
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
+        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
+        res = self._request("PATCH", path, params=params, body=query_payload)
+        if isinstance(res, dict):
+            return res
+        return {}
 
     def validate_stats_query(
         self,

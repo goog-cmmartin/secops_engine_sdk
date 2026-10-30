@@ -73,12 +73,12 @@ A high-performance, verifiable Python SDK and Workflow Engine for **Google Secur
 ├── clients/                  # Multi-tier frontends
 │   ├── cli/                  # Terminal CLI executable (secops.py)
 │   ├── desktop/              # Qt / PySide6 Native Desktop application
+│   ├── tui/                  # Textual TUI proof-of-concept
+│   │   ├── app.py            # Two-pane Textual App with background workers
+│   │   ├── render.py         # Stateless Rich-based rendering (Tables, Panels)
+│   │   ├── requirements-tui.txt # TUI-only dependencies (textual, rich)
+│   │   └── README.md         # TUI design, threading, and demo mode docs
 │   └── web/                  # Real-time WebSocket multi-agent chat interface with generative widgets
-├── tui/                      # Textual TUI proof-of-concept
-│   ├── app.py                # Two-pane Textual App with background workers
-│   ├── render.py             # Stateless Rich-based rendering (Tables, Panels)
-│   ├── requirements-tui.txt  # TUI-only dependencies (textual, rich)
-│   └── README.md             # TUI design, threading, and demo mode docs
 ├── runbooks/                 # Autonomous incident response, threat hunting & operational runbooks
 │   ├── README.md             # Runbook catalog & execution guide
 │   ├── incident_response/    # Automated triage and indicator scoping
@@ -131,6 +131,15 @@ cp .env.example .env
 # SECOPS_REGION=us
 ```
 
+> **Multi-Tenant Configuration:** If you maintain multiple tenant configuration files (e.g., `thatsiemguy.conf`, `thatsiemguy-europe.conf`), you can activate a default tenant by copying it to `.env`:
+> ```bash
+> cp thatsiemguy.conf .env
+> ```
+> To run a one-off command against an alternate tenant without modifying `.env` (`os.environ` takes precedence over `.env`):
+> ```bash
+> env $(grep -v '^#' thatsiemguy-europe.conf | xargs) python3 -m clients.cli.secops siem tenant
+> ```
+
 ### Authentication
 
 Token acquisition is centralized in `engine/auth.py` (`CredentialProvider`) and
@@ -164,24 +173,27 @@ result = engine.search_udm(
     page_size=20
 )
 for event in result:
-    print(event.id, event.timestamp)
+    print(event.event_type, event.timestamp)
 
 # Search SOAR Cases
 cases = engine.search_cases(page_size=10)
 for case in cases:
-    print(case.id, case.title, case.priority)
+    print(case.case_id, case.title, case.priority)
 ```
 
 ### 4. Running the CLI
 ```bash
+# Check active tenant instance metadata
+python3 -m clients.cli.secops siem tenant
+
 # Search UDM Events
-python3 -m clients.cli.secops search "metadata.event_type = 'PROCESS_UNCATEGORIZED'" --limit 20
+python3 -m clients.cli.secops search -q "metadata.event_type = 'PROCESS_UNCATEGORIZED'" --limit 20
 
-# Search SOAR Cases
-python3 -m clients.cli.secops cases --limit 10
+# List or Search SOAR Cases
+python3 -m clients.cli.secops case list --limit 10
 
-# Search Playbooks
-python3 -m clients.cli.secops playbooks
+# List or Search Playbooks
+python3 -m clients.cli.secops playbook list
 
 # Search Ingestion Connectors & Webhooks
 python3 -m clients.cli.secops soar-ingestion-connectors
@@ -264,9 +276,9 @@ See [`docs/proto-schemas.md`](docs/proto-schemas.md) for:
 
 **Quickstart:**
 ```bash
-# Initialize submodule (for fresh clones)
-git submodule update --init --recursive
+# Initialize proto schemas submodule (for fresh clones)
+git submodule update --init protos/secops_protos
 
-# Validate dashboard queries against proto schemas
+# Validate dashboard queries against proto schemas (requires `rich` from clients/tui/requirements-tui.txt)
 python3 examples/dashboard_query_proto_demo.py all
 ```

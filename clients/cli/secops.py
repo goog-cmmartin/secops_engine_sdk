@@ -299,6 +299,27 @@ over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2
     case_response_plan_cmd.add_argument("identifier", help="Case ID or Plan ID")
     case_response_plan_cmd.add_argument("--is-plan-id", action="store_true", help="Treat identifier as Plan ID instead of Case ID")
 
+    case_attach_cmd = case_sub.add_parser("attach-evidence", help="Batch attach evidence (detections, events) to a case")
+    case_attach_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_attach_cmd.add_argument("--detection-id", "-d", action="append", default=[], help="Detection ID to attach (repeatable)")
+    case_attach_cmd.add_argument("--event-id", "-e", action="append", default=[], help="Event ID to attach (repeatable)")
+    case_attach_cmd.add_argument("--type", default="EVIDENCE_TYPE_DETECTION", help="Default evidence type")
+
+    case_detach_cmd = case_sub.add_parser("detach-evidence", help="Batch detach evidence from a case")
+    case_detach_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_detach_cmd.add_argument("--detection-id", "-d", action="append", default=[], help="Detection ID to detach (repeatable)")
+    case_detach_cmd.add_argument("--event-id", "-e", action="append", default=[], help="Event ID to detach (repeatable)")
+    case_detach_cmd.add_argument("--type", default="EVIDENCE_TYPE_DETECTION", help="Default evidence type")
+
+    case_correlate_cmd = case_sub.add_parser("correlate-detections", help="Correlate case entities with silent/non-alerting detections in UDM")
+    case_correlate_cmd.add_argument("case_id", help="Case ID (e.g. 104185)")
+    case_correlate_cmd.add_argument("--lookback-hours", type=int, default=24, help="UDM search lookback in hours (default: 24)")
+    case_correlate_cmd.add_argument("--attach", action="store_true", default=False, help="Natively attach non-alerting detections/events to case")
+    case_correlate_cmd.add_argument("--comment", action="store_true", default=True, help="Post summary comment to Case Wall (default: True)")
+    case_correlate_cmd.add_argument("--no-comment", action="store_false", dest="comment", help="Do not post Case Wall comment")
+    case_correlate_cmd.add_argument("--max-events", type=int, default=1000, help="Max UDM events to scan (default: 1000)")
+    case_correlate_cmd.add_argument("--format", "-f", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+
     # Alert Investigate command
     alert_parser = subparsers.add_parser("alert", help="Investigate specific SecOps alert")
     alert_sub = alert_parser.add_subparsers(dest="alert_action", required=True)
@@ -2917,6 +2938,76 @@ def run_case_cli(args):
                     print(f"       Integration : {act.integration_id}")
                 if act.action_reasoning:
                     print(f"       Reasoning   : {act.action_reasoning}")
+
+    elif args.case_action == "attach-evidence":
+        items = []
+        for did in getattr(args, "detection_id", []):
+            items.append({"evidenceId": did, "evidenceType": "EVIDENCE_TYPE_DETECTION"})
+        for eid in getattr(args, "event_id", []):
+            items.append({"evidenceId": eid, "evidenceType": "EVIDENCE_TYPE_EVENT"})
+        if not items:
+            print(" [!] No detection or event IDs provided via --detection-id or --event-id.")
+            return
+        print(f"\n[CLI] Attaching {len(items)} evidence item(s) to Case {args.case_id}...")
+        res = engine.attach_case_evidence(case_id=args.case_id, evidence_items=items)
+        print(f" [✓] Successfully attached {res.total_count} evidence item(s) to Case {res.case_id}.")
+        for idx, it in enumerate(res.evidence_items, 1):
+            print(f"     [{idx}] ({it.evidence_type}) {it.evidence_id}")
+
+    elif args.case_action == "detach-evidence":
+        items = []
+        for did in getattr(args, "detection_id", []):
+            items.append({"evidenceId": did, "evidenceType": "EVIDENCE_TYPE_DETECTION"})
+        for eid in getattr(args, "event_id", []):
+            items.append({"evidenceId": eid, "evidenceType": "EVIDENCE_TYPE_EVENT"})
+        if not items:
+            print(" [!] No detection or event IDs provided via --detection-id or --event-id.")
+            return
+        print(f"\n[CLI] Detaching {len(items)} evidence item(s) from Case {args.case_id}...")
+        res = engine.detach_case_evidence(case_id=args.case_id, evidence_items=items)
+        print(f" [✓] Successfully detached {res.total_count} evidence item(s) from Case {res.case_id}.")
+
+    elif args.case_action == "correlate-detections":
+        print(f"\n[CLI] Correlating Case {args.case_id} entities with UDM detections (Lookback: {args.lookback_hours}h)...")
+        res = engine.correlate_silent_detections(
+            case_id=args.case_id,
+            lookback_hours=args.lookback_hours,
+            attach_to_case=args.attach,
+            post_wall_comment=args.comment,
+            max_events=args.max_events,
+        )
+        if getattr(args, "format", "table") == "json":
+            import json
+            print(json.dumps({
+                "case_id": res.case_id,
+                "entities_searched": res.entities_searched,
+                "detections_found": res.detections_found,
+                "events_found": res.events_found,
+                "attached_evidences": [
+                    {"evidence_id": e.evidence_id, "evidence_type": e.evidence_type, "attach_time": e.attach_time}
+                    for e in res.attached_evidences
+                ],
+                "comment_id": res.comment_id,
+            }, indent=2))
+        else:
+            print(f"\n=======================================================")
+            print(f" CASE {res.case_id} DETECTION CORRELATION")
+            print(f" Entities Searched : {len(res.entities_searched)}")
+            print(f" Detections Found  : {len(res.detections_found)}")
+            print(f" Matching Events   : {len(res.events_found)}")
+            print(f" Attached Evidence : {len(res.attached_evidences)}")
+            if res.comment_id:
+                print(f" Wall Comment ID   : {res.comment_id}")
+            print(f"=======================================================")
+            if res.detections_found:
+                print("\n--- DETECTIONS FOUND ---")
+                for idx, d in enumerate(res.detections_found, 1):
+                    state_str = "[ALERTING]" if d.get("is_alerting") else "[SILENT/NON-ALERTING]"
+                    print(f" [{idx}] {state_str} {d.get('rule_name')} (Rule ID: {d.get('rule_id')}, Severity: {d.get('severity', 'N/A')})")
+            if res.attached_evidences:
+                print(f"\n--- ATTACHED TO CASE ({len(res.attached_evidences)}) ---")
+                for idx, e in enumerate(res.attached_evidences, 1):
+                    print(f" [{idx}] ({e.evidence_type}) {e.evidence_id}")
 
 
 def run_alert_cli(args):

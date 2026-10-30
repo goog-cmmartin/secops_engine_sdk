@@ -24,6 +24,9 @@ from engine.domain import (
     CaseAiInvestigationResult,
     CaseWallRecord,
     CaseWallResult,
+    CaseEvidenceItem,
+    CaseEvidenceBatchResult,
+    CaseDetectionCorrelationResult,
     TriageVerdict,
     CasePrecedentSummary,
     EntityPrecedentItem,
@@ -341,6 +344,11 @@ from engine.workflows.case_wall import (
     GetCaseWallWorkflow,
     ListCaseCommentsWorkflow,
 )
+from engine.workflows.case_evidence import (
+    AttachCaseEvidenceWorkflow,
+    DetachCaseEvidenceWorkflow,
+)
+from engine.workflows.correlate_silent_detections import CorrelateSilentDetectionsWorkflow
 from engine.workflows.content_pack import (
     GetContentPackDetailWorkflow,
     ListContentPackCategoriesWorkflow,
@@ -371,9 +379,16 @@ from engine.workflows.detection_tuning import (
 )
 from engine.workflows.dashboards import (
     run_dashboard_health_check,
+    AddDashboardChartWorkflow,
+    CreateDashboardWorkflow,
+    DeleteDashboardWorkflow,
+    DuplicateDashboardWorkflow,
     ExecuteDashboardQueryWorkflow,
     GetDashboardDetailWorkflow,
+    RemoveDashboardChartWorkflow,
     SearchDashboardsWorkflow,
+    UpdateDashboardChartWorkflow,
+    UpdateDashboardWorkflow,
     ValidateDashboardQueryWorkflow,
 )
 from engine.workflows.dashboard_health import AuditDashboardHealthWorkflow
@@ -413,10 +428,13 @@ from engine.workflows.integration import (
 )
 from engine.workflows.investigate_event import InvestigateEventWorkflow
 from engine.workflows.job import (
+    CreateJobInstanceWorkflow,
     GetJobDetailWorkflow,
     GetJobInstanceLogsWorkflow,
     ListJobInstancesWorkflow,
     SearchJobsWorkflow,
+    UpdateJobInstanceWorkflow,
+    UpdateJobWorkflow,
 )
 from engine.workflows.marketplace_integrations import (
     GetMarketplaceIntegrationAffectedItemsWorkflow,
@@ -436,10 +454,13 @@ from engine.workflows.parser import (
 )
 from engine.workflows.parser_health import AuditParserHealthWorkflow
 from engine.workflows.playbook import (
+    DeletePlaybooksWorkflow,
     GetAlertPlaybookInstancesWorkflow,
     GetPlaybookWorkflow,
     ListPlaybookCategoriesWorkflow,
+    SavePlaybookWorkflow,
     SearchPlaybooksWorkflow,
+    UpdatePlaybookWidgetWorkflow,
 )
 from engine.workflows.playbook_health import AuditPlaybookHealthWorkflow
 from engine.workflows.playbook_decay import AuditPlaybookDecayWorkflow
@@ -685,6 +706,9 @@ class SecOpsEngine:
         "_add_case_comment_wf": lambda e: AddCaseCommentWorkflow(e.adapter),
         "_list_case_comments_wf": lambda e: ListCaseCommentsWorkflow(e.adapter),
         "_get_case_wall_wf": lambda e: GetCaseWallWorkflow(e.adapter),
+        "_attach_case_evidence_wf": lambda e: AttachCaseEvidenceWorkflow(e.adapter),
+        "_detach_case_evidence_wf": lambda e: DetachCaseEvidenceWorkflow(e.adapter),
+        "_correlate_silent_detections_wf": lambda e: CorrelateSilentDetectionsWorkflow(e.adapter),
         "_update_case_wf": lambda e: UpdateCaseWorkflow(e.adapter),
         "_assign_case_wf": lambda e: AssignCaseWorkflow(e.adapter),
         "_set_case_stage_wf": lambda e: SetCaseStageWorkflow(e.adapter),
@@ -726,6 +750,9 @@ class SecOpsEngine:
         "_search_playbooks_wf": lambda e: SearchPlaybooksWorkflow(e.adapter),
         "_get_playbook_wf": lambda e: GetPlaybookWorkflow(e.adapter),
         "_list_playbook_cats_wf": lambda e: ListPlaybookCategoriesWorkflow(e.adapter),
+        "_save_playbook_wf": lambda e: SavePlaybookWorkflow(e.adapter),
+        "_update_playbook_widget_wf": lambda e: UpdatePlaybookWidgetWorkflow(e.adapter),
+        "_delete_playbooks_wf": lambda e: DeletePlaybooksWorkflow(e.adapter),
         "_alert_playbook_instances_wf": lambda e: GetAlertPlaybookInstancesWorkflow(e.adapter),
         "_audit_soar_playbook_health_wf": lambda e: AuditPlaybookHealthWorkflow(e),
         "_audit_playbook_decay_wf": lambda e: AuditPlaybookDecayWorkflow(e),
@@ -743,6 +770,9 @@ class SecOpsEngine:
         "_get_job_wf": lambda e: GetJobDetailWorkflow(e.adapter),
         "_list_job_instances_wf": lambda e: ListJobInstancesWorkflow(e.adapter),
         "_get_job_instance_logs_wf": lambda e: GetJobInstanceLogsWorkflow(e.adapter),
+        "_update_job_wf": lambda e: UpdateJobWorkflow(e.adapter),
+        "_update_job_instance_wf": lambda e: UpdateJobInstanceWorkflow(e.adapter),
+        "_create_job_instance_wf": lambda e: CreateJobInstanceWorkflow(e.adapter),
         "_search_content_packs_wf": lambda e: SearchContentPacksWorkflow(e.adapter),
         "_get_content_pack_wf": lambda e: GetContentPackDetailWorkflow(e.adapter),
         "_list_content_pack_cats_wf": lambda e: ListContentPackCategoriesWorkflow(e.adapter),
@@ -782,6 +812,13 @@ class SecOpsEngine:
         "_get_marketplace_affected_items_wf": lambda e: GetMarketplaceIntegrationAffectedItemsWorkflow(e.adapter),
         "_search_dashboards_wf": lambda e: SearchDashboardsWorkflow(e.adapter),
         "_get_dashboard_wf": lambda e: GetDashboardDetailWorkflow(e.adapter),
+        "_create_dashboard_wf": lambda e: CreateDashboardWorkflow(e.adapter),
+        "_update_dashboard_wf": lambda e: UpdateDashboardWorkflow(e.adapter),
+        "_delete_dashboard_wf": lambda e: DeleteDashboardWorkflow(e.adapter),
+        "_duplicate_dashboard_wf": lambda e: DuplicateDashboardWorkflow(e.adapter),
+        "_add_dashboard_chart_wf": lambda e: AddDashboardChartWorkflow(e.adapter),
+        "_update_dashboard_chart_wf": lambda e: UpdateDashboardChartWorkflow(e.adapter),
+        "_remove_dashboard_chart_wf": lambda e: RemoveDashboardChartWorkflow(e.adapter),
         "_execute_dashboard_query_wf": lambda e: ExecuteDashboardQueryWorkflow(e.adapter),
         "_validate_dashboard_query_wf": lambda e: ValidateDashboardQueryWorkflow(e.adapter),
         "_audit_dashboard_health_wf": lambda e: AuditDashboardHealthWorkflow(e.adapter),
@@ -1220,6 +1257,43 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="case.evidence.attach",
+                name="Attach Evidence to Case",
+                description="Batch attaches evidence items (detections, events, alerts) to a Google SecOps case.",
+                category="case",
+                handler=self.attach_case_evidence,
+                mcp_tool_name="attach_case_evidence",
+                composed=False,
+                evidence_path="evidence/case/evidence/attach",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.evidence.detach",
+                name="Detach Evidence from Case",
+                description="Batch detaches evidence items from a Google SecOps case.",
+                category="case",
+                handler=self.detach_case_evidence,
+                mcp_tool_name="detach_case_evidence",
+                composed=False,
+                evidence_path="evidence/case/evidence/detach",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.detection.correlate",
+                name="Correlate Silent Detections to Case",
+                description="Pivots across all entities involved in a case, searches UDM for non-alerting detections or matching events, and attaches them as case evidence.",
+                category="case",
+                handler=self.correlate_silent_detections,
+                mcp_tool_name="correlate_silent_detections",
+                composed=True,
+                uses=("case.investigate", "search.udm", "case.evidence.attach", "case.comment"),
+                evidence_path="evidence/case/detection/correlate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="case_alert.update",
                 name="Update Case Alert",
                 description="Mutates case alert attributes such as priority or status.",
@@ -1500,6 +1574,46 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="playbook.save",
+                name="Save SOAR Playbook Definition",
+                description="Creates or updates a SOAR playbook or block workflow definition with automatic category ID/name synchronization.",
+                category="playbook",
+                handler=self.save_playbook,
+                mcp_tool_name="save_playbook",
+                composed=False,
+                side_effects=["write_playbook"],
+                evidence_path="evidence/playbook/save",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="playbook.update_widget",
+                name="Update SOAR Playbook HTML Widget",
+                description="Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook.",
+                category="playbook",
+                handler=self.update_playbook_widget,
+                mcp_tool_name="update_playbook_widget",
+                composed=True,
+                uses=("playbook.get", "playbook.save"),
+                side_effects=["write_playbook"],
+                evidence_path="evidence/playbook/update_widget",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="playbook.delete",
+                name="Delete SOAR Playbooks",
+                description="Deletes one or more SOAR playbooks by UUID identifier, numeric ID, or name.",
+                category="playbook",
+                handler=self.delete_playbooks,
+                mcp_tool_name="delete_playbooks",
+                composed=False,
+                side_effects=["delete_playbook"],
+                evidence_path="evidence/playbook/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="playbook.instances",
                 name="Alert Playbook Run Instances",
                 description="Retrieves authoritative per-alert playbook run instances and the executed step DAG.",
@@ -1655,6 +1769,45 @@ class SecOpsEngine:
                 mcp_tool_name="get_job_instance_logs",
                 composed=False,
                 evidence_path="evidence/job/logs",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="job.update",
+                name="Update SOAR Scheduled Job",
+                description="Updates a SOAR scheduled job definition (script, description, enabled, parameters) and optionally syncs script changes to its active job instances.",
+                category="job",
+                handler=self.update_job,
+                mcp_tool_name="update_job",
+                composed=False,
+                side_effects=["write_job"],
+                evidence_path="evidence/job/update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="job.instance.update",
+                name="Update SOAR Job Instance",
+                description="Updates a configured runtime SOAR job instance (script, schedule, parameters, or enabled status).",
+                category="job",
+                handler=self.update_job_instance,
+                mcp_tool_name="update_job_instance",
+                composed=False,
+                side_effects=["write_job_instance"],
+                evidence_path="evidence/job/instance_update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="job.instance.create",
+                name="Create SOAR Job Instance",
+                description="Creates a new scheduled runtime SOAR job instance under a job definition.",
+                category="job",
+                handler=self.create_job_instance,
+                mcp_tool_name="create_job_instance",
+                composed=False,
+                side_effects=["create_job_instance"],
+                evidence_path="evidence/job/instance_create",
             )
         )
         self.registry.register(
@@ -2030,6 +2183,97 @@ class SecOpsEngine:
                 mcp_tool_name="get_dashboard",
                 composed=True,
                 evidence_path="evidence/dashboard/get",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.create",
+                name="Create Google SecOps Native Dashboard",
+                description="Creates a new Native Dashboard in Google SecOps.",
+                category="dashboard",
+                handler=self.create_dashboard,
+                mcp_tool_name="create_dashboard",
+                composed=False,
+                side_effects=["create_dashboard"],
+                evidence_path="evidence/dashboard/create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.update",
+                name="Update Google SecOps Native Dashboard",
+                description="Updates an existing Native Dashboard's display name, description, filters, or chart layouts.",
+                category="dashboard",
+                handler=self.update_dashboard,
+                mcp_tool_name="update_dashboard",
+                composed=False,
+                side_effects=["write_dashboard"],
+                evidence_path="evidence/dashboard/update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.delete",
+                name="Delete Google SecOps Native Dashboard",
+                description="Deletes a Native Dashboard by ID.",
+                category="dashboard",
+                handler=self.delete_dashboard,
+                mcp_tool_name="delete_dashboard",
+                composed=False,
+                side_effects=["delete_dashboard"],
+                evidence_path="evidence/dashboard/delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.duplicate",
+                name="Duplicate Google SecOps Native Dashboard",
+                description="Duplicates an existing Native Dashboard under a new display name.",
+                category="dashboard",
+                handler=self.duplicate_dashboard,
+                mcp_tool_name="duplicate_dashboard",
+                composed=False,
+                side_effects=["create_dashboard"],
+                evidence_path="evidence/dashboard/duplicate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.chart.add",
+                name="Add Chart to Google SecOps Native Dashboard",
+                description="Adds a chart widget (visualization, markdown, or button) and optional query to a Native Dashboard.",
+                category="dashboard",
+                handler=self.add_dashboard_chart,
+                mcp_tool_name="add_dashboard_chart",
+                composed=False,
+                side_effects=["write_dashboard"],
+                evidence_path="evidence/dashboard/chart_add",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.chart.update",
+                name="Update Chart/Query on Google SecOps Native Dashboard",
+                description="Updates an existing DashboardChart and/or its associated DashboardQuery.",
+                category="dashboard",
+                handler=self.update_dashboard_chart,
+                mcp_tool_name="update_dashboard_chart",
+                composed=False,
+                side_effects=["write_dashboard"],
+                evidence_path="evidence/dashboard/chart_update",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="dashboard.chart.remove",
+                name="Remove Chart from Google SecOps Native Dashboard",
+                description="Removes a chart from a Native Dashboard.",
+                category="dashboard",
+                handler=self.remove_dashboard_chart,
+                mcp_tool_name="remove_dashboard_chart",
+                composed=False,
+                side_effects=["write_dashboard"],
+                evidence_path="evidence/dashboard/chart_remove",
             )
         )
         self.registry.register(
@@ -4317,6 +4561,102 @@ class SecOpsEngine:
             activity_type=activity_type,
         )
 
+    def attach_case_evidence(
+        self,
+        case_id: Union[str, int],
+        evidence_items: List[Union[Dict[str, Any], str]],
+        default_evidence_type: str = "EVIDENCE_TYPE_DETECTION",
+    ) -> CaseEvidenceBatchResult:
+        """Batch attaches evidence items (detections, events, alerts) to a SOAR Case."""
+        return self._attach_case_evidence_wf.execute(
+            case_id=_normalize_case_id(case_id),
+            evidence_items=evidence_items,
+            default_evidence_type=default_evidence_type,
+        )
+
+    def detach_case_evidence(
+        self,
+        case_id: Union[str, int],
+        evidence_items: List[Union[Dict[str, Any], str]],
+        default_evidence_type: str = "EVIDENCE_TYPE_DETECTION",
+    ) -> CaseEvidenceBatchResult:
+        """Batch detaches evidence items from a SOAR Case."""
+        return self._detach_case_evidence_wf.execute(
+            case_id=_normalize_case_id(case_id),
+            evidence_items=evidence_items,
+            default_evidence_type=default_evidence_type,
+        )
+
+    def attach_detections_to_case(
+        self, case_id: Union[str, int], detection_ids: List[str]
+    ) -> CaseEvidenceBatchResult:
+        """Convenience method to attach non-alerting SIEM detections to a SOAR Case."""
+        return self.attach_case_evidence(
+            case_id=case_id,
+            evidence_items=detection_ids,
+            default_evidence_type="EVIDENCE_TYPE_DETECTION",
+        )
+
+    def attach_events_to_case(
+        self, case_id: Union[str, int], event_ids: List[str]
+    ) -> CaseEvidenceBatchResult:
+        """Convenience method to attach individual UDM log events to a SOAR Case."""
+        return self.attach_case_evidence(
+            case_id=case_id,
+            evidence_items=event_ids,
+            default_evidence_type="EVIDENCE_TYPE_EVENT",
+        )
+
+    def correlate_silent_detections(
+        self,
+        case_id: Union[str, int],
+        lookback_hours: int = 24,
+        attach_to_case: bool = False,
+        attach_entities: bool = True,
+        post_wall_comment: bool = True,
+        entity_filter: Optional[List[str]] = None,
+        max_events: int = 1000,
+    ) -> CaseDetectionCorrelationResult:
+        """Correlates a SOAR case's involved entities with silent (non-alerting) detections in UDM."""
+        return self._correlate_silent_detections_wf.execute(
+            case_id=_normalize_case_id(case_id),
+            lookback_hours=lookback_hours,
+            attach_to_case=attach_to_case,
+            attach_entities=attach_entities,
+            post_wall_comment=post_wall_comment,
+            entity_filter=entity_filter,
+            max_events=max_events,
+        )
+
+    def add_case_alert_entity(
+        self,
+        case_id: Union[str, int],
+        case_alert_id: Union[str, int],
+        identifier: str,
+        entity_type: str = "IP",
+    ) -> Dict[str, Any]:
+        """Manually attaches an involved entity to a specific case alert."""
+        return self.adapter.add_case_alert_entity(
+            case_id=str(case_id),
+            case_alert_id=str(case_alert_id),
+            identifier=identifier,
+            entity_type=entity_type,
+        )
+
+    def search_unique_entities(
+        self,
+        filter_expr: Optional[str] = None,
+        page_size: int = 50,
+        page_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Searches or lists unique entities across the SecOps instance."""
+        return self.adapter.search_unique_entities(
+            filter_expr=filter_expr,
+            page_size=page_size,
+            page_token=page_token,
+        )
+
+
     def update_case(
         self,
         case_id: Union[str, int],
@@ -4796,6 +5136,69 @@ class SecOpsEngine:
         """Lists all SOAR Playbook categories/folders."""
         return self._list_playbook_cats_wf.execute()
 
+    def save_playbook(
+        self,
+        playbook_payload: Dict[str, Any],
+        category_name: Optional[str] = None,
+        is_enabled: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Creates or updates a SOAR playbook or block workflow definition with automatic category ID/name synchronization."""
+        return self._save_playbook_wf.execute(
+            playbook_payload=playbook_payload,
+            category_name=category_name,
+            is_enabled=is_enabled,
+        )
+
+    def update_playbook_widget(
+        self,
+        identifier_or_id: str,
+        html_content: str,
+        step_name_or_id: Optional[str] = None,
+        widget_title: Optional[str] = None,
+        widget_index: Optional[int] = None,
+        update_step_parameter: Optional[str] = None,
+        update_step_parameter_value: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook."""
+        return self._update_playbook_widget_wf.execute(
+            identifier_or_id=identifier_or_id,
+            html_content=html_content,
+            step_name_or_id=step_name_or_id,
+            widget_title=widget_title,
+            widget_index=widget_index,
+            update_step_parameter=update_step_parameter,
+            update_step_parameter_value=update_step_parameter_value,
+        )
+
+    def delete_playbooks(
+        self,
+        identifiers_or_ids: Union[List[str], str],
+    ) -> Dict[str, Any]:
+        """Deletes one or more SOAR Playbooks by UUID identifier, numeric ID, or exact name."""
+        norm_ids = [identifiers_or_ids] if isinstance(identifiers_or_ids, str) else list(identifiers_or_ids)
+        return self._delete_playbooks_wf.execute(identifiers_or_ids=norm_ids)
+
+    def export_playbooks(
+        self,
+        identifiers: Union[List[str], str],
+    ) -> Dict[str, Any]:
+        """Exports one or more SOAR playbooks into a portable package payload."""
+        norm_ids = [identifiers] if isinstance(identifiers, str) else list(identifiers)
+        return self.adapter.export_playbooks(norm_ids)
+
+    def import_playbooks(
+        self,
+        blob_base64: str,
+        import_as_duplicates: bool = False,
+        environments_map: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Imports a base64-encoded SOAR playbook package payload."""
+        return self.adapter.import_playbooks(
+            blob_base64=blob_base64,
+            import_as_duplicates=import_as_duplicates,
+            environments_map=environments_map,
+        )
+
     def audit_soar_playbook_health(
         self,
         days: int = 7,
@@ -4976,6 +5379,67 @@ class SecOpsEngine:
             job_instance_id=job_instance_id,
             limit=limit,
             order_by=order_by,
+        )
+
+    def update_job(
+        self,
+        integration: str,
+        job_id: str,
+        script: Optional[str] = None,
+        description: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        update_mask: Optional[str] = None,
+        sync_instances: bool = True,
+    ) -> Dict[str, Any]:
+        """Updates a SOAR scheduled job definition and optionally syncs script changes to its active job instances."""
+        return self._update_job_wf.execute(
+            integration=integration,
+            job_id=job_id,
+            script=script,
+            description=description,
+            enabled=enabled,
+            parameters=parameters,
+            update_mask=update_mask,
+            sync_instances=sync_instances,
+        )
+
+    def update_job_instance(
+        self,
+        integration: str,
+        job_id: str,
+        instance_id: str,
+        script: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        interval_seconds: Optional[int] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        advanced_config: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates a configured runtime SOAR job instance (script, schedule, parameters, or enabled status)."""
+        return self._update_job_instance_wf.execute(
+            integration=integration,
+            job_id=job_id,
+            instance_id=instance_id,
+            script=script,
+            enabled=enabled,
+            interval_seconds=interval_seconds,
+            parameters=parameters,
+            advanced_config=advanced_config,
+            update_mask=update_mask,
+        )
+
+    def create_job_instance(
+        self,
+        integration: str,
+        job_id: str,
+        instance_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Creates a new scheduled runtime SOAR job instance under a job definition."""
+        return self._create_job_instance_wf.execute(
+            integration=integration,
+            job_id=job_id,
+            instance_payload=instance_payload,
         )
 
     def search_content_packs(
@@ -5347,6 +5811,135 @@ class SecOpsEngine:
     ) -> DashboardDetail:
         """Retrieves complete composite dashboard graph with charts and queries."""
         return self._get_dashboard_wf.execute(identifier_or_title, include_queries=include_queries)
+
+    def create_dashboard(
+        self,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+        filters: Optional[List[Dict[str, Any]]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+    ) -> DashboardSummary:
+        """Creates a new Native Dashboard in Google SecOps."""
+        return self._create_dashboard_wf.execute(
+            display_name=display_name,
+            description=description,
+            dashboard_type=dashboard_type,
+            filters=filters,
+            charts=charts,
+        )
+
+    def update_dashboard(
+        self,
+        dashboard_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+        update_mask: Optional[str] = None,
+    ) -> DashboardSummary:
+        """Updates an existing Native Dashboard's display name, description, filters, or chart layouts."""
+        return self._update_dashboard_wf.execute(
+            dashboard_id=dashboard_id,
+            display_name=display_name,
+            description=description,
+            filters=filters,
+            charts=charts,
+            update_mask=update_mask,
+        )
+
+    def delete_dashboard(self, dashboard_id: str) -> Dict[str, Any]:
+        """Deletes a Native Dashboard by ID."""
+        return self._delete_dashboard_wf.execute(dashboard_id=dashboard_id)
+
+    def duplicate_dashboard(
+        self,
+        dashboard_id: str,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+    ) -> DashboardSummary:
+        """Duplicates an existing Native Dashboard under a new display name."""
+        return self._duplicate_dashboard_wf.execute(
+            dashboard_id=dashboard_id,
+            display_name=display_name,
+            description=description,
+            dashboard_type=dashboard_type,
+        )
+
+    def add_dashboard_chart(
+        self,
+        dashboard_id: str,
+        display_name: str,
+        query: Optional[str] = None,
+        description: Optional[str] = None,
+        tile_type: str = "TILE_TYPE_VISUALIZATION",
+        visualization: Optional[Dict[str, Any]] = None,
+        data_sources: Optional[List[str]] = None,
+        time_unit: str = "DAY",
+        time_value: str = "1",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        span_x: int = 6,
+        span_y: int = 4,
+        start_x: int = 0,
+        start_y: int = 0,
+        drill_down_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Adds a chart widget (visualization, markdown, or button) and optional query to a Native Dashboard."""
+        return self._add_dashboard_chart_wf.execute(
+            dashboard_id=dashboard_id,
+            display_name=display_name,
+            query=query,
+            description=description,
+            tile_type=tile_type,
+            visualization=visualization,
+            data_sources=data_sources,
+            time_unit=time_unit,
+            time_value=time_value,
+            start_time=start_time,
+            end_time=end_time,
+            span_x=span_x,
+            span_y=span_y,
+            start_x=start_x,
+            start_y=start_y,
+            drill_down_config=drill_down_config,
+        )
+
+    def update_dashboard_chart(
+        self,
+        chart_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        visualization: Optional[Dict[str, Any]] = None,
+        data_sources: Optional[List[str]] = None,
+        drill_down_config: Optional[Dict[str, Any]] = None,
+        query_id: Optional[str] = None,
+        query: Optional[str] = None,
+        time_unit: Optional[str] = None,
+        time_value: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates an existing DashboardChart and/or its associated DashboardQuery."""
+        return self._update_dashboard_chart_wf.execute(
+            chart_id=chart_id,
+            display_name=display_name,
+            description=description,
+            visualization=visualization,
+            data_sources=data_sources,
+            drill_down_config=drill_down_config,
+            query_id=query_id,
+            query=query,
+            time_unit=time_unit,
+            time_value=time_value,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+    def remove_dashboard_chart(self, dashboard_id: str, chart_id: str) -> Dict[str, Any]:
+        """Removes a chart from a Native Dashboard."""
+        return self._remove_dashboard_chart_wf.execute(dashboard_id=dashboard_id, chart_id=chart_id)
 
     def execute_dashboard_query(
         self,

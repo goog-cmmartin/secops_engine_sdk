@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-10-25 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-10-27 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**223 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**226 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-10-25 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 43 |
-| primitive | 29 |
+| workflow | 44 |
+| primitive | 31 |
 | query | 151 |
-| **total** | **223** |
+| **total** | **226** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 62 |
 | bounded | 19 |
 | unbounded | 70 |
-| (n/a — workflows/primitive) | 72 |
+| (n/a — workflows/primitive) | 75 |
 
 ## Workflows
 
@@ -37,6 +37,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `alert.investigate` | alert | Retrieves security alert details with root-cause entities and raw log attachments. |
 | `case.agentic_response_plan.get` | case | Resolves an AI-driven agentic response plan by either case ID or plan ID. |
 | `case.ai_investigate` | case | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
+| `case.detection.correlate` | case | Pivots across all entities involved in a case, searches UDM for non-alerting detections or matching events, and attaches them as case evidence. |
 | `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | case | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
@@ -86,12 +87,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (24: workflow=8, primitive=10, query=6)
+### case  (27: workflow=9, primitive=12, query=6)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `case.agentic_response_plan.get` | workflow | — | `get_agentic_response_plan` | Resolves an AI-driven agentic response plan by either case ID or plan ID. |
 | `case.ai_investigate` | workflow | — | `ai_investigate_case` | Executes deep AI-driven case investigation: fetches AI summary, extracts network and user indicators, runs automated UDM searches across Chronicle event logs, and assesses enterprise impact. |
+| `case.detection.correlate` | workflow | — | `correlate_silent_detections` | Pivots across all entities involved in a case, searches UDM for non-alerting detections or matching events, and attaches them as case evidence. |
 | `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | workflow | — | `orchestrate_case_triage` | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
@@ -100,6 +102,8 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case_alert.get_recommendation` | workflow | — | `get_case_alert_recommendation` | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
 | `case.assign` | primitive | — | `assign_case` | Assigns a SOAR case to a SOC role (@Role) or user GUID. |
 | `case.comment` | primitive | — | `add_case_comment` | Adds structured analyst investigation comments to a SOAR case. |
+| `case.evidence.attach` | primitive | — | `attach_case_evidence` | Batch attaches evidence items (detections, events, alerts) to a Google SecOps case. |
+| `case.evidence.detach` | primitive | — | `detach_case_evidence` | Batch detaches evidence items from a Google SecOps case. |
 | `case.get_or_create_summary` | primitive | — | `get_or_create_case_summary` | Gets or initiates generation of a Gemini AI-driven overview, reasons, and next steps for a SOAR case. |
 | `case.set_incident` | primitive | — | `set_case_incident` | Marks or unmarks a SOAR case as an incident. |
 | `case.set_stage` | primitive | — | `set_case_stage` | Updates the lifecycle stage of a SOAR case. |

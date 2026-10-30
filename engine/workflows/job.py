@@ -198,7 +198,7 @@ class GetJobDetailWorkflow:
                                 start_time=lg.get("startTime"),
                                 end_time=lg.get("endTime"),
                                 status=lg.get("status", "UNKNOWN"),
-                                log_text=lg.get("log", ""),
+                                log_text=lg.get("message") or lg.get("log", "") or "",
                                 job_identifier=lg.get("jobIdentifier", extracted_id),
                                 integration=lg.get("integration", integration),
                                 job_instance_id=lg.get("jobInstanceId", inst_id),
@@ -307,7 +307,7 @@ class GetJobInstanceLogsWorkflow:
                     start_time=lg.get("startTime"),
                     end_time=lg.get("endTime"),
                     status=lg.get("status", "UNKNOWN"),
-                    log_text=lg.get("log", "") or "",
+                    log_text=lg.get("message") or lg.get("log", "") or "",
                     job_identifier=lg.get("jobIdentifier", ""),
                     integration=lg.get("integration", ""),
                     job_instance_id=lg.get("jobInstanceId", job_instance_id),
@@ -316,3 +316,140 @@ class GetJobInstanceLogsWorkflow:
             )
 
         return results
+
+
+class UpdateJobWorkflow:
+    """Updates a SOAR scheduled job definition and optionally syncs script changes to its active job instances."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        integration: str,
+        job_id: str,
+        script: Optional[str] = None,
+        description: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        update_mask: Optional[str] = None,
+        sync_instances: bool = True,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        mask_fields: List[str] = []
+
+        if script is not None:
+            payload["script"] = script
+            mask_fields.append("script")
+        if description is not None:
+            payload["description"] = description
+            mask_fields.append("description")
+        if enabled is not None:
+            payload["enabled"] = bool(enabled)
+            mask_fields.append("enabled")
+        if parameters is not None:
+            payload["parameters"] = parameters
+            mask_fields.append("parameters")
+
+        final_mask = update_mask or ",".join(mask_fields) or "script"
+        updated_job = self.adapter.update_job(
+            integration=integration,
+            job_id=job_id,
+            job_payload=payload,
+            update_mask=final_mask,
+        )
+
+        synced_instances: List[Dict[str, Any]] = []
+        if sync_instances and script is not None:
+            raw_instances = self.adapter.list_job_instances(
+                integration=integration,
+                job_id=job_id,
+                page_size=100,
+            )
+            for inst in raw_instances:
+                inst_name = inst.get("name", "")
+                inst_id = str(inst.get("id")) if inst.get("id") else _parse_job_instance_id_from_name(inst_name)
+                if inst_id:
+                    res_inst = self.adapter.update_job_instance(
+                        integration=integration,
+                        job_id=job_id,
+                        instance_id=inst_id,
+                        instance_payload={"script": script},
+                        update_mask="script",
+                    )
+                    synced_instances.append(res_inst)
+
+        return {
+            "job": updated_job,
+            "synced_instances": synced_instances,
+            "synced_instance_count": len(synced_instances),
+        }
+
+
+class UpdateJobInstanceWorkflow:
+    """Updates a configured runtime SOAR job instance (script, schedule, parameters, or enabled status)."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        integration: str,
+        job_id: str,
+        instance_id: str,
+        script: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        interval_seconds: Optional[int] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        advanced_config: Optional[Dict[str, Any]] = None,
+        update_mask: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        mask_fields: List[str] = []
+
+        if script is not None:
+            payload["script"] = script
+            mask_fields.append("script")
+        if enabled is not None:
+            payload["enabled"] = bool(enabled)
+            mask_fields.append("enabled")
+        if interval_seconds is not None:
+            payload["intervalSeconds"] = int(interval_seconds)
+            mask_fields.append("intervalSeconds")
+        if parameters is not None:
+            payload["parameters"] = parameters
+            mask_fields.append("parameters")
+        if advanced_config is not None:
+            payload["advancedConfig"] = advanced_config
+            mask_fields.append("advancedConfig")
+
+        final_mask = update_mask or ",".join(mask_fields) or "script"
+        return self.adapter.update_job_instance(
+            integration=integration,
+            job_id=job_id,
+            instance_id=instance_id,
+            instance_payload=payload,
+            update_mask=final_mask,
+        )
+
+
+class CreateJobInstanceWorkflow:
+    """Creates a new scheduled runtime SOAR job instance for a job definition."""
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        integration: str,
+        job_id: str,
+        instance_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(instance_payload, dict) or not instance_payload:
+            raise ValueError("instance_payload must be a non-empty dictionary.")
+        return self.adapter.create_job_instance(
+            integration=integration,
+            job_id=job_id,
+            instance_payload=instance_payload,
+        )
+

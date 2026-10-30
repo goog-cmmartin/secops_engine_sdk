@@ -458,7 +458,7 @@ window.GRAPH_DATA = {_script_safe_json(graph_data)};
 (function() {{
   const data = window.GRAPH_DATA;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}})[c]);
-  const safeUrl = u => /^https?:\/\//i.test(String(u || "")) ? u : "#";
+  const safeUrl = u => /^https?:\\/\\//i.test(String(u || "")) ? u : "#";
   const typeSelect = document.getElementById("filter-type");
   for (const t of data.types) {{
     const opt = document.createElement("option");

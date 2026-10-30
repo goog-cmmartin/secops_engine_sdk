@@ -411,3 +411,296 @@ def run_dashboard_health_check(
             adapter.project_id = orig_pid
             adapter.customer_id = orig_cid
             adapter.region = orig_reg
+
+
+class CreateDashboardWorkflow:
+    """Creates a new Native Dashboard in Google SecOps."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+        filters: Optional[List[Dict[str, Any]]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+    ) -> DashboardSummary:
+        if not display_name or not str(display_name).strip():
+            raise ValueError("display_name must be provided.")
+        raw = self.adapter.create_native_dashboard(
+            display_name=display_name.strip(),
+            description=description,
+            dashboard_type=dashboard_type,
+            filters=filters,
+            charts=charts,
+        )
+        return _map_dashboard_summary(raw)
+
+
+class UpdateDashboardWorkflow:
+    """Updates an existing Native Dashboard's display name, description, filters, or chart layouts."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        dashboard_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        charts: Optional[List[Dict[str, Any]]] = None,
+        update_mask: Optional[str] = None,
+    ) -> DashboardSummary:
+        if not dashboard_id or not str(dashboard_id).strip():
+            raise ValueError("dashboard_id must be provided.")
+
+        payload: Dict[str, Any] = {}
+        mask_fields: List[str] = []
+        definition: Dict[str, Any] = {}
+
+        if display_name is not None:
+            payload["displayName"] = display_name
+            mask_fields.append("display_name")
+        if description is not None:
+            payload["description"] = description
+            mask_fields.append("description")
+        if filters is not None:
+            definition["filters"] = filters
+            mask_fields.append("definition.filters")
+        if charts is not None:
+            definition["charts"] = charts
+            mask_fields.append("definition.charts")
+        if definition:
+            payload["definition"] = definition
+
+        final_mask = update_mask or ",".join(mask_fields)
+        if not final_mask:
+            raise ValueError("At least one field (display_name, description, filters, charts) must be provided to update.")
+
+        raw = self.adapter.patch_native_dashboard(
+            dashboard_id=dashboard_id,
+            dashboard_payload=payload,
+            update_mask=final_mask,
+        )
+        return _map_dashboard_summary(raw)
+
+
+class DeleteDashboardWorkflow:
+    """Deletes a Native Dashboard by ID."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(self, dashboard_id: str) -> Dict[str, Any]:
+        if not dashboard_id or not str(dashboard_id).strip():
+            raise ValueError("dashboard_id must be provided.")
+        clean_id = str(dashboard_id).strip().split("/")[-1]
+        res = self.adapter.delete_native_dashboard(clean_id)
+        return {"deleted_dashboard_id": clean_id, "raw": res}
+
+
+class DuplicateDashboardWorkflow:
+    """Duplicates an existing Native Dashboard under a new display name."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        dashboard_id: str,
+        display_name: str,
+        description: Optional[str] = None,
+        dashboard_type: str = "CUSTOM",
+    ) -> DashboardSummary:
+        if not dashboard_id or not str(dashboard_id).strip():
+            raise ValueError("dashboard_id must be provided.")
+        if not display_name or not str(display_name).strip():
+            raise ValueError("display_name must be provided.")
+        raw = self.adapter.duplicate_native_dashboard(
+            dashboard_id=dashboard_id,
+            display_name=display_name.strip(),
+            description=description,
+            dashboard_type=dashboard_type,
+        )
+        return _map_dashboard_summary(raw)
+
+
+class AddDashboardChartWorkflow:
+    """Adds a chart widget (visualization, markdown, or button) to a Native Dashboard."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        dashboard_id: str,
+        display_name: str,
+        query: Optional[str] = None,
+        description: Optional[str] = None,
+        tile_type: str = "TILE_TYPE_VISUALIZATION",
+        visualization: Optional[Dict[str, Any]] = None,
+        data_sources: Optional[List[str]] = None,
+        time_unit: str = "DAY",
+        time_value: str = "1",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        span_x: int = 6,
+        span_y: int = 4,
+        start_x: int = 0,
+        start_y: int = 0,
+        drill_down_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not dashboard_id or not str(dashboard_id).strip():
+            raise ValueError("dashboard_id must be provided.")
+        if not display_name or not str(display_name).strip():
+            raise ValueError("display_name must be provided.")
+
+        dashboard_chart: Dict[str, Any] = {
+            "displayName": display_name,
+            "tileType": tile_type,
+            "visualization": visualization or {},
+            "chartDatasource": {
+                "dataSources": data_sources or ["UDM"],
+            },
+        }
+        if description is not None:
+            dashboard_chart["description"] = description
+        if drill_down_config is not None:
+            dashboard_chart["drillDownConfig"] = drill_down_config
+
+        dashboard_query: Optional[Dict[str, Any]] = None
+        if query:
+            if start_time and end_time:
+                input_spec: Dict[str, Any] = {
+                    "timeWindow": {
+                        "startTime": start_time,
+                        "endTime": end_time,
+                    }
+                }
+            else:
+                input_spec = {
+                    "relativeTime": {
+                        "timeUnit": time_unit,
+                        "startTimeVal": str(time_value),
+                    }
+                }
+            dashboard_query = {
+                "query": query,
+                "input": input_spec,
+            }
+
+        chart_layout = {
+            "startX": int(start_x),
+            "spanX": int(span_x),
+            "startY": int(start_y),
+            "spanY": int(span_y),
+        }
+
+        return self.adapter.add_dashboard_chart(
+            dashboard_id=dashboard_id,
+            dashboard_chart=dashboard_chart,
+            dashboard_query=dashboard_query,
+            chart_layout=chart_layout,
+        )
+
+
+class UpdateDashboardChartWorkflow:
+    """Updates an existing DashboardChart and/or its associated DashboardQuery."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        chart_id: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        visualization: Optional[Dict[str, Any]] = None,
+        data_sources: Optional[List[str]] = None,
+        drill_down_config: Optional[Dict[str, Any]] = None,
+        query_id: Optional[str] = None,
+        query: Optional[str] = None,
+        time_unit: Optional[str] = None,
+        time_value: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+
+        if any(v is not None for v in (display_name, description, visualization, data_sources, drill_down_config)):
+            chart_payload: Dict[str, Any] = {}
+            chart_mask: List[str] = []
+            if display_name is not None:
+                chart_payload["displayName"] = display_name
+                chart_mask.append("display_name")
+            if description is not None:
+                chart_payload["description"] = description
+                chart_mask.append("description")
+            if visualization is not None:
+                chart_payload["visualization"] = visualization
+                chart_mask.append("visualization")
+            if data_sources is not None:
+                chart_payload["chartDatasource"] = {"dataSources": data_sources}
+                chart_mask.append("chart_datasource.data_sources")
+            if drill_down_config is not None:
+                chart_payload["drillDownConfig"] = drill_down_config
+                chart_mask.append("drill_down_config")
+
+            result["updated_chart"] = self.adapter.patch_dashboard_chart(
+                chart_id=chart_id,
+                chart_payload=chart_payload,
+                update_mask=",".join(chart_mask),
+            )
+
+        if query is not None or any(v is not None for v in (time_unit, time_value, start_time, end_time)):
+            resolved_query_id = query_id
+            if not resolved_query_id:
+                existing_chart = self.adapter.get_dashboard_chart(chart_id)
+                resolved_query_id = existing_chart.get("chartDatasource", {}).get("dashboardQuery")
+            if not resolved_query_id:
+                raise ValueError("query_id could not be resolved from chart_id; please provide query_id explicitly.")
+
+            query_payload: Dict[str, Any] = {}
+            query_mask: List[str] = []
+            if query is not None:
+                query_payload["query"] = query
+                query_mask.append("query")
+            if start_time and end_time:
+                query_payload["input"] = {
+                    "timeWindow": {"startTime": start_time, "endTime": end_time}
+                }
+                query_mask.append("input")
+            elif time_unit is not None or time_value is not None:
+                query_payload["input"] = {
+                    "relativeTime": {
+                        "timeUnit": time_unit or "DAY",
+                        "startTimeVal": str(time_value or "1"),
+                    }
+                }
+                query_mask.append("input")
+
+            result["updated_query"] = self.adapter.patch_dashboard_query(
+                query_id=resolved_query_id,
+                query_payload=query_payload,
+                update_mask=",".join(query_mask),
+            )
+
+        return result
+
+
+class RemoveDashboardChartWorkflow:
+    """Removes a chart from a Native Dashboard."""
+
+    def __init__(self, adapter: GoogleSecOpsAdapter):
+        self.adapter = adapter
+
+    def execute(self, dashboard_id: str, chart_id: str) -> Dict[str, Any]:
+        if not dashboard_id or not str(dashboard_id).strip():
+            raise ValueError("dashboard_id must be provided.")
+        if not chart_id or not str(chart_id).strip():
+            raise ValueError("chart_id must be provided.")
+        return self.adapter.remove_dashboard_chart(dashboard_id=dashboard_id, chart_id=chart_id)
+

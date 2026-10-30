@@ -80,6 +80,47 @@ _ENTITY_TYPE_ALIASES: Dict[str, EntityType] = {
     "resource": EntityType.RESOURCE,
     "file": EntityType.FILE,
     "filename": EntityType.FILE,
+    # SOAR-specific entity type variants
+    "destinationurl": EntityType.URL,
+    "destination_url": EntityType.URL,
+    "sourceurl": EntityType.URL,
+    "source_url": EntityType.URL,
+    "targeturl": EntityType.URL,
+    "target_url": EntityType.URL,
+    "requesturl": EntityType.URL,
+    "request_url": EntityType.URL,
+    "useruniqname": EntityType.USER,
+    "user_uniq_name": EntityType.USER,
+    "sourceusername": EntityType.USER,
+    "source_user_name": EntityType.USER,
+    "destinationusername": EntityType.USER,
+    "destination_user_name": EntityType.USER,
+    "targetusername": EntityType.USER,
+    "target_user_name": EntityType.USER,
+    "account": EntityType.USER,
+    "account_name": EntityType.USER,
+    "destinationhostname": EntityType.HOSTNAME,
+    "destination_host_name": EntityType.HOSTNAME,
+    "sourcehostname": EntityType.HOSTNAME,
+    "source_host_name": EntityType.HOSTNAME,
+    "targethostname": EntityType.HOSTNAME,
+    "target_host_name": EntityType.HOSTNAME,
+    "devicename": EntityType.HOSTNAME,
+    "device_name": EntityType.HOSTNAME,
+    "computername": EntityType.HOSTNAME,
+    "computer_name": EntityType.HOSTNAME,
+    "destinationaddress": EntityType.IP,
+    "destination_address": EntityType.IP,
+    "sourceaddress": EntityType.IP,
+    "source_address": EntityType.IP,
+    "destinationip": EntityType.IP,
+    "destination_ip": EntityType.IP,
+    "sourceip": EntityType.IP,
+    "source_ip": EntityType.IP,
+    "src_ip": EntityType.IP,
+    "dst_ip": EntityType.IP,
+    "filehash": EntityType.SHA256,
+    "file_hash": EntityType.SHA256,
 }
 
 
@@ -1405,6 +1446,42 @@ class CaseWallResult:
     @property
     def count(self) -> int:
         return len(self.records)
+
+
+@dataclass
+class CaseEvidenceItem:
+    evidence_type: str
+    evidence_id: str
+    attach_time: Optional[datetime] = None
+    attacher: Optional[str] = None
+    source_evidence_id: Optional[str] = None
+    source_evidence_type: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseEvidenceBatchResult:
+    case_id: str
+    action: str
+    evidence_items: List[CaseEvidenceItem] = field(default_factory=list)
+    total_count: int = 0
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseDetectionCorrelationResult:
+    case_id: str
+    lookback_hours: int
+    entities_searched: List[Dict[str, Any]] = field(default_factory=list)
+    query_used: str = ""
+    detections_found: List[Dict[str, Any]] = field(default_factory=list)
+    events_found: List[Dict[str, Any]] = field(default_factory=list)
+    attached_evidences: List[CaseEvidenceItem] = field(default_factory=list)
+    attached_entities: List[Dict[str, Any]] = field(default_factory=list)
+    comment_id: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

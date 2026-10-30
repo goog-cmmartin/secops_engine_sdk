@@ -332,7 +332,7 @@ class TimestampIntegrityWorkflow:
 
         return (
             f"#### ⏱️ 1. Ingestion Pipeline Hygiene & Real-Time Flow\n"
-            f"Evaluated telemetry delta \(\Delta t = \\text{{ingested}} - \\text{{event}}\) across **{report.total_log_types_audited} log sources** "
+            f"Evaluated telemetry delta \\(\\Delta t = \\text{{ingested}} - \\text{{event}}\\) across **{report.total_log_types_audited} log sources** "
             f"over the past {report.days} days. **{report.healthy_count}** feeds exhibit nominal real-time flow, with **{report.new_anomalies_count} new anomalies**, "
             f"**{report.previously_known_count} previously known issues**, and **{report.resolved_count} resolved streams**.\n\n"
             f"#### 🔴 2. High-Latency Bottlenecks & Forwarder Delays (Δt ≫ 0)\n"
@@ -340,8 +340,8 @@ class TimestampIntegrityWorkflow:
             f"#### ⚠️ 3. Clock Drift & NTP Desynchronization Risks (Δt < 0)\n"
             f"{skew_txt}\n\n"
             f"#### 🛠️ 4. Recommended Infrastructure & Collector Remediation\n"
-            f"- For feeds with \(\Delta t \\gg 0\): Inspect local forwarder queue sizes, batching intervals, and egress bandwidth limits.\n"
-            f"- For feeds with \(\Delta t < 0\): Resynchronize host NTP daemons (e.g. `chronyd` or `w32time`) and verify timezone offsets in ingestion parsers."
+            f"- For feeds with \\(\\Delta t \\gg 0\\): Inspect local forwarder queue sizes, batching intervals, and egress bandwidth limits.\n"
+            f"- For feeds with \\(\\Delta t < 0\\): Resynchronize host NTP daemons (e.g. `chronyd` or `w32time`) and verify timezone offsets in ingestion parsers."
         )
 
 

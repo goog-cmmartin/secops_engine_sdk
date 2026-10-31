@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from adapters.google_secops import GoogleSecOpsAdapter
-
-from agents.core.evidence_store import EvidenceFabricStore
+    from agents.core.evidence_store import EvidenceFabricStore
 from engine.domain import (
     TimestampIntegrityReport,
     TimestampMetricRow,

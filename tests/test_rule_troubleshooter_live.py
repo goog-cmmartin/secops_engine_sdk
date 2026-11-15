@@ -60,14 +60,18 @@ class TestRuleTroubleshooterLive(unittest.TestCase):
         if not self.engine:
             self.skipTest("Live SecOps engine not available.")
 
-        rule_detail = self.engine.get_rule("ru_6cb096c8-2270-4d03-860b-3c3db443a7e4")
+        rules_batch = self.engine.list_rules(page_size=5)
+        if not rules_batch.rules:
+            self.skipTest("No YARA-L rules available in live tenant.")
+        target_rule = rules_batch.rules[0]
+        rule_detail = self.engine.get_rule(target_rule.rule_id)
         serialized = _serialize_for_llm(rule_detail)
 
         self.assertIsInstance(serialized, dict)
         self.assertIn("display_name", serialized)
         self.assertIn("text", serialized)
         self.assertIn("rule_text", serialized)
-        self.assertEqual(serialized["display_name"], "IngestionLatencyDataShape")
+        self.assertEqual(serialized["display_name"], target_rule.display_name)
 
     def test_missing_api_key_reports_explicit_error(self):
         """Ensures missing API key yields an explicit error message, never silent mocks."""

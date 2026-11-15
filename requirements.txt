@@ -1,3 +1,4 @@
+# Core runtime dependencies (install full dev/test extras via: pip install -e ".[dev]")
 requests>=2.31.0
 pyyaml>=6.0.0
 google-auth>=2.20.0

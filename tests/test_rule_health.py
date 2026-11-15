@@ -32,7 +32,7 @@ class TestRuleHealthWorkflow(unittest.TestCase):
 
     def test_capability_registration(self):
         """Verifies rule.audit_health capability is registered with correct taxonomy and DAG edges."""
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         cap = engine.registry.get("rule.audit_health")
         self.assertIsNotNone(cap)
         self.assertEqual(cap.category, "rule")

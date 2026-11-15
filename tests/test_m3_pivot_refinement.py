@@ -68,7 +68,14 @@ class TestSearchPivotRefinementLive(unittest.TestCase):
     def test_pivot_ref_002_multi_field_additive_refinement(self):
         """[PIVOT-REF-002] Refine query with multiple additive inclusive filters."""
         f1 = FieldFilter(field_path="metadata.eventType", operator=FilterOperator.EQUALS, value="USER_LOGIN")
-        f2 = FieldFilter(field_path="metadata.vendorName", operator=FilterOperator.EQUALS, value=self.live_vendor)
+        if self.live_vendor:
+            second_field, second_key, second_val = "metadata.vendorName", "vendorName", self.live_vendor
+        else:
+            second_val = self.investigation.get_field("metadata.logType") or self.investigation.get_field("metadata.productName")
+            second_field = "metadata.logType" if self.investigation.get_field("metadata.logType") else "metadata.productName"
+            second_key = second_field.split(".")[-1]
+        self.assertTrue(bool(second_val), "Expected at least one secondary metadata field on live USER_LOGIN event")
+        f2 = FieldFilter(field_path=second_field, operator=FilterOperator.EQUALS, value=second_val)
 
         session = self.engine.refine_search(
             base="",  # Standalone filters
@@ -83,7 +90,7 @@ class TestSearchPivotRefinementLive(unittest.TestCase):
         for ev_wrapper in session.events:
             ev = ev_wrapper.get("event", {})
             self.assertEqual(ev.get("metadata", {}).get("eventType"), "USER_LOGIN")
-            self.assertEqual(ev.get("metadata", {}).get("vendorName"), self.live_vendor)
+            self.assertEqual(ev.get("metadata", {}).get(second_key), second_val)
 
     def test_pivot_ref_003_exclusive_filter_refinement(self):
         """[PIVOT-REF-003] Refine query with exclusion filter (NOT EQUALS)."""

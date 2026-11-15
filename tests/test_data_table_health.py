@@ -28,7 +28,7 @@ class TestDataTableHealthWorkflow(unittest.TestCase):
 
     def test_capability_registration(self):
         """Verifies data_table.audit_health capability is properly registered."""
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         cap = engine.registry.get("data_table.audit_health")
         self.assertIsNotNone(cap)
         self.assertEqual(cap.category, "data_table")

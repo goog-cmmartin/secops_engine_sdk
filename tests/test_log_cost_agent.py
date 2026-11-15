@@ -29,7 +29,7 @@ class TestLogCostAgent(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.root_dir = Path(self._tmpdir.name)
         self.evidence_store = LocalFileEvidenceStore(root_dir=self.root_dir)
-        self.engine = SecOpsEngine(adapter=None)
+        self.engine = SecOpsEngine(adapter=object())
         self.agent = LogCostAgentAgent(
             engine=self.engine,
             evidence_store=self.evidence_store,

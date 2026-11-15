@@ -10,6 +10,7 @@ from engine.workflows.case_ai_investigation import (
     InvestigateCaseWithAIWorkflow,
     extract_indicators,
 )
+from tests.live_guard import require_live_writes
 from tests.test_helpers import get_live_adapter, get_live_engine
 
 
@@ -56,7 +57,12 @@ class TestCaseAiInvestigationWorkflow(unittest.TestCase):
 
     def test_live_ai_investigate_dry_run(self):
         """Validates autonomous AI investigation against live SecOps tenant in dry-run mode."""
-        target_case_id = "104655"
+        # :getOrCreateCaseSummary persists an AI summary on the case when none exists.
+        require_live_writes(self)
+        cases = self.engine.search_cases(page_size=5)
+        if not cases.results:
+            self.skipTest("No cases available in live tenant.")
+        target_case_id = str(cases.results[0].case_id)
         res = self.engine.ai_investigate_case(
             case_id=target_case_id,
             hunt_lookback_days=7,

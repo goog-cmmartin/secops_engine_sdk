@@ -28,7 +28,7 @@ class TestDashboardHealthWorkflow(unittest.TestCase):
 
     def test_capability_registration(self):
         """Verifies dashboard.audit_health capability is properly registered."""
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         cap = engine.registry.get("dashboard.audit_health")
         self.assertIsNotNone(cap)
         self.assertEqual(cap.category, "dashboard")

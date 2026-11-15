@@ -41,3 +41,4 @@ live_guard.install()
 # factories on local backends unless live tests are explicitly enabled.
 if not live_guard.live_tests_enabled():
     os.environ["SECOPS_DISABLE_FIRESTORE"] = "1"
+    os.environ["SECOPS_IGNORE_DOTENV"] = "1"

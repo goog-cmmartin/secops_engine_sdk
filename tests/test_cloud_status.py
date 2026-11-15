@@ -16,6 +16,7 @@ from engine.workflows.cloud_status import (
 )
 from agents.generated.cloud_status import CloudStatusAgent
 from agents.core.fleet_scheduler import DEFAULT_AGENT_SCHEDULES, FleetScheduler
+from tests.live_guard import live_tests_enabled, require_live
 
 
 class TestCloudStatusWorkflow(unittest.TestCase):
@@ -63,6 +64,7 @@ class TestCloudStatusWorkflow(unittest.TestCase):
 
     def test_live_fetch_security_incidents(self):
         """Fetches live incidents from status.cloud.google.com and validates schemas."""
+        require_live(self)
         incidents = fetch_security_incidents(service_name="Google SecOps", lookback_days=60)
         self.assertIsInstance(incidents, list)
         self.assertGreater(len(incidents), 0, "Expected at least 1 incident in live 60-day status feed")
@@ -74,6 +76,7 @@ class TestCloudStatusWorkflow(unittest.TestCase):
 
     def test_live_audit_cloud_service_status(self):
         """Generates comprehensive status report from live endpoint."""
+        require_live(self)
         report = audit_cloud_service_status(service_name="Google SecOps", lookback_days=14)
         self.assertIsInstance(report, CloudStatusReport)
         self.assertIn(report.overall_health, ["HEALTHY", "DEGRADED", "OUTAGE", "ADVISORY"])
@@ -83,6 +86,7 @@ class TestCloudStatusWorkflow(unittest.TestCase):
 
     def test_correlate_incident_with_telemetry(self):
         """Tests incident correlation and operational guidance generation."""
+        require_live(self)
         # Query recent resolved incident from today
         incidents = fetch_security_incidents(service_name="Google SecOps", lookback_days=3)
         if incidents:
@@ -94,12 +98,51 @@ class TestCloudStatusWorkflow(unittest.TestCase):
 
     def test_engine_facade_methods(self):
         """Validates that SecOpsEngine facade exposes and executes cloud status capabilities."""
-        engine = SecOpsEngine()
-        incidents = engine.query_cloud_status_incidents(service_name="Google SecOps", lookback_days=14)
-        self.assertIsInstance(incidents, list)
+        import io
+        import json
+        from unittest.mock import patch
 
-        report = engine.audit_cloud_service_status(lookback_days=14)
-        self.assertIsInstance(report, CloudStatusReport)
+        engine = SecOpsEngine(adapter=object())
+        if live_tests_enabled():
+            incidents = engine.query_cloud_status_incidents(service_name="Google SecOps", lookback_days=14)
+            self.assertIsInstance(incidents, list)
+
+            report = engine.audit_cloud_service_status(lookback_days=14)
+            self.assertIsInstance(report, CloudStatusReport)
+        else:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            stub_feed = [
+                {
+                    "id": "OFFLINE_INCIDENT_01",
+                    "number": "2026-099",
+                    "begin": now_iso,
+                    "end": None,
+                    "modified": now_iso,
+                    "external_desc": "Google SecOps regional ingestion latency",
+                    "status_impact": "SERVICE_DISRUPTION",
+                    "severity": "medium",
+                    "service_key": "FHwvkSZ6RzzDYAvDZXMM",
+                    "service_name": "Google SecOps",
+                    "affected_products": [{"title": "Google SecOps", "id": "FHwvkSZ6RzzDYAvDZXMM"}],
+                    "currently_affected_locations": [{"id": "us", "title": "US Multi-Region"}],
+                    "previously_affected_locations": [],
+                    "updates": [],
+                    "uri": "incidents/OFFLINE_INCIDENT_01",
+                }
+            ]
+            payload_bytes = json.dumps(stub_feed).encode("utf-8")
+
+            def _fake_urlopen(*_args, **_kwargs):
+                return io.BytesIO(payload_bytes)
+
+            with patch("engine.workflows.cloud_status.urllib.request.urlopen", side_effect=_fake_urlopen):
+                incidents = engine.query_cloud_status_incidents(service_name="Google SecOps", lookback_days=14)
+                self.assertEqual(len(incidents), 1)
+                self.assertEqual(incidents[0].id, "OFFLINE_INCIDENT_01")
+
+                report = engine.audit_cloud_service_status(lookback_days=14)
+                self.assertIsInstance(report, CloudStatusReport)
+                self.assertEqual(report.total_incidents, 1)
 
         # Check capability registration
         cap_query = engine.registry.get("gcp_status.incidents.query")

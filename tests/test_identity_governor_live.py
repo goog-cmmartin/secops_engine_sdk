@@ -40,7 +40,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
         try:
             self.engine = get_live_engine()
         except Exception:
-            self.engine = SecOpsEngine(custom_registry=WorkflowRegistry())
+            self.engine = SecOpsEngine(adapter=object(), custom_registry=WorkflowRegistry())
 
         self.agent = IdentityGovernorAgent(
             engine=self.engine,
@@ -108,7 +108,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
         """Verifies saving an IAM audit snapshot and detecting simulated privilege drift."""
         audit_1 = {
             "audit_id": "audit_baseline",
-            "project_id": "sdl-preview-americas",
+            "project_id": "example-secops-project",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "chronicle_bindings": [
                 {
@@ -126,14 +126,14 @@ class IdentityGovernorLiveTest(unittest.TestCase):
         }
         self.evidence_store.save_iam_audit(audit_1)
 
-        latest = self.evidence_store.get_latest_iam_audit(project_id="sdl-preview-americas")
+        latest = self.evidence_store.get_latest_iam_audit(project_id="example-secops-project")
         self.assertIsNotNone(latest)
         self.assertEqual(latest["audit_id"], "audit_baseline")
 
         # Create mutated audit with 1 added member and 1 new custom role
         audit_2 = {
             "audit_id": "audit_mutated",
-            "project_id": "sdl-preview-americas",
+            "project_id": "example-secops-project",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "chronicle_bindings": [
                 {
@@ -145,7 +145,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
             ],
             "custom_roles": [
                 {
-                    "role_name": "projects/sdl-preview-americas/roles/ShadowAdmin",
+                    "role_name": "projects/example-secops-project/roles/ShadowAdmin",
                     "title": "Shadow Admin",
                     "chronicle_permissions": ["chronicle.rules.delete"],
                 }
@@ -161,7 +161,7 @@ class IdentityGovernorLiveTest(unittest.TestCase):
         self.assertEqual(len(drift["members_added"]), 1)
         self.assertEqual(drift["members_added"][0]["member"], "user:mallory@example.com")
         self.assertEqual(len(drift["custom_roles_added"]), 1)
-        self.assertEqual(drift["custom_roles_added"][0], "projects/sdl-preview-americas/roles/ShadowAdmin")
+        self.assertEqual(drift["custom_roles_added"][0], "projects/example-secops-project/roles/ShadowAdmin")
 
     def test_run_identity_drift_audit_widget(self):
         """Verifies that run_identity_drift_audit attaches an interactive UI card."""

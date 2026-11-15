@@ -110,7 +110,7 @@ All events returned by `SecOpsEngine` (`search_udm`, `search_from_entity`, `inve
 
 ### Principle 5: Identifier Normalization
 
-Case identifiers in Google SecOps are represented in various forms: integers (`104984`), strings (`"104984"`), or resource names (`"projects/sdl-preview-americas/locations/us/instances/.../cases/104984"`).
+Case identifiers in Google SecOps are represented in various forms: integers (`104984`), strings (`"104984"`), or resource names (`"projects/example-secops-project/locations/us/instances/.../cases/104984"`).
 
 - All case-related methods (`investigate_case`, `triage_case`, `add_case_comment`, `list_case_comments`, `update_case`, `assign_case`, `set_case_stage`, `get_case_wall`, etc.) accept `Union[str, int]`.
 - Identifiers are normalized via `_normalize_case_id`:

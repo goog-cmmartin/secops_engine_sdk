@@ -1,5 +1,6 @@
 import unittest
 from engine.facade import SecOpsEngine
+from tests.live_guard import require_live_writes
 from tests.test_helpers import get_live_engine
 from runbooks.incident_response.autonomous_case_ai_triage import (
     run_autonomous_case_ai_triage,
@@ -34,7 +35,11 @@ class TestAutonomousRunbooks(unittest.TestCase):
 
     def test_autonomous_case_ai_triage_dry_run(self):
         """Validates that autonomous case AI triage executes end-to-end cleanly in dry-run mode."""
-        target_case_id = "104655"
+        require_live_writes(self)
+        cases = self.engine.search_cases(page_size=5)
+        if not cases.results:
+            self.skipTest("No cases available in live tenant.")
+        target_case_id = str(cases.results[0].case_id)
         res: AutonomousTriageResult = run_autonomous_case_ai_triage(
             case_id=target_case_id,
             hunt_lookback_days=7,

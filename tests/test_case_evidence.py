@@ -13,6 +13,7 @@ from engine.workflows.case_evidence import (
     DetachCaseEvidenceWorkflow,
     _normalize_evidence_type,
 )
+from tests.live_guard import require_live_writes
 from tests.test_helpers import get_live_adapter, get_live_engine
 
 
@@ -61,9 +62,12 @@ class TestCaseEvidenceLive(unittest.TestCase):
         cls.engine = get_live_engine(adapter=cls.adapter)
 
     def test_live_attach_and_detach_evidence(self):
-        """Validates roundtrip attach and detach of evidence on live SecOps case 108339."""
-        case_id = "108339"
-        # Test event ID verified against live tenant
+        """Validates roundtrip attach and detach of evidence on a live SecOps case."""
+        require_live_writes(self)
+        cases = self.engine.search_cases(page_size=5)
+        if not cases.results:
+            self.skipTest("No cases available in live tenant.")
+        case_id = str(cases.results[0].case_id)
         test_event_id = "AAAAADnuNlSqbJAaUjOTUTv2Tm4AAAAADgAAAAAAAAA="
 
         # 1. Attach
@@ -87,7 +91,10 @@ class TestCaseEvidenceLive(unittest.TestCase):
 
     def test_live_correlate_silent_detections(self):
         """Validates correlate_silent_detections workflow execution against live case."""
-        case_id = "108339"
+        cases = self.engine.search_cases(page_size=5)
+        if not cases.results:
+            self.skipTest("No cases available in live tenant.")
+        case_id = str(cases.results[0].case_id)
         res = self.engine.correlate_silent_detections(
             case_id=case_id,
             lookback_hours=24,

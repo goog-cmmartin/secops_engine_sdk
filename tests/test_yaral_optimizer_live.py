@@ -34,20 +34,20 @@ class TestYaralOptimizerLive(unittest.TestCase):
             self.engine = None
 
     def test_tool_binding_and_signatures(self):
-        """Verifies that all 5 capabilities plus submit_rule_proposal are bound with valid signatures."""
+        """Verifies that read-only capabilities plus submit_rule_proposal are bound without direct write tools."""
         if not self.engine:
             self.skipTest("Live SecOps engine not available.")
 
         agent = YaralOptimizerAgent(engine=self.engine)
         tools = agent.get_tools()
 
-        self.assertGreaterEqual(len(tools), 6)
+        self.assertGreaterEqual(len(tools), 4)
         tool_names = [getattr(t, "__name__", "") for t in tools]
 
         self.assertIn("verify_rule_text", tool_names)
         self.assertIn("get_rule", tool_names)
-        self.assertIn("patch_rule", tool_names)
-        self.assertIn("update_rule_deployment", tool_names)
+        self.assertNotIn("patch_rule", tool_names)
+        self.assertNotIn("update_rule_deployment", tool_names)
         self.assertIn("list_rule_revisions", tool_names)
         self.assertIn("submit_rule_proposal", tool_names)
 
@@ -98,6 +98,11 @@ class TestYaralOptimizerLive(unittest.TestCase):
         if not self.engine:
             self.skipTest("Live SecOps engine not available.")
 
+        rules_batch = self.engine.list_rules(page_size=5)
+        if not rules_batch.rules:
+            self.skipTest("No YARA-L rules available in live tenant.")
+        target_rule_id = rules_batch.rules[0].rule_id
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             temp_root = Path(tmp_dir)
             prop_mgr = ProposalManager(root_dir=temp_root)
@@ -110,8 +115,8 @@ class TestYaralOptimizerLive(unittest.TestCase):
             )
 
             prompt = (
-                "Please inspect rule ru_6cb096c8-2270-4d03-860b-3c3db443a7e4. "
-                "Check its match condition and structure, optimize it to prevent bottlenecks, "
+                f"Please inspect rule {target_rule_id}. "
+                "Add a harmless narrowing comment or optimization to its events section so the rule text differs slightly from the live rule, "
                 "verify the new rule with verify_rule_text, and call submit_rule_proposal to create a change proposal."
             )
 
@@ -120,8 +125,8 @@ class TestYaralOptimizerLive(unittest.TestCase):
             self.assertIsNotNone(msg)
             self.assertTrue(len(msg.content) > 50)
 
-            # Verify that Gemini 3.8 Flash called the submit_rule_proposal tool
-            self.assertIsNotNone(msg.proposal_id)
+            # Verify that Gemini called the submit_rule_proposal tool
+            self.assertIsNotNone(msg.proposal_id, f"Expected proposal_id from live optimizer, got message: {msg.content[:300]}")
             self.assertIsNotNone(msg.widget)
             self.assertEqual(msg.widget.get("type"), "hitl_proposal_card")
             self.assertEqual(msg.widget.get("proposal_id"), msg.proposal_id)
@@ -131,7 +136,7 @@ class TestYaralOptimizerLive(unittest.TestCase):
             self.assertIsNotNone(proposal)
             self.assertEqual(proposal.status, "OPEN")
             self.assertEqual(proposal.author, "@yaral-optimizer")
-            self.assertEqual(proposal.target_resource_id, "ru_6cb096c8-2270-4d03-860b-3c3db443a7e4")
+            self.assertEqual(proposal.target_resource_id, target_rule_id)
             self.assertTrue(proposal.preflight.syntax_verified)
 
             # Verify execution provenance recorded

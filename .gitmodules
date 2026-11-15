@@ -1,3 +1,7 @@
 [submodule "protos/secops_protos"]
 	path = protos/secops_protos
 	url = ../secops_protos
+[submodule "clients/chrome_extension"]
+	path = clients/chrome_extension
+	url = ../secops_chrome_extension
+

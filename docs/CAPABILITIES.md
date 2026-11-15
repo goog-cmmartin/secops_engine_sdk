@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-10-27 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-11-15 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**226 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**240 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-10-27 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 44 |
-| primitive | 31 |
-| query | 151 |
-| **total** | **226** |
+| workflow | 46 |
+| primitive | 37 |
+| query | 157 |
+| **total** | **240** |
 
 | cardinality | count |
 | :--- | ----: |
-| single | 62 |
-| bounded | 19 |
+| single | 63 |
+| bounded | 24 |
 | unbounded | 70 |
-| (n/a — workflows/primitive) | 75 |
+| (n/a — workflows/primitive) | 83 |
 
 ## Workflows
 
@@ -41,6 +41,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case.get_summary` | case | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | case | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | case | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
+| `case.related_by_entity` | case | Correlates a SOAR case's involved entities across active and historical SOAR cases. |
 | `case.timeline` | case | Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates. |
 | `case.triage` | case | End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions. |
 | `case_alert.get_recommendation` | case | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
@@ -65,6 +66,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.diagnose_unparsed` | parser | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
 | `playbook.audit_health` | playbook | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `playbook.decay_audit` | playbook | Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence. |
+| `playbook.update_widget` | playbook | Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook. |
 | `rule.audit` | rule | Performs an end-to-end repository audit across custom and curated rules, synchronizing vector embeddings, calculating DPS decay, discovering cross-rule conflicts, and updating Firestore Evidence Fabric. |
 | `rule.audit_health` | rule | Audits and correlates Chronicle YARA-L rules, execution errors, latency observability, and detection decay. |
 | `rule.conflict.audit` | rule | Performs semantic dual-rule YARA-L logic comparison, identifies REDUNDANCY, OVERLAP, CONTRADICTION, or SCOPE GAPS, and computes Conflict Overlap Score (COS: 0-100). |
@@ -87,7 +89,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `alert.investigate` | workflow | — | `investigate_alert` | Retrieves security alert details with root-cause entities and raw log attachments. |
 
-### case  (27: workflow=9, primitive=12, query=6)
+### case  (28: workflow=10, primitive=11, query=7)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -97,6 +99,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case.get_summary` | workflow | — | `get_case_summary` | Requests Gemini AI case summary and polls until generation is complete or timeout. |
 | `case.investigate` | workflow | — | `investigate_case` | Aggregates case metadata, security alerts, involved entities, and analyst comments. |
 | `case.orchestrate_triage` | workflow | — | `orchestrate_case_triage` | Batched retrieval, parallel investigation, and automated initial triage assessment for SOAR cases. |
+| `case.related_by_entity` | workflow | — | `find_related_cases_by_entity` | Correlates a SOAR case's involved entities across active and historical SOAR cases. |
 | `case.timeline` | workflow | — | `get_case_timeline` | Synthesizes a chronologically ordered event timeline across Case Creation, Alert Detections, Playbook Milestones, Analyst Comments, and Case Updates. |
 | `case.triage` | workflow | — | `triage_case` | End-to-end single case triage: deep investigation, Gemini AI summary, title and entity precedent correlation, novelty assessment, and stage transitions. |
 | `case_alert.get_recommendation` | workflow | — | `get_case_alert_recommendation` | End-to-end workflow to trigger Gemini AI recommendation generation and poll until completion or failure. |
@@ -109,7 +112,6 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case.set_stage` | primitive | — | `set_case_stage` | Updates the lifecycle stage of a SOAR case. |
 | `case.update` | primitive | — | `update_case` | Mutates case attributes such as assignee, stage, incident flag, or priority. |
 | `case_alert.create_recommendation` | primitive | — | `create_case_alert_recommendation` | Initiates asynchronous generation of a Gemini AI recommendation for a case alert. |
-| `case_alert.fetch_recommendation` | primitive | — | `fetch_case_alert_recommendation` | Fetches a previously generated Gemini AI recommendation for a case alert by recommendation ID. |
 | `case_alert.set_priority` | primitive | — | `set_case_alert_priority` | Updates the priority level of a specific case alert. |
 | `case_alert.update` | primitive | — | `update_case_alert` | Mutates case alert attributes such as priority or status. |
 | `case.get_wall` | query | `unbounded` | `get_case_wall` | Retrieves the complete SOAR case activity stream including status changes, tag updates, and playbook execution steps. |
@@ -118,6 +120,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `case.remediation_plan.get` | query | `single` | `get_remediation_plan` | Fetches a specific AI-generated agentic response / remediation plan by plan ID or resource name. |
 | `case.remediation_plan.list` | query | `unbounded` | `list_remediation_plans` | Lists AI-generated agentic response / remediation plans for cases and alerts. |
 | `case.search` | query | `unbounded` | `search_cases` | Searches, lists, and filters SOAR cases across time ranges, status, priority, and stages. |
+| `case_alert.fetch_recommendation` | query | `single` | `fetch_case_alert_recommendation` | Fetches a previously generated Gemini AI recommendation for a case alert by recommendation ID. |
 
 ### case_config  (14: query=14)
 
@@ -146,7 +149,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `content_pack.get` | query | `single` | `get_content_pack` | Retrieves complete Content Pack details and bundled playbooks, integrations, dashboards, rulesets, and queries. |
 | `content_pack.search` | query | `unbounded` | `search_content_packs` | Searches, lists, and filters Content Hub Marketplace Content Packs across categories and pack types. |
 
-### curated_detections  (19: workflow=3, primitive=7, query=9)
+### curated_detections  (19: workflow=3, primitive=3, query=13)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -155,28 +158,35 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `curated_detections.tuning.synthesize` | workflow | — | `synthesize_detection_tuning` | Synthesizes safe multi-factor exclusions enforcing HITL safety guardrails, compiles candidate rule patches or UDM refinements, and calculates noise reduction projections. |
 | `curated_detections.refinements.create` | primitive | — | `create_findings_refinement` | Creates a new UDM findings refinement exclusion for curated rules or tenant-wide detections. |
 | `curated_detections.refinements.delete` | primitive | — | `delete_findings_refinement` | Removes an active UDM findings refinement exclusion. |
-| `curated_detections.refinements.test` | primitive | — | `test_findings_refinement` | Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio. |
 | `curated_detections.set_deployment` | primitive | — | `set_curated_ruleset_deployment` | Updates enabled and alerting states for a Curated Rule Set precision deployment. |
-| `curated_detections.tuning.case_history` | primitive | — | `cross_reference_rule_cases` | Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes. |
-| `curated_detections.tuning.entity_cardinality` | primitive | — | `analyze_entity_cardinality` | Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule. |
-| `curated_detections.tuning.top_noisy_rules` | primitive | — | `find_top_noisy_rules` | Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification. |
 | `curated_detections.deployments.list` | query | `unbounded` | `list_curated_rule_set_deployments` | Lists every curated rule set BROAD/PRECISE deployment (enabled, alerting) in one bulk call, optionally joined with rule set display names. |
 | `curated_detections.get_rule` | query | `single` | `get_curated_rule` | Retrieves an individual Curated Rule, its MITRE techniques, false positives, and raw YARA-L logic. |
 | `curated_detections.get_ruleset` | query | `single` | `get_curated_ruleset` | Deep-inspects a Curated Rule Set, its broad/precise deployments, member rules, and detection telemetry. |
 | `curated_detections.metrics` | query | `single` | `get_curated_detection_metrics` | Aggregates detection firing counts and retrieves tenant-wide rule quotas and telemetry. |
 | `curated_detections.refinements.list` | query | `unbounded` | `list_findings_refinements` | Lists active UDM findings refinements and detection exclusions across the tenant. |
+| `curated_detections.refinements.test` | query | `bounded` | `test_findings_refinement` | Simulates and dry-runs an exclusion query against historical detections to compute noise suppression ratio. |
 | `curated_detections.rules.list` | query | `unbounded` | `list_curated_rules` | Lists individual Google-curated rules with page-token pagination (slow endpoint; cache results). |
 | `curated_detections.rulesets.list` | query | `unbounded` | `list_curated_rulesets` | Lists Curated Rule Sets with page-token pagination (all_pages / max_results). |
 | `curated_detections.search_rulesets` | query | `unbounded` | `search_curated_rulesets` | Discovers and searches Google SecOps Curated Rule Sets with MITRE ATT&CK mappings and log sources. |
+| `curated_detections.tuning.case_history` | query | `bounded` | `cross_reference_rule_cases` | Cross-references historical SOAR cases associated with a detection rule to extract analyst resolutions and root causes. |
+| `curated_detections.tuning.entity_cardinality` | query | `bounded` | `analyze_entity_cardinality` | Profiles multi-dimensional entity subfield distributions (IPs, hostnames, users, processes, DNS) for a detection rule. |
 | `curated_detections.tuning.samples` | query | `bounded` | `sample_detection_events` | Pulls correlated multi-attribute detection tuples (user + command + host + IP) from detection collection elements. |
+| `curated_detections.tuning.top_noisy_rules` | query | `bounded` | `find_top_noisy_rules` | Aggregates and ranks top firing detection rules with alert state, volume, and Google vs Customer rule classification. |
 
-### dashboard  (6: workflow=3, query=3)
+### dashboard  (13: workflow=3, primitive=7, query=3)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `dashboard.audit_health` | workflow | — | `audit_dashboard_health` | Audits native dashboards for recent creations, modifications, broken widget queries, empty placeholders, and staleness. |
 | `dashboard.get` | workflow | — | `get_dashboard` | Retrieves complete composite dashboard graph with layout, batch-resolved charts, and queries. |
 | `dashboard.health_check` | workflow | — | `run_dashboard_health_check` | Executes comprehensive health check for a named dashboard by resolving configuration, executing all widget queries, and generating operational ingestion health summary. |
+| `dashboard.chart.add` | primitive | — | `add_dashboard_chart` | Adds a chart widget (visualization, markdown, or button) and optional query to a Native Dashboard. |
+| `dashboard.chart.remove` | primitive | — | `remove_dashboard_chart` | Removes a chart from a Native Dashboard. |
+| `dashboard.chart.update` | primitive | — | `update_dashboard_chart` | Updates an existing DashboardChart and/or its associated DashboardQuery. |
+| `dashboard.create` | primitive | — | `create_dashboard` | Creates a new Native Dashboard in Google SecOps. |
+| `dashboard.delete` | primitive | — | `delete_dashboard` | Deletes a Native Dashboard by ID. |
+| `dashboard.duplicate` | primitive | — | `duplicate_dashboard` | Duplicates an existing Native Dashboard under a new display name. |
+| `dashboard.update` | primitive | — | `update_dashboard` | Updates an existing Native Dashboard's display name, description, filters, or chart layouts. |
 | `dashboard.execute_query` | query | `bounded` | `execute_dashboard_query` | Executes a dashboard widget query against live telemetry and transforms columnar results into tabular records. |
 | `dashboard.search` | query | `unbounded` | `search_dashboards` | Searches, lists, and filters native dashboards configured in Google SecOps. |
 | `dashboard.validate_query` | query | `bounded` | `validate_dashboard_query` | Validates statistical / dashboard widget query syntax against the live Google SecOps query compiler. |
@@ -306,10 +316,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | :--- | :--- | :--- | :--- | :--- |
 | `ioc.search_enterprise` | query | `bounded` | `search_enterprise_iocs` | Searches enterprise IoC matches and Mandiant breach intelligence for indicators. |
 
-### job  (4: query=4)
+### job  (7: primitive=3, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `job.instance.create` | primitive | — | `create_job_instance` | Creates a new scheduled runtime SOAR job instance under a job definition. |
+| `job.instance.update` | primitive | — | `update_job_instance` | Updates a configured runtime SOAR job instance (script, schedule, parameters, or enabled status). |
+| `job.update` | primitive | — | `update_job` | Updates a SOAR scheduled job definition (script, description, enabled, parameters) and optionally syncs script changes to its active job instances. |
 | `job.get` | query | `single` | `get_job` | Retrieves complete job details, deployed runtime instances, and recent execution logs. |
 | `job.instances` | query | `unbounded` | `list_job_instances` | Lists runtime job instances deployed across environments or specific jobs. |
 | `job.logs` | query | `unbounded` | `get_job_instance_logs` | Retrieves execution run records and output logs for a job instance. |
@@ -342,26 +355,29 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `soc.briefing.posture_snapshot` | query | `single` | `generate_posture_snapshot` | Compiles complete tenant operational posture, subsystem health indicators, assertion freshness distributions, and surfaced Knowledge Gaps. |
 | `soc.briefing.shift_handover` | query | `single` | `generate_shift_briefing` | Deterministically aggregates work queue deltas, resolved issues, active agent leases, applied changes, and verified healthy baselines into a shift briefing. |
 
-### parser  (9: workflow=2, primitive=1, query=6)
+### parser  (9: workflow=2, query=7)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `parser.audit_health` | workflow | — | `audit_parser_health` | Audits and correlates SIEM parser states, CBN version drift, extension conflicts, and Health Hub telemetry. |
 | `parser.diagnose_unparsed` | workflow | — | `diagnose_unparsed_logs` | Finds unparsed raw logs for a log type and runs them against the active parser to diagnose errors. |
-| `parser.run` | primitive | — | `run_parser` | Executes a Logstash CBN parser configuration against a raw log string. |
 | `parser.extensions.get` | query | `single` | `get_parser_extension` | Retrieves full parser extension configuration, decoded snippet, and test log. |
 | `parser.extensions.search` | query | `unbounded` | `search_parser_extensions` | Discovers parser extensions and dynamic parsing configurations across log types. |
 | `parser.get` | query | `single` | `get_parser` | Retrieves complete parser metadata and decoded Logstash CBN filter code. |
 | `parser.log_type_setting.get` | query | `single` | `get_log_type_setting` | Retrieves autonomous parsing settings and extraction type for a specific log type. |
 | `parser.log_types.list` | query | `unbounded` | `list_log_types` | Discovers and filters supported ingestion log types cataloged in Google SecOps. |
+| `parser.run` | query | `bounded` | `run_parser` | Executes a Logstash CBN parser configuration against a raw log string. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (6: workflow=2, query=4)
+### playbook  (9: workflow=3, primitive=2, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `playbook.audit_health` | workflow | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `playbook.decay_audit` | workflow | — | `audit_playbook_decay` | Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence. |
+| `playbook.update_widget` | workflow | — | `update_playbook_widget` | Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook. |
+| `playbook.delete` | primitive | — | `delete_playbooks` | Deletes one or more SOAR playbooks by UUID identifier, numeric ID, or name. |
+| `playbook.save` | primitive | — | `save_playbook` | Creates or updates a SOAR playbook or block workflow definition with automatic category ID/name synchronization. |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |
 | `playbook.get` | query | `single` | `get_playbook` | Retrieves complete playbook definition, trigger conditions, and step execution DAG. |
 | `playbook.instances` | query | `unbounded` | `get_alert_playbook_instances` | Retrieves authoritative per-alert playbook run instances and the executed step DAG. |

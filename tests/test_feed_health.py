@@ -146,7 +146,7 @@ class TestFeedHealthWorkflow(unittest.TestCase):
         self.assertEqual(finding.volume_funnel.get("total_logs"), 1000)
 
     def test_capability_registered_on_engine(self):
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         cap = engine.registry.get("feed.audit_health")
         self.assertIsNotNone(cap)
         self.assertEqual(cap.category, "feed")

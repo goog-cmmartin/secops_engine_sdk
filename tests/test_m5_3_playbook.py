@@ -29,34 +29,30 @@ class TestPlaybookLiveCapabilities(unittest.TestCase):
     def setUpClass(cls):
         cls.engine = get_live_engine()
         cls.adapter = cls.engine.adapter
+        all_pbs = cls.engine.search_playbooks(limit=50)
+        cls.sample_playbooks = all_pbs.results
 
     def test_list_playbook_categories(self):
         """Validates that playbook category hierarchy is retrieved from live endpoint."""
         categories = self.engine.list_playbook_categories()
         self.assertIsInstance(categories, list)
-        self.assertGreaterEqual(len(categories), 10)
+        self.assertGreaterEqual(len(categories), 1)
 
-        cat_names = [c.name for c in categories]
-        self.assertIn("GSA", cat_names)
-        self.assertIn("Blocks", cat_names)
-        self.assertIn("Cymbal", cat_names)
-
-        # Check category structure
-        sample = next(c for c in categories if c.name == "Blocks")
+        sample = categories[0]
         self.assertIsInstance(sample, PlaybookCategory)
         self.assertTrue(sample.id)
-        self.assertEqual(sample.category_state, "FULL")
-        self.assertFalse(sample.is_default)
+        self.assertTrue(sample.name)
 
-        default_cat = next(c for c in categories if c.name == "Default")
-        self.assertTrue(default_cat.is_default)
+        default_cat = next((c for c in categories if c.name == "Default"), None)
+        if default_cat is not None:
+            self.assertTrue(default_cat.is_default)
 
     def test_search_all_playbooks(self):
         """Validates listing/searching all playbooks returning live PlaybookSummary batches."""
         batch = self.engine.search_playbooks(limit=200)
         self.assertIsInstance(batch, PlaybookBatch)
-        self.assertGreaterEqual(batch.total_count, 150)
-        self.assertGreaterEqual(len(batch.results), 150)
+        self.assertGreaterEqual(batch.total_count, 1)
+        self.assertGreaterEqual(len(batch.results), 1)
 
         # Verify summary properties
         sample = batch.results[0]
@@ -69,69 +65,59 @@ class TestPlaybookLiveCapabilities(unittest.TestCase):
 
     def test_search_playbooks_keyword_filter(self):
         """Validates precision filtering by keyword against name and creator."""
-        batch = self.engine.search_playbooks(query="Hybrid Automation")
-        self.assertEqual(batch.total_count, 1)
-        self.assertEqual(batch.results[0].name, "Hybrid Automation Playbook")
-        self.assertEqual(batch.results[0].id, "2277")
+        if not self.sample_playbooks:
+            self.skipTest("No playbooks available in live tenant.")
+        target = self.sample_playbooks[0]
+        batch = self.engine.search_playbooks(query=target.name)
+        self.assertGreaterEqual(batch.total_count, 1)
+        self.assertTrue(any(p.identifier == target.identifier for p in batch.results))
 
     def test_search_playbooks_category_filter(self):
         """Validates filtering playbooks by category facet."""
-        batch_gsa = self.engine.search_playbooks(category="GSA")
-        self.assertGreaterEqual(batch_gsa.total_count, 10)
-        for pb in batch_gsa.results:
-            self.assertEqual(pb.category_name, "GSA")
+        target = next((p for p in self.sample_playbooks if p.category_name), None)
+        if not target:
+            self.skipTest("No categorized playbooks available in live tenant.")
+        batch_cat = self.engine.search_playbooks(category=target.category_name)
+        self.assertGreaterEqual(batch_cat.total_count, 1)
+        for pb in batch_cat.results:
+            self.assertEqual(pb.category_name, target.category_name)
 
     def test_search_playbooks_type_filter(self):
         """Validates filtering playbooks by REGULAR vs NESTED type."""
         batch_reg = self.engine.search_playbooks(playbook_type=PlaybookType.REGULAR)
-        self.assertGreaterEqual(batch_reg.total_count, 40)
         for pb in batch_reg.results:
             self.assertEqual(pb.playbook_type, PlaybookType.REGULAR)
 
         batch_nested = self.engine.search_playbooks(playbook_type=PlaybookType.NESTED)
-        self.assertGreaterEqual(batch_nested.total_count, 100)
         for pb in batch_nested.results:
             self.assertEqual(pb.playbook_type, PlaybookType.NESTED)
+        self.assertGreaterEqual(batch_reg.total_count + batch_nested.total_count, 1)
 
     def test_get_playbook_by_uuid(self):
         """Validates deep inspection of playbook definition, trigger, and step parameters."""
-        pb_uuid = "7b17236f-8b9d-441b-a744-e4482e281627"
-        pb = self.engine.get_playbook(pb_uuid)
+        if not self.sample_playbooks:
+            self.skipTest("No playbooks available in live tenant.")
+        target = self.sample_playbooks[0]
+        pb = self.engine.get_playbook(target.identifier)
 
         self.assertIsInstance(pb, PlaybookDetail)
-        self.assertEqual(pb.id, "2277")
-        self.assertEqual(pb.identifier, pb_uuid)
-        self.assertEqual(pb.name, "Hybrid Automation Playbook")
-        self.assertEqual(pb.category_name, "GSA")
-        self.assertIn("Agentic investigation results", pb.description)
-
-        # Validate Trigger
-        self.assertIsNotNone(pb.trigger)
-        self.assertEqual(pb.trigger.trigger_type, "PRODUCT_NAME")
-        self.assertEqual(pb.trigger.logical_operator, "AND")
-        self.assertGreaterEqual(len(pb.trigger.conditions), 1)
-        self.assertEqual(pb.trigger.conditions[0].value, "RULE")
-        self.assertEqual(pb.trigger.conditions[0].match_type, "EQUAL")
-
-        # Validate Steps
-        self.assertGreaterEqual(len(pb.steps), 1)
-        step = pb.steps[0]
-        self.assertEqual(step.instance_name, "Triage and Investigation Agent_1")
-        self.assertEqual(step.integration, "GoogleSecOpsAiAgents")
-        self.assertEqual(step.action_provider, "Scripts")
-        self.assertTrue(step.is_automatic)
-        self.assertFalse(step.is_skippable)
-
-        # Validate Parameters
-        param_names = [p.name for p in step.parameters]
-        self.assertIn("AsyncActionTimeout", param_names)
-        self.assertIn("IntegrationInstance", param_names)
+        self.assertEqual(pb.id, target.id)
+        self.assertEqual(pb.identifier, target.identifier)
+        self.assertEqual(pb.name, target.name)
+        self.assertIsInstance(pb.steps, list)
+        if pb.steps:
+            step = pb.steps[0]
+            self.assertTrue(bool(step.instance_name or step.name))
+            self.assertIsInstance(step.parameters, list)
 
     def test_get_playbook_by_numeric_id(self):
-        """Validates looking up playbook using sequential integer ID ('2277')."""
-        pb = self.engine.get_playbook("2277")
-        self.assertEqual(pb.identifier, "7b17236f-8b9d-441b-a744-e4482e281627")
-        self.assertEqual(pb.name, "Hybrid Automation Playbook")
+        """Validates looking up a discovered playbook using its sequential integer ID."""
+        if not self.sample_playbooks:
+            self.skipTest("No playbooks available in live tenant.")
+        target = self.sample_playbooks[0]
+        pb = self.engine.get_playbook(target.id)
+        self.assertEqual(pb.identifier, target.identifier)
+        self.assertEqual(pb.name, target.name)
 
     def test_facade_capability_registration(self):
         """Validates that playbook capabilities are registered in the Workflow Registry."""

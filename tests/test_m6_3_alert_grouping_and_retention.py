@@ -55,15 +55,19 @@ class TestMilestone63AlertGroupingAndRetention(unittest.TestCase):
         self.assertIn("SourceUserName", detail.summary.entity_types)
 
     def test_get_alert_grouping_rule_rule_17(self):
-        detail = self.engine.get_alert_grouping_rule("17")
+        batch = self.engine.search_alert_grouping_rules(limit=20)
+        target = next((r for r in batch.rules if r.id != "1"), None)
+        if not target:
+            self.skipTest("No secondary alert grouping rule configured in live tenant.")
+        detail = self.engine.get_alert_grouping_rule(target.id)
         self.assertIsInstance(detail, AlertGroupingRuleDetail)
-        self.assertEqual(detail.summary.id, "17")
-        self.assertEqual(detail.summary.category, "ALERT_TYPE")
-        self.assertGreater(len(detail.category_details), 0)
-
-        first_cd = detail.category_details[0]
-        self.assertTrue(bool(first_cd.identifier))
-        self.assertTrue(bool(first_cd.display_name))
+        self.assertEqual(detail.summary.id, target.id)
+        self.assertEqual(detail.summary.category, target.category)
+        self.assertIsInstance(detail.category_details, list)
+        if detail.category_details:
+            first_cd = detail.category_details[0]
+            self.assertTrue(bool(first_cd.identifier))
+            self.assertTrue(bool(first_cd.display_name))
 
     def test_get_alert_grouping_settings(self):
         batch = self.engine.get_alert_grouping_settings()

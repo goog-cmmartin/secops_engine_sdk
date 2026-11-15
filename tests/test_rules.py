@@ -90,7 +90,10 @@ class TestDetectionRulesWorkflows(unittest.TestCase):
         dep = self.engine.get_rule_deployment(target_rule_id)
         self.assertIsInstance(dep, RuleDeployment)
         self.assertTrue(bool(dep.name))
-        self.assertIn(dep.run_frequency, ["LIVE", "HOURLY", "DAILY", "RUN_FREQUENCY_UNSPECIFIED"])
+        self.assertIn(
+            dep.run_frequency,
+            ["LIVE", "HOURLY", "HOURLY_CUSTOMIZABLE", "DAILY", "RUN_FREQUENCY_UNSPECIFIED"],
+        )
 
     def test_rule_revisions(self):
         """Validates listing revisions and version history for a rule."""

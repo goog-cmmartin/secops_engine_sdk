@@ -24,7 +24,7 @@ class RawLogSearchContractTest(unittest.TestCase):
     """Verifies registry, facade, and capability declarations."""
 
     def setUp(self):
-        self.engine = SecOpsEngine()
+        self.engine = SecOpsEngine(adapter=object())
 
     def test_log_capabilities_registered(self):
         c_stats = self.engine.registry.get("log.product_sources.stats")

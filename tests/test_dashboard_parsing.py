@@ -7,7 +7,7 @@ from engine.domain import DashboardQueryResult
 class TestDashboardParsing(unittest.TestCase):
     def test_dashboard_result_parsing(self):
         """Test that _parse_dashboard_result correctly transforms column-oriented to row-oriented data."""
-        adapter = GoogleSecOpsAdapter()
+        adapter = GoogleSecOpsAdapter.__new__(GoogleSecOpsAdapter)
 
         # Mock raw API response
         raw_response = {
@@ -72,7 +72,7 @@ class TestDashboardParsing(unittest.TestCase):
 
     def test_dashboard_result_empty(self):
         """Test parsing empty dashboard results."""
-        adapter = GoogleSecOpsAdapter()
+        adapter = GoogleSecOpsAdapter.__new__(GoogleSecOpsAdapter)
 
         raw_response = {
             'results': [],

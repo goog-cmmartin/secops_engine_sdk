@@ -123,7 +123,9 @@ class TestEventInvestigationLive(unittest.TestCase):
         # Field flattening
         flat_dict = investigation.flatten_fields()
         self.assertIn("metadata.eventType", flat_dict)
-        self.assertIn("metadata.vendorName", flat_dict)
+        self.assertIn("metadata.logType", flat_dict)
+        if expected_vendor is not None:
+            self.assertIn("metadata.vendorName", flat_dict)
         self.assertEqual(flat_dict["metadata.eventType"], "USER_LOGIN")
 
     def test_ev_inv_006_error_visibility_on_invalid_id(self):

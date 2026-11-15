@@ -15,6 +15,7 @@ workflow code cannot swallow it and report a misleading pass.
 """
 
 import os
+import socket
 import urllib.parse
 import urllib.request
 import unittest
@@ -42,6 +43,7 @@ READ_ONLY_POST_SUFFIXES = (
     # Natural language -> UDM query translation; returns text, persists nothing.
     ":translateUdmQuery",
     "logging.googleapis.com/v2/entries:list",
+    ":getIamPolicy",
     # Cancelling a long-running operation the test itself started (UDM search timeout path).
     ":cancel",
 )
@@ -104,6 +106,39 @@ def check_request(method: str, url: str) -> None:
         )
 
 
+_LOOPBACK_HOSTS = frozenset({
+    "",
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "0.0.0.0",
+    "::ffff:127.0.0.1",
+})
+
+
+def _is_loopback_host(host: str) -> bool:
+    clean = (host or "").strip().strip("[]").lower()
+    if clean in _LOOPBACK_HOSTS or clean.startswith("127."):
+        return True
+    return False
+
+
+def check_socket_address(address: object) -> None:
+    """Blocks non-loopback TCP/UDP socket connections unless SECOPS_LIVE_TESTS=1."""
+    if live_tests_enabled():
+        return
+    if not isinstance(address, tuple) or len(address) < 2:
+        # AF_UNIX paths (str / bytes) stay local to the host.
+        return
+    host, port = address[0], address[1]
+    if _is_loopback_host(str(host)):
+        return
+    raise LiveCallBlocked(
+        f"Outbound socket connection blocked in offline tests: {host}:{port} "
+        f"(set {LIVE_TESTS_ENV}=1 to allow live network calls)"
+    )
+
+
 _installed = False
 
 
@@ -112,6 +147,9 @@ def install() -> None:
     if _installed:
         return
     real_urlopen = urllib.request.urlopen
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_create_connection = socket.create_connection
 
     def guarded_urlopen(url, data=None, *args, **kwargs):
         if isinstance(url, urllib.request.Request):
@@ -121,5 +159,20 @@ def install() -> None:
         check_request(method, full_url)
         return real_urlopen(url, data, *args, **kwargs)
 
+    def guarded_connect(sock_self, address):
+        check_socket_address(address)
+        return real_connect(sock_self, address)
+
+    def guarded_connect_ex(sock_self, address):
+        check_socket_address(address)
+        return real_connect_ex(sock_self, address)
+
+    def guarded_create_connection(address, *args, **kwargs):
+        check_socket_address(address)
+        return real_create_connection(address, *args, **kwargs)
+
     urllib.request.urlopen = guarded_urlopen
+    socket.socket.connect = guarded_connect  # type: ignore[method-assign]
+    socket.socket.connect_ex = guarded_connect_ex  # type: ignore[method-assign]
+    socket.create_connection = guarded_create_connection
     _installed = True

@@ -129,6 +129,7 @@ references/
 
 # Local state & chat history
 .state/
+state/
 .chat/
 .chris.json
 

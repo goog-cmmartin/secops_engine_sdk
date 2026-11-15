@@ -19,9 +19,9 @@ The SecOps Workflow Engine (`engine/facade.py`) provides high-level orchestratio
   - Target Endpoint User: `TIMADDLER`
   - Executable: `CLIENT UPDATE.EXE`
 - **Environment:**
-  - Customer ID: `a556547c-1cff-43ef-a2e4-cf5b12a865df`
+  - Customer ID: `00000000-0000-0000-0000-000000000000`
   - Region: `us`
-  - Project ID: `sdl-preview-americas`
+  - Project ID: `example-secops-project`
 
 ---
 
@@ -810,7 +810,7 @@ python3 clients/cli/secops.py dashboard check --name "[SDL] User and Application
 #### Live Example Output
 ```json
 {
-  "dashboard_id": "projects/37679061640/locations/us/instances/a556547c-1cff-43ef-a2e4-cf5b12a865df/nativeDashboards/056218ab-992c-4864-b8b7-81ade36f25df",
+  "dashboard_id": "projects/123456789012/locations/us/instances/00000000-0000-0000-0000-000000000000/nativeDashboards/056218ab-992c-4864-b8b7-81ade36f25df",
   "query_results_count": 10,
   "errors_count": 0,
   "summary": "Dashboard Health Check: [SDL] User and Application Activity\nAll 10 widget queries executed successfully against the live analytics engine with zero compilation or runtime errors."

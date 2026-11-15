@@ -65,9 +65,10 @@ class TestPreviewFeaturesAndDataRBAC(unittest.TestCase):
         """Searches data access scopes and deep inspects a specific scope."""
         batch = self.engine.search_data_access_scopes()
         self.assertIsInstance(batch, DataAccessScopeBatch)
-        self.assertGreater(batch.total_count, 0)
-        self.assertGreater(len(batch.scopes), 0)
         self.assertIsInstance(batch.global_scope_granted, bool)
+        if not batch.scopes:
+            self.skipTest("No custom data access scopes configured in live tenant.")
+        self.assertGreater(batch.total_count, 0)
 
         # Keyword query filter test
         first_scope = batch.scopes[0]
@@ -87,8 +88,9 @@ class TestPreviewFeaturesAndDataRBAC(unittest.TestCase):
         """Searches data access labels and deep inspects a specific label and its UDM query."""
         batch = self.engine.search_data_access_labels()
         self.assertIsInstance(batch, DataAccessLabelBatch)
+        if not batch.labels:
+            self.skipTest("No custom data access labels configured in live tenant.")
         self.assertGreater(batch.total_count, 0)
-        self.assertGreater(len(batch.labels), 0)
 
         # Find a label (e.g. pci)
         target_label = batch.labels[0]

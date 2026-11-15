@@ -162,7 +162,7 @@ class TestRuleAuditCapabilityContract(unittest.TestCase):
     """Verifies registry contracts, composition, and facade exposure for rule.audit."""
 
     def test_rule_audit_capability_registered(self):
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         cap = engine.registry.get("rule.audit")
         self.assertIsNotNone(cap)
         self.assertEqual(cap.category, "rule")
@@ -174,6 +174,6 @@ class TestRuleAuditCapabilityContract(unittest.TestCase):
         self.assertIn("rule.decay.audit", cap.uses)
 
     def test_facade_method_exists(self):
-        engine = SecOpsEngine()
+        engine = SecOpsEngine(adapter=object())
         self.assertTrue(hasattr(engine, "audit_rules"))
         self.assertTrue(callable(engine.audit_rules))

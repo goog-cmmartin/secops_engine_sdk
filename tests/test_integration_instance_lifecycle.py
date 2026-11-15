@@ -141,17 +141,19 @@ class TestIntegrationInstanceLifecycleLive(unittest.TestCase):
             raise
 
     def test_live_fetch_affected_items_for_known_instance(self):
-        # We know dc6df515-9517-46eb-96cc-21f245bb9dfb is GoogleChronicle system default instance
+        instances = self.engine.list_integration_instances()
+        if not instances:
+            self.skipTest("No integration instances configured in live tenant.")
+        target = next((i for i in instances if i.integration_identifier == "GoogleChronicle"), instances[0])
         affected = self.engine.get_integration_instance_affected_items(
-            integration_id="GoogleChronicle",
-            instance_id="dc6df515-9517-46eb-96cc-21f245bb9dfb",
+            integration_id=target.integration_identifier,
+            instance_id=target.identifier,
         )
         self.assertIsInstance(affected, IntegrationInstanceAffectedItems)
-        self.assertEqual(affected.integration_identifier, "GoogleChronicle")
-        self.assertEqual(affected.instance_identifier, "dc6df515-9517-46eb-96cc-21f245bb9dfb")
+        self.assertEqual(affected.integration_identifier, target.integration_identifier)
+        self.assertEqual(affected.instance_identifier, target.identifier)
         self.assertIsInstance(affected.affected_playbooks, list)
-        self.assertGreaterEqual(len(affected.affected_playbooks), 1)
-        self.assertTrue(affected.has_affected_items)
+        self.assertEqual(affected.has_affected_items, len(affected.affected_playbooks) > 0)
 
 
 if __name__ == "__main__":

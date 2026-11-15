@@ -25,7 +25,7 @@ class TestTinaInvestigationContracts(unittest.TestCase):
     """Verifies registry capabilities, taxonomy axes, and contract rules."""
 
     def setUp(self):
-        self.engine = SecOpsEngine()
+        self.engine = SecOpsEngine(adapter=object())
         self.reg = self.engine.registry
 
     def test_capabilities_registered(self):
@@ -60,6 +60,8 @@ class TestTinaInvestigationParsing(unittest.TestCase):
         )
         list_evidence_file = os.path.join(evidence_dir, "tina_list", "raw.json")
         get_evidence_file = os.path.join(evidence_dir, "tina_get", "raw.json")
+        if not (os.path.exists(list_evidence_file) and os.path.exists(get_evidence_file)):
+            self.skipTest("Local gitignored evidence/investigation/ captures not present.")
 
         self.assertTrue(os.path.exists(list_evidence_file), f"Missing {list_evidence_file}")
         with open(list_evidence_file, "r", encoding="utf-8") as f:

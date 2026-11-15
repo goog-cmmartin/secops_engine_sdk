@@ -232,7 +232,7 @@ class TestCaseIdNormalization(unittest.TestCase):
         self.assertEqual(_normalize_case_id("104984"), "104984")
         self.assertEqual(_normalize_case_id("cases/104984"), "104984")
         self.assertEqual(
-            _normalize_case_id("projects/sdl-preview-americas/locations/us/cases/104984"),
+            _normalize_case_id("projects/example-secops-project/locations/us/cases/104984"),
             "104984",
         )
         self.assertEqual(_normalize_case_id("  104984  "), "104984")

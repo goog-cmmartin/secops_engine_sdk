@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "fix/**", "feat/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, Contract Gates & Offline Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    env:
+      SECOPS_IGNORE_DOTENV: "1"
+      SECOPS_DISABLE_GIT_COMMITS: "1"
+      SECOPS_DISABLE_FIRESTORE: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Ruff syntax and undefined-name checks
+        run: ruff check .
+
+      - name: Run repository invariant gates (symtable, anti-mock, tenant scrub, doc & agent freshness)
+        run: python scripts/ci_checks.py
+
+      - name: Run hermetic offline test suite
+        run: pytest

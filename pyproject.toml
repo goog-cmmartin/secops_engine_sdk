@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secops-engine-sdk"
+version = "0.2.0"
+description = "Typed workflow engine, capability registry, and autonomous agent framework for Google SecOps (SIEM & SOAR)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "pyyaml>=6.0.0",
+    "google-auth>=2.20.0",
+    "pydantic>=2.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.27.0",
+]
+tui = [
+    "textual>=0.60.0",
+    "rich>=13.7.0",
+]
+agents = [
+    "google-genai>=0.3.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "bandit>=1.7.8",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.27.0",
+    "textual>=0.60.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+secops = "clients.cli.secops:main"
+secops-tui = "run_tui:main"
+
+[tool.setuptools]
+py-modules = ["run_tui"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["adapters*", "agents*", "clients*", "engine*", "runbooks*"]
+exclude = ["tests*", "discovery*", "benchmarks*", "examples*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = ["protos/secops_protos", "clients/chrome_extension", ".venv"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = false
+exclude = ["^protos/", "^discovery/", "^tests/"]

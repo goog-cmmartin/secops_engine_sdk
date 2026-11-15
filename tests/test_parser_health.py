@@ -21,7 +21,7 @@ class TestParserHealthAudit(unittest.TestCase):
     """Tests for AuditParserHealthWorkflow and finding classifications."""
 
     def setUp(self):
-        self.engine = SecOpsEngine()
+        self.engine = SecOpsEngine(adapter=MagicMock())
         self.workflow = AuditParserHealthWorkflow(self.engine.adapter)
 
     def test_capability_registration(self):

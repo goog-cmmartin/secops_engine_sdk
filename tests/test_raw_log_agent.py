@@ -12,7 +12,7 @@ class TestRawLogAgent(unittest.TestCase):
     """Verifies agent manifest metadata, capability bindings, tool registration, and widget generation."""
 
     def setUp(self):
-        self.engine = SecOpsEngine(adapter=None)
+        self.engine = SecOpsEngine(adapter=object())
         self.agent = RawLogAgentAgent(engine=self.engine)
 
     def test_agent_manifest_bindings(self):

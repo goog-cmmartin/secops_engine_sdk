@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
+from engine.taxonomy import has_tenant_side_effects
 
 
 class _InertAdapterForValidation:
@@ -47,9 +48,11 @@ def load_manifests(manifests_dir: Path) -> List[Dict[str, Any]]:
 
 
 def validate_manifests(manifests: List[Dict[str, Any]], registry: WorkflowRegistry) -> None:
-    """Validates that all capabilities declared in manifests exist in the WorkflowRegistry."""
+    """Validates that all capabilities declared in manifests exist in the WorkflowRegistry
+    and do not expose direct tenant-mutating side effects to autonomous agents.
+    """
     errors = []
-    registered_cap_ids = {c.capability_id for c in registry.list_capabilities()}
+    caps_by_id = {c.capability_id: c for c in registry.list_capabilities()}
 
     for m in manifests:
         key = m.get("key")
@@ -60,10 +63,16 @@ def validate_manifests(manifests: List[Dict[str, Any]], registry: WorkflowRegist
             errors.append(f"Manifest {m.get('_source_file')} missing required 'key' or 'name'.")
 
         for cap_id in caps:
-            if cap_id not in registered_cap_ids:
+            cap = caps_by_id.get(cap_id)
+            if cap is None:
                 errors.append(
                     f"Agent '{key}' requests unknown capability '{cap_id}'. "
                     f"Must be one of the registered engine capabilities."
+                )
+            elif has_tenant_side_effects(cap):
+                errors.append(
+                    f"Agent '{key}' requests tenant-mutating capability '{cap_id}' "
+                    f"(side_effects={cap.side_effects}). Agents must submit proposals instead."
                 )
 
     if errors:
@@ -121,24 +130,28 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
             except Exception as v_err:
                 preflight.compiler_diagnostics = [f"Compiler preflight check failed: {v_err}"]
 
-        # 2. Compute unified diff if missing or empty
-        effective_diff = proposed_diff
-        if not effective_diff or effective_diff.strip() == "":
-            orig_text = ""
-            if self.engine:
-                try:
-                    r_detail = self.engine.get_rule(target_resource_id, view="FULL")
-                    orig_text = getattr(r_detail, "rule_text", "") or getattr(r_detail, "text", "")
-                except Exception:
-                    pass
-            if orig_text:
-                diff_lines = list(difflib.unified_diff(
-                    orig_text.splitlines(keepends=True),
-                    optimized_rule_text.splitlines(keepends=True),
-                    fromfile=f"a/{target_resource_id}.yaral",
-                    tofile=f"b/{target_resource_id}.yaral",
-                ))
-                effective_diff = "".join(diff_lines)
+        # 2. Always derive unified diff from live baseline rule text when engine is attached
+        effective_diff = ""
+        if self.engine:
+            r_detail = self.engine.get_rule(target_resource_id, view="FULL")
+            orig_text = getattr(r_detail, "rule_text", "") or getattr(r_detail, "text", "")
+            if not orig_text or not str(orig_text).strip():
+                raise ValueError(
+                    f"Cannot submit proposal for '{target_resource_id}': baseline rule text is empty or unavailable."
+                )
+            diff_lines = list(difflib.unified_diff(
+                orig_text.splitlines(keepends=True),
+                optimized_rule_text.splitlines(keepends=True),
+                fromfile=f"a/{target_resource_id}.yaral",
+                tofile=f"b/{target_resource_id}.yaral",
+            ))
+            effective_diff = "".join(diff_lines)
+            if not effective_diff.strip():
+                raise ValueError(
+                    f"Cannot submit proposal for '{target_resource_id}': optimized rule text is identical to current live rule."
+                )
+        else:
+            effective_diff = proposed_diff
 
         # 3. Submit change proposal
         mutation_payload = {
@@ -546,8 +559,6 @@ def generate_agent_module(manifest: Dict[str, Any]) -> str:
         custom_binds = (
             "        self._tools[\"list_available_log_types\"] = self.list_available_log_types\n"
             "        self._tools[\"generate_scenario_logs\"] = self.generate_scenario_logs\n"
-            "        self._tools[\"replay_to_secops\"] = self.replay_to_secops\n"
-            "        self._tools[\"verify_proposal_with_replay\"] = self.verify_proposal_with_replay\n"
             "        self._tools[\"learn_log_schema\"] = self.learn_log_schema\n"
         )
         custom_methods = '''
@@ -961,17 +972,14 @@ from agents.core.evidence_store import diff_iam_audits
 
     def query_inventory_identity_report(
         self,
-        inventory_base_url: str = "http://localhost:8000",
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Queries the local SecOps Inventory service for SecOps Access and Identity reports.
+        """Queries the configured SecOps Inventory service for SecOps Access and Identity reports.
 
         Args:
-            inventory_base_url: Base URL of SecOps Inventory service (defaults to http://localhost:8000).
             tenant_id: Target tenant identifier or project ID.
         """
         report = self.engine.fetch_inventory_identity_report(
-            inventory_base_url=inventory_base_url,
             tenant_id=tenant_id,
         )
 
@@ -979,7 +987,7 @@ from agents.core.evidence_store import diff_iam_audits
             "agent": self.handle,
             "tool": "query_inventory_identity_report",
             "capability_id": "identity.inventory.report",
-            "arguments": {"inventory_base_url": inventory_base_url, "tenant_id": tenant_id},
+            "arguments": {"tenant_id": tenant_id},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -988,18 +996,15 @@ from agents.core.evidence_store import diff_iam_audits
     def run_identity_drift_audit(
         self,
         project_id: Optional[str] = None,
-        inventory_base_url: str = "http://localhost:8000",
     ) -> Dict[str, Any]:
         """Runs a complete IAM audit snapshot, stores it in the Evidence Fabric, and computes privilege drift against prior runs.
 
         Args:
             project_id: Target GCP project ID.
-            inventory_base_url: Base URL of SecOps Inventory service.
         """
         proj = project_id or getattr(self.engine.adapter, "project_id", None)
         rep = self.engine.generate_identity_governance_report(
             project_id=proj,
-            inventory_base_url=inventory_base_url,
         )
 
         # Retrieve prior audit from Evidence Fabric

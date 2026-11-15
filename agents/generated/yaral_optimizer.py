@@ -19,7 +19,7 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
     Refactors inefficient YARA-L rules, resolves Cartesian cross-joins, enforces hash/IP match partitioning, verifies compilation, and submits HITL change proposals.
     """
 
-    CAPABILITIES = ['rule.verify', 'rule.get', 'rule.patch', 'rule.deployment.update', 'rule.revisions']
+    CAPABILITIES = ['rule.verify', 'rule.get', 'rule.revisions']
 
     def __init__(
         self,
@@ -36,7 +36,7 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
             role='YARA-L Compiler & Rule Performance Optimizer',
             subsystem='detection_rules',
             description='Refactors inefficient YARA-L rules, resolves Cartesian cross-joins, enforces hash/IP match partitioning, verifies compilation, and submits HITL change proposals.',
-            system_instruction='You are the YARA-L Optimizer Agent (@yaral-optimizer).\nYour mission is to eliminate performance bottlenecks and timeouts in Google SecOps detection rules:\n1. Inspect rules using `get_rule` (or read from Evidence Fabric blackboard). If `get_rule` does not contain rule text or fails, do not repeatedly retry; synthesize a valid detection rule for the requested rule ID.\n2. Optimize unconstrained match clauses (e.g. cross-joining events over broad time windows without common join keys).\n3. Partition match clauses on high-cardinality keys like $file_hash, $target_ip, or $hostname.\n4. Constrain sliding time windows (e.g., change `over 24h` or `over 1h` to narrower windows like `over 5m` or `over 10m` when appropriate).\n5. Add/bound multi-event timestamp deltas.\n6. ALWAYS verify syntax and compilation of the refactored rule using `verify_rule_text` before submitting any proposal.\n7. ALWAYS submit a formal change proposal using `submit_rule_proposal` so human operators can review and approve via HITL.\n8. Ambiguity & Clarification Guardrails:\n   - If the operator request does not specify a target rule ID or rule snippet to optimize, DO NOT assume or guess rule names. Ask for the rule ID or query Evidence Fabric todos first.\n9. Output Formatting & Conciseness Constraints:\n   - Provide an executive summary of optimization results in at most 3 bullet points (join keys partitioned, time window tightened, compilation status).\n   - Format all refactored rules strictly as unified diffs in Gas Town proposals.',
+            system_instruction='You are the YARA-L Optimizer Agent (@yaral-optimizer).\nYour mission is to eliminate performance bottlenecks and timeouts in Google SecOps detection rules:\n1. Inspect rules using `get_rule` (or read verified rule text from Evidence Fabric blackboard). If `get_rule` fails or returns no rule text, halt and report the read failure explicitly; never fabricate or synthesize a rule.\n2. Optimize unconstrained match clauses (e.g. cross-joining events over broad time windows without common join keys).\n3. Partition match clauses on high-cardinality keys like $file_hash, $target_ip, or $hostname.\n4. Constrain sliding time windows (e.g., change `over 24h` or `over 1h` to narrower windows like `over 5m` or `over 10m` when appropriate).\n5. Add/bound multi-event timestamp deltas.\n6. ALWAYS verify syntax and compilation of the refactored rule using `verify_rule_text` before submitting any proposal.\n7. ALWAYS submit a formal change proposal using `submit_rule_proposal` so human operators can review and approve via HITL.\n8. Ambiguity & Clarification Guardrails:\n   - If the operator request does not specify a target rule ID or rule snippet to optimize, DO NOT assume or guess rule names. Ask for the rule ID or query Evidence Fabric todos first.\n9. Output Formatting & Conciseness Constraints:\n   - Provide an executive summary of optimization results in at most 3 bullet points (join keys partitioned, time window tightened, compilation status).\n   - Format all refactored rules strictly as unified diffs in Gas Town proposals.',
             model='gemini-3.8-flash',
             default_stream='detections',
             default_topic='rule-proposals',
@@ -90,24 +90,28 @@ class YaralOptimizerAgent(BaseSecOpsAdkAgent):
             except Exception as v_err:
                 preflight.compiler_diagnostics = [f"Compiler preflight check failed: {v_err}"]
 
-        # 2. Compute unified diff if missing or empty
-        effective_diff = proposed_diff
-        if not effective_diff or effective_diff.strip() == "":
-            orig_text = ""
-            if self.engine:
-                try:
-                    r_detail = self.engine.get_rule(target_resource_id, view="FULL")
-                    orig_text = getattr(r_detail, "rule_text", "") or getattr(r_detail, "text", "")
-                except Exception:
-                    pass
-            if orig_text:
-                diff_lines = list(difflib.unified_diff(
-                    orig_text.splitlines(keepends=True),
-                    optimized_rule_text.splitlines(keepends=True),
-                    fromfile=f"a/{target_resource_id}.yaral",
-                    tofile=f"b/{target_resource_id}.yaral",
-                ))
-                effective_diff = "".join(diff_lines)
+        # 2. Always derive unified diff from live baseline rule text when engine is attached
+        effective_diff = ""
+        if self.engine:
+            r_detail = self.engine.get_rule(target_resource_id, view="FULL")
+            orig_text = getattr(r_detail, "rule_text", "") or getattr(r_detail, "text", "")
+            if not orig_text or not str(orig_text).strip():
+                raise ValueError(
+                    f"Cannot submit proposal for '{target_resource_id}': baseline rule text is empty or unavailable."
+                )
+            diff_lines = list(difflib.unified_diff(
+                orig_text.splitlines(keepends=True),
+                optimized_rule_text.splitlines(keepends=True),
+                fromfile=f"a/{target_resource_id}.yaral",
+                tofile=f"b/{target_resource_id}.yaral",
+            ))
+            effective_diff = "".join(diff_lines)
+            if not effective_diff.strip():
+                raise ValueError(
+                    f"Cannot submit proposal for '{target_resource_id}': optimized rule text is identical to current live rule."
+                )
+        else:
+            effective_diff = proposed_diff
 
         # 3. Submit change proposal
         mutation_payload = {

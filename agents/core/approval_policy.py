@@ -15,16 +15,6 @@ from typing import Optional
 
 from engine.domain import AuthorityTier
 
-# Actions that change what runs in production (deployment state) or execute an
-# arbitrary engine capability. Always require a human.
-HUMAN_ONLY_ACTIONS = frozenset({
-    "DEPLOY_RULE",
-    "UNDEPLOY_RULE",
-    "UPDATE_RULE_DEPLOYMENT",
-    "TOGGLE_RULE_DEPLOYMENT",
-    "GENERIC_CAPABILITY",
-})
-
 # Actions whose payload a preflight can verify (YARA-L/CBN compiler, or
 # :testFindingsRefinement for refinement queries).
 CODE_CHANGE_ACTIONS = frozenset({
@@ -33,6 +23,19 @@ CODE_CHANGE_ACTIONS = frozenset({
     "PATCH_PARSER_CBN",
     "CREATE_FINDINGS_REFINEMENT",
 })
+
+# Actions that change what runs in production (deployment state, rule text,
+# parser CBN, findings refinements) or execute an arbitrary engine capability.
+# Always require a human regardless of declared risk level.
+HUMAN_ONLY_ACTIONS = frozenset({
+    "DEPLOY_RULE",
+    "UNDEPLOY_RULE",
+    "UPDATE_RULE_DEPLOYMENT",
+    "TOGGLE_RULE_DEPLOYMENT",
+    "DELETE_RULE",
+    "DELETE_FINDINGS_REFINEMENT",
+    "GENERIC_CAPABILITY",
+}) | CODE_CHANGE_ACTIONS
 
 HIGH_RISK_LEVELS = frozenset({"HIGH", "CRITICAL"})
 

@@ -37,7 +37,7 @@ class LogjammerAgentLiveTest(unittest.TestCase):
         try:
             self.engine = get_live_engine()
         except Exception:
-            self.engine = SecOpsEngine(custom_registry=WorkflowRegistry())
+            self.engine = SecOpsEngine(adapter=object(), custom_registry=WorkflowRegistry())
 
         self.agent = LogjammerAgentAgent(
             engine=self.engine,
@@ -49,17 +49,20 @@ class LogjammerAgentLiveTest(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_tool_bindings_and_playbook_discovery(self):
-        """Verifies that all empirical replay tools are bound and discover 35 guides."""
+        """Verifies read/generation tools are bound while live replay tools remain off the model tool list."""
         tools = self.agent.get_tools()
         tool_names = [t.__name__ for t in tools]
         self.assertIn("list_available_log_types", tool_names)
         self.assertIn("generate_scenario_logs", tool_names)
-        self.assertIn("replay_to_secops", tool_names)
-        self.assertIn("verify_proposal_with_replay", tool_names)
+        self.assertNotIn("replay_to_secops", tool_names)
+        self.assertNotIn("verify_proposal_with_replay", tool_names)
         self.assertIn("learn_log_schema", tool_names)
 
-        # Introspect available playbooks
-        playbooks = self.agent.list_available_log_types()
+        # Introspect available playbooks when logjammer SDK is installed
+        try:
+            playbooks = self.agent.list_available_log_types()
+        except ModuleNotFoundError:
+            self.skipTest("logjammer SDK not installed in active environment")
         self.assertIsInstance(playbooks, list)
         self.assertGreaterEqual(len(playbooks), 30)
         self.assertIn("WINDOWS_SYSMON", playbooks)

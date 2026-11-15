@@ -9,15 +9,17 @@ Exposes:
 import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
+import hmac
+import html
 import json
 import logging
 import os
 from pathlib import Path
+import secrets
 from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agents.core.base_adk_agent import llm_credentials_status
@@ -54,9 +56,9 @@ from engine.domain import (
     Lease,
     AgentCapabilityProfile,
 )
+from adapters.google_secops import GoogleSecOpsAdapter
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
-from tests.test_helpers import get_live_engine
 
 logger = logging.getLogger(__name__)
 
@@ -69,27 +71,41 @@ STATE_ROOT = Path(os.environ.get(STATE_ROOT_ENV_VAR, "").strip() or REPO_ROOT).e
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-class _InertAdapterForWeb:
-    """Inert adapter when live ADC credentials are not configured."""
+class SecOpsEngineUnavailableError(RuntimeError):
+    """Raised when a web endpoint requires live SecOps connectivity that is not configured."""
+
+
+class _DisconnectedSecOpsAdapter:
+    """Adapter attached when live Google SecOps credentials or tenant parameters are absent."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
     def __getattr__(self, name: str) -> Any:
-        def _no_op(*args: Any, **kwargs: Any) -> Any:
-            return {}
-        return _no_op
+        def _unavailable(*args: Any, **kwargs: Any) -> Any:
+            raise SecOpsEngineUnavailableError(
+                f"Google SecOps live engine is unavailable ({self.reason}). Cannot call adapter.{name}()."
+            )
+        return _unavailable
 
 
-def _build_engine() -> SecOpsEngine:
-    """Instantiates a live SecOpsEngine if GCP env is configured, otherwise an inert instance."""
+def _build_engine() -> tuple[SecOpsEngine, bool]:
+    """Instantiates a live SecOpsEngine via GoogleSecOpsAdapter, or a disconnected engine."""
     try:
-        return get_live_engine()
+        live_adapter = GoogleSecOpsAdapter()
+        return SecOpsEngine(adapter=live_adapter), True
     except Exception as e:
-        logger.info("Initializing web engine with offline adapter: %s", e)
-        return SecOpsEngine(adapter=_InertAdapterForWeb(), custom_registry=WorkflowRegistry())
+        logger.info("Live GoogleSecOpsAdapter not configured (%s); attaching disconnected adapter.", e)
+        return (
+            SecOpsEngine(adapter=_DisconnectedSecOpsAdapter(str(e)), custom_registry=WorkflowRegistry()),
+            False,
+        )
 
 
 # Core singleton instances
 chat_store = ChatStore(root_dir=STATE_ROOT)
 proposal_manager = ProposalManager()
-engine = _build_engine()
+engine, _ENGINE_CONNECTED = _build_engine()
 evidence_store = get_evidence_store(root_dir=str(STATE_ROOT))
 work_queue = get_work_queue(root_dir=str(STATE_ROOT))
 issue_materializer = IssueMaterializer()
@@ -151,25 +167,132 @@ if len(chat_store.list_messages("general", "announcements")) == 0:
         ),
     )
 
+API_TOKEN_ENV_VAR = "SECOPS_WEB_API_TOKEN"
+OPERATOR_ID_ENV_VAR = "SECOPS_OPERATOR_ID"
+TRUST_IAP_ENV_VAR = "SECOPS_TRUST_IAP_HEADERS"
+TRUST_LOOPBACK_ENV_VAR = "SECOPS_TRUST_LOOPBACK"
+SESSION_COOKIE_NAME = "secops_session"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+WEB_API_TOKEN = os.environ.get(API_TOKEN_ENV_VAR, "").strip() or secrets.token_urlsafe(32)
+
+
+def _is_loopback_host_header(request: Request) -> bool:
+    """Verifies the HTTP Host header names a loopback interface to block DNS rebinding."""
+    raw_host = (request.headers.get("host") or "").strip().lower()
+    if not raw_host:
+        return False
+    if raw_host.startswith("["):
+        end = raw_host.find("]")
+        if end == -1:
+            return False
+        hostname = raw_host[1:end]
+        rest = raw_host[end + 1 :]
+        if rest and not (rest.startswith(":") and rest[1:].isdigit()):
+            return False
+        return hostname in LOOPBACK_HOSTS
+    if ":" in raw_host:
+        hostname, port = raw_host.rsplit(":", 1)
+        if not port.isdigit():
+            return False
+    else:
+        hostname = raw_host
+    return hostname in LOOPBACK_HOSTS
+
+
+def validate_web_bind_host(host: str) -> None:
+    """Refuses non-loopback binds unless an explicit SECOPS_WEB_API_TOKEN is configured."""
+    clean_host = (host or "").strip().lower()
+    if clean_host not in LOOPBACK_HOSTS and not os.environ.get(API_TOKEN_ENV_VAR, "").strip():
+        raise RuntimeError(
+            f"Refusing to bind web server to non-loopback host '{host}' without "
+            f"{API_TOKEN_ENV_VAR} set in the environment."
+        )
+
+
+def _extract_header_token(request: Request) -> str:
+    hdr = (request.headers.get("x-secops-token") or "").strip()
+    if hdr:
+        return hdr
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _is_authenticated_api_request(request: Request) -> bool:
+    expected = os.environ.get(API_TOKEN_ENV_VAR, "").strip() or WEB_API_TOKEN
+    supplied = _extract_header_token(request)
+    if supplied and hmac.compare_digest(supplied, expected):
+        return True
+    if request.method in ("GET", "HEAD"):
+        cookie_tok = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+        if cookie_tok and hmac.compare_digest(cookie_tok, expected):
+            return True
+    return False
+
+
+def _resolve_session_operator(request: Request) -> str:
+    """Derives the human approver identity from authenticated server/session context."""
+    trust_iap = os.environ.get(TRUST_IAP_ENV_VAR, "").strip().lower() in ("1", "true", "yes")
+    if trust_iap:
+        iap_user = (request.headers.get("x-goog-authenticated-user-email") or "").strip()
+        if iap_user:
+            if ":" in iap_user:
+                iap_user = iap_user.split(":", 1)[1].strip()
+            if iap_user.startswith("@"):
+                raise HTTPException(
+                    status_code=403,
+                    detail={"code": "HUMAN_REQUIRED", "message": "Agent handles cannot act as session operator."},
+                )
+            if iap_user:
+                return iap_user
+    env_op = os.environ.get(OPERATOR_ID_ENV_VAR, "").strip()
+    if env_op:
+        if env_op.startswith("@"):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "HUMAN_REQUIRED", "message": "Agent handles cannot act as session operator."},
+            )
+        return env_op
+    return "secops-operator"
+
+
 app = FastAPI(
     title="Google SecOps Multi-Agent Fleet Chat",
     description="Zulip/Slack-inspired interface for autonomous SecOps agents and Gas Town change proposals.",
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@app.exception_handler(SecOpsEngineUnavailableError)
+async def handle_engine_unavailable(request: Request, exc: SecOpsEngineUnavailableError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"status": "UNAVAILABLE", "detail": str(exc)},
+    )
 
 
 @app.middleware("http")
-async def add_no_cache_headers(request: Request, call_next: Any) -> Any:
+async def enforce_api_auth_and_headers(request: Request, call_next: Any) -> Any:
+    path = request.url.path
+    if path.startswith("/api/"):
+        if not _is_authenticated_api_request(request):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid X-SecOps-Token / Bearer token."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            request.state.operator_id = _resolve_session_operator(request)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+            )
     response = await call_next(request)
-    if request.url.path.startswith("/static/") or request.url.path == "/":
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if path.startswith("/static/") or path == "/":
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -289,6 +412,7 @@ async def health_check() -> Dict[str, Any]:
         "agents_online": len(fleet),
         "open_proposals": len(open_props),
         "engine_capabilities": len(engine.registry.list_capabilities()),
+        "engine_connected": _ENGINE_CONNECTED,
         "evidence_fabric_store": evidence_store.__class__.__name__,
         # Booleans only — never expose the credential values themselves.
         "llm_configured": llm_credentials_status()["configured"],
@@ -572,8 +696,10 @@ async def get_proposal(proposal_id: str) -> Dict[str, Any]:
 async def approve_proposal(
     proposal_id: str,
     body: ApproveProposalRequest,
+    request: Request,
 ) -> Dict[str, Any]:
     """Approves and merges a change proposal, applying live SecOps mutation."""
+    approver = getattr(request.state, "operator_id", None) or _resolve_session_operator(request)
     try:
         proposal = proposal_manager.get_proposal(proposal_id)
     except FileNotFoundError:
@@ -583,7 +709,7 @@ async def approve_proposal(
         res = proposal_manager.approve_and_merge(
             proposal_id=proposal_id,
             engine=engine,
-            merged_by=body.merged_by,
+            merged_by=approver,
             lifecycle_manager=lifecycle_manager,
             approval_note=body.approval_note,
             override_preflight=body.override_preflight,
@@ -609,7 +735,7 @@ async def approve_proposal(
     if manual:
         content = (
             f"🛠️ **Change Proposal Approved — Apply Manually**: `{proposal_id}`\n\n"
-            f"- **Approved By**: {body.merged_by}\n"
+            f"- **Approved By**: {approver}\n"
             + (f"- **Approval Note**: {body.approval_note}\n" if body.approval_note else "")
             + f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n\n"
             f"**Nothing was changed in SecOps.** There is no automated write for `{proposal.action_type}`. "
@@ -618,7 +744,7 @@ async def approve_proposal(
     else:
         content = (
             f"✅ **Change Proposal Merged**: `{proposal_id}`\n\n"
-            f"- **Approved By**: {body.merged_by}\n"
+            f"- **Approved By**: {approver}\n"
             + (f"- **Approval Note**: {body.approval_note}\n" if body.approval_note else "")
             + f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n"
             f"- **Git Commit**: `{res.commit_hash or 'HEAD'}`\n\n"
@@ -639,25 +765,26 @@ async def approve_proposal(
             "title": proposal.title,
             "target_resource_id": proposal.target_resource_id,
             "action_type": proposal.action_type,
-            "merged_by": body.merged_by,
+            "merged_by": approver,
             "commit_hash": res.commit_hash,
         },
     )
 
     # Only a change that is live resolves the matching to-dos; a manual apply waits for Mark applied.
     if not manual:
-        _cascade_resolve_todos(proposal, body.merged_by, f"Resolved via approved proposal {proposal_id}")
+        _cascade_resolve_todos(proposal, approver, f"Resolved via approved proposal {proposal_id}")
 
     return asdict(res)
 
 
 @app.post("/api/proposals/{proposal_id}/mark-applied")
-async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> Dict[str, Any]:
+async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest, request: Request) -> Dict[str, Any]:
     """Records that a human applied an approved manual-apply proposal in SecOps."""
+    operator_actor = getattr(request.state, "operator_id", None) or _resolve_session_operator(request)
     try:
         proposal = proposal_manager.mark_manually_applied(
             proposal_id=proposal_id,
-            applied_by=body.applied_by,
+            applied_by=operator_actor,
             note=body.note,
             lifecycle_manager=lifecycle_manager,
         )
@@ -675,7 +802,7 @@ async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> D
         sender_type="agent",
         content=(
             f"✅ **Change Applied Manually**: `{proposal_id}`\n\n"
-            f"- **Applied By**: {body.applied_by}\n"
+            f"- **Applied By**: {operator_actor}\n"
             f"- **Note**: {proposal.apply_note}\n"
             f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})"
             + ("\n\nThe linked issue is now APPLIED; the next patrol will verify and close it." if proposal.issue_id else "")
@@ -693,7 +820,7 @@ async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> D
             "commit_hash": proposal.merge_commit,
         },
     )
-    _cascade_resolve_todos(proposal, body.applied_by, f"Resolved via manually applied proposal {proposal_id}")
+    _cascade_resolve_todos(proposal, operator_actor, f"Resolved via manually applied proposal {proposal_id}")
     return {
         "proposal_id": proposal_id,
         "apply_status": proposal.apply_status,
@@ -704,12 +831,13 @@ async def mark_proposal_applied(proposal_id: str, body: MarkAppliedRequest) -> D
 
 
 @app.post("/api/proposals/{proposal_id}/abandon")
-async def abandon_proposal(proposal_id: str, body: AbandonProposalRequest) -> Dict[str, Any]:
+async def abandon_proposal(proposal_id: str, body: AbandonProposalRequest, request: Request) -> Dict[str, Any]:
     """Records that a human decided not to apply an approved manual-apply proposal."""
+    operator_actor = getattr(request.state, "operator_id", None) or _resolve_session_operator(request)
     try:
         proposal = proposal_manager.abandon_manual_apply(
             proposal_id=proposal_id,
-            abandoned_by=body.abandoned_by,
+            abandoned_by=operator_actor,
             reason=body.reason,
             lifecycle_manager=lifecycle_manager,
         )
@@ -727,7 +855,7 @@ async def abandon_proposal(proposal_id: str, body: AbandonProposalRequest) -> Di
         sender_type="agent",
         content=(
             f"🚫 **Approved Change Abandoned**: `{proposal_id}`\n\n"
-            f"- **Abandoned By**: {body.abandoned_by}\n"
+            f"- **Abandoned By**: {operator_actor}\n"
             f"- **Reason**: {proposal.abandon_reason}\n"
             f"- **Target**: `{proposal.target_resource_id}` ({proposal.action_type})\n\n"
             "Nothing was changed in SecOps."
@@ -1038,15 +1166,29 @@ async def get_gastown_overview() -> Dict[str, Any]:
     todos_in_progress = evidence_store.list_todos(status="IN_PROGRESS")
     todos_resolved = evidence_store.list_todos(status="RESOLVED")
 
+    llm_status = llm_credentials_status()
+    schedules_by_agent = {
+        s.get("agent_handle"): s
+        for s in fleet_scheduler.list_schedules()
+        if isinstance(s, dict) and s.get("agent_handle")
+    }
+
+    dispatcher_msgs = [
+        m for m in chat_store.list_messages("general")
+        if getattr(m, "sender_handle", "") == "@secops-dispatcher"
+    ]
+    mayor_last_ts = getattr(dispatcher_msgs[-1], "created_at", None) if dispatcher_msgs else None
+    mayor_age = _humanize_age(mayor_last_ts)
+
     # Mayor Status
     mayor = {
         "title": "The Mayor (@secops-dispatcher)",
         "handle": "@secops-dispatcher",
         "coordinator": "@secops-dispatcher",
-        "is_attached": True,
-        "activity": "Active",
+        "is_attached": bool(llm_status["configured"]),
+        "activity": "Active" if llm_status["configured"] else "Unconfigured",
         "runtime": "Google ADK 2 & GEAP Engine",
-        "last_activity": "Just now",
+        "last_activity": f"{mayor_age} ago" if mayor_age else None,
     }
 
     # Deacon Health
@@ -1063,71 +1205,133 @@ async def get_gastown_overview() -> Dict[str, Any]:
         "merged_proposals": len(merged_props),
     }
 
-    # Convoys (Synthesized work streams from live agent tasks)
-    total_noise_props = max(1, len(open_props) + len(merged_props))
-    noise_pct = int((len(merged_props) / total_noise_props) * 100) if total_noise_props > 0 else 0
+    def _build_convoy(
+        *,
+        convoy_id: str,
+        title: str,
+        primary_agent: str,
+        assignees: List[str],
+        stream: str,
+        topic: str,
+        action_prompt: str,
+        ready_count: int,
+        active_count: int,
+        done_count: int,
+        timestamps: List[Any],
+    ) -> Dict[str, Any]:
+        total = ready_count + active_count + done_count
+        pct = int((done_count / total) * 100) if total > 0 else 0
+        if ready_count + active_count > 0:
+            work_status = "active"
+        elif done_count > 0:
+            work_status = "complete"
+        else:
+            work_status = "idle"
+        sched = schedules_by_agent.get(primary_agent) or {}
+        candidate_ts = [t for t in timestamps if t]
+        if sched.get("last_run_at"):
+            candidate_ts.append(sched["last_run_at"])
+        latest_age = None
+        if candidate_ts:
+            latest_age = _humanize_age(max(str(t) for t in candidate_ts))
+        return {
+            "id": convoy_id,
+            "title": title,
+            "work_status": work_status,
+            "progress": f"{done_count}/{total}",
+            "progress_pct": pct,
+            "work_done": done_count,
+            "primary_agent": primary_agent,
+            "stream": stream,
+            "topic": topic,
+            "action_prompt": action_prompt,
+            "assignees": assignees,
+            "ready_beads": ready_count,
+            "in_progress": active_count,
+            "last_activity": f"{latest_age} ago" if latest_age else None,
+        }
+
+    def _agent_todos(items: List[Dict[str, Any]], handles: set[str], keyword: str = "") -> List[Dict[str, Any]]:
+        matched: List[Dict[str, Any]] = []
+        for t in items:
+            if t.get("target_agent") in handles or (keyword and keyword in str(t.get("action_type", "")).lower()):
+                matched.append(t)
+        return matched
+
+    decay_handles = {"@detection-decay-agent", "@yaral-optimizer"}
+    decay_ready = _agent_todos(todos_pending, decay_handles, "decay")
+    decay_active = _agent_todos(todos_in_progress, decay_handles, "decay")
+    decay_done = _agent_todos(todos_resolved, decay_handles, "decay")
+
+    tuning_handles = {"@detection-tuning-agent"}
+    tuning_active = _agent_todos(todos_in_progress, tuning_handles, "tune")
+
+    feed_handles = {"@feed-agent"}
+    feed_ready = _agent_todos(todos_pending, feed_handles, "feed")
+    feed_active = _agent_todos(todos_in_progress, feed_handles, "feed")
+    feed_done = _agent_todos(todos_resolved, feed_handles, "feed")
+
+    parser_handles = {"@parser-doctor"}
+    parser_ready = _agent_todos(todos_pending, parser_handles, "parser")
+    parser_active = _agent_todos(todos_in_progress, parser_handles, "parser")
+    parser_done = _agent_todos(todos_resolved, parser_handles, "parser")
 
     convoys = [
-        {
-            "id": "convoy-rule-decay",
-            "title": "Detection Rule Decay & 90-Day Telemetry Sync",
-            "work_status": "active",
-            "progress": "95/100",
-            "progress_pct": 95,
-            "primary_agent": "@detection-decay-agent",
-            "stream": "detections",
-            "topic": "decay-review",
-            "action_prompt": "@detection-decay-agent list decay queue",
-            "assignees": ["@detection-decay-agent", "@yaral-optimizer"],
-            "ready_beads": len([t for t in todos_pending if "decay" in t.get("action_type", "").lower()]),
-            "in_progress": 1,
-            "last_activity": "2m ago",
-        },
-        {
-            "id": "convoy-noise-suppression",
-            "title": "Alert Noise Tuning & Exception Rule Generation",
-            "work_status": "active",
-            "progress": f"{len(merged_props)}/{len(open_props) + len(merged_props)}",
-            "progress_pct": max(20, min(100, noise_pct)),
-            "primary_agent": "@detection-tuning-agent",
-            "stream": "detections",
-            "topic": "tuning-review",
-            "action_prompt": "@detection-tuning-agent find noisy rules",
-            "assignees": ["@detection-tuning-agent"],
-            "ready_beads": len(open_props),
-            "in_progress": 1,
-            "last_activity": "Just now",
-        },
-        {
-            "id": "convoy-ingestion-sla",
-            "title": "Chronicle Health Hub Ingestion SLAs (<4h)",
-            "work_status": "complete",
-            "progress": "11/11",
-            "progress_pct": 100,
-            "primary_agent": "@feed-agent",
-            "stream": "ingestion",
-            "topic": "feed-health",
-            "action_prompt": "@feed-agent audit feeds",
-            "assignees": ["@feed-agent"],
-            "ready_beads": 0,
-            "in_progress": 0,
-            "last_activity": "5m ago",
-        },
-        {
-            "id": "convoy-parser-drift",
-            "title": "Logstash CBN Extension Drift & Drop Codes",
-            "work_status": "active",
-            "progress": "91/92",
-            "progress_pct": 98,
-            "primary_agent": "@parser-doctor",
-            "stream": "ingestion",
-            "topic": "parser-drops",
-            "action_prompt": "@parser-doctor audit parsers",
-            "assignees": ["@parser-doctor"],
-            "ready_beads": 1,
-            "in_progress": 1,
-            "last_activity": "10m ago",
-        },
+        _build_convoy(
+            convoy_id="convoy-rule-decay",
+            title="Detection Rule Decay & 90-Day Telemetry Sync",
+            primary_agent="@detection-decay-agent",
+            assignees=["@detection-decay-agent", "@yaral-optimizer"],
+            stream="detections",
+            topic="decay-review",
+            action_prompt="@detection-decay-agent list decay queue",
+            ready_count=len(decay_ready),
+            active_count=len(decay_active),
+            done_count=len(decay_done),
+            timestamps=[t.get("updated_at") or t.get("created_at") for t in (decay_ready + decay_active + decay_done)],
+        ),
+        _build_convoy(
+            convoy_id="convoy-noise-suppression",
+            title="Alert Noise Tuning & Exception Rule Generation",
+            primary_agent="@detection-tuning-agent",
+            assignees=["@detection-tuning-agent"],
+            stream="detections",
+            topic="tuning-review",
+            action_prompt="@detection-tuning-agent find noisy rules",
+            ready_count=len(open_props),
+            active_count=len(tuning_active),
+            done_count=len(merged_props),
+            timestamps=[
+                getattr(p, "updated_at", None) or getattr(p, "created_at", None)
+                for p in (open_props + merged_props)
+            ] + [t.get("updated_at") or t.get("created_at") for t in tuning_active],
+        ),
+        _build_convoy(
+            convoy_id="convoy-ingestion-sla",
+            title="Chronicle Health Hub Ingestion SLAs (<4h)",
+            primary_agent="@feed-agent",
+            assignees=["@feed-agent"],
+            stream="ingestion",
+            topic="feed-health",
+            action_prompt="@feed-agent audit feeds",
+            ready_count=len(feed_ready),
+            active_count=len(feed_active),
+            done_count=len(feed_done),
+            timestamps=[t.get("updated_at") or t.get("created_at") for t in (feed_ready + feed_active + feed_done)],
+        ),
+        _build_convoy(
+            convoy_id="convoy-parser-drift",
+            title="Logstash CBN Extension Drift & Drop Codes",
+            primary_agent="@parser-doctor",
+            assignees=["@parser-doctor"],
+            stream="ingestion",
+            topic="parser-drops",
+            action_prompt="@parser-doctor audit parsers",
+            ready_count=len(parser_ready),
+            active_count=len(parser_active),
+            done_count=len(parser_done),
+            timestamps=[t.get("updated_at") or t.get("created_at") for t in (parser_ready + parser_active + parser_done)],
+        ),
     ]
 
     summary["convoy_count"] = len(convoys)
@@ -1730,59 +1934,6 @@ async def propose_tuning(rule_id: str, lookback_days: int = Query(14), dominance
     return {"status": "ERROR", "message": "@detection-tuning-agent not active"}
 
 
-@app.post("/api/tuning/deploy/{rule_id}")
-async def deploy_tuning(rule_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Deploys approved tuning proposal directly to live Google SecOps (Chronicle)."""
-    tuned_text = body.get("tuned_rule_text", "")
-    rule_name = body.get("rule_name", rule_id)
-
-    if not secops_engine:
-        return {"status": "ERROR", "message": "SecOpsEngine not configured"}
-
-    is_curated = "ur_" in rule_id or rule_id.startswith("ur_")
-    if is_curated:
-        refinement_query = body.get("udm_refinement_query") or tuned_text.replace("// UDM Findings Refinement Exclusion\n", "").strip()
-        disp_name = f"Noise Suppression: {rule_name}"[:100]
-        try:
-            ref_summary = secops_engine.create_findings_refinement(
-                display_name=disp_name,
-                query=refinement_query,
-                curated_rule_ids=[rule_id],
-            )
-            chat_store.add_message(
-                stream="detections",
-                topic="tuning-review",
-                sender_handle="@detection-tuning-agent",
-                sender_type="agent",
-                content=(
-                    f"🚀 **Noise Suppression Deployed to Chronicle** for Curated Rule `{rule_name}` (`{rule_id}`)!\n\n"
-                    f"- **Refinement Name**: `{disp_name}`\n"
-                    f"- **Refinement ID**: `{ref_summary.refinement_id if hasattr(ref_summary, 'refinement_id') else 'Active'}`\n"
-                    f"- **Exclusion**: `{refinement_query}`\n\n"
-                    f"Chronicle detection engine is now actively filtering benign administrative triggers."
-                ),
-            )
-            return {"status": "SUCCESS", "message": f"Refinement deployed for {rule_id}", "refinement_id": getattr(ref_summary, "refinement_id", "")}
-        except Exception as e:
-            return {"status": "ERROR", "message": f"Deployment failed: {str(e)}"}
-    else:
-        try:
-            secops_engine.update_rule(rule_id=rule_id, rule_text=tuned_text, update_mask="text")
-            chat_store.add_message(
-                stream="detections",
-                topic="tuning-review",
-                sender_handle="@detection-tuning-agent",
-                sender_type="agent",
-                content=(
-                    f"🚀 **Rule Exclusion Deployed to Chronicle** for Customer Rule `{rule_name}` (`{rule_id}`)!\n\n"
-                    f"Updated rule text verified by compiler and deployed into live Chronicle production."
-                ),
-            )
-            return {"status": "SUCCESS", "message": f"Rule {rule_id} updated successfully"}
-        except Exception as e:
-            return {"status": "ERROR", "message": f"Rule update failed: {str(e)}"}
-
-
 # --- Ingestion Feeds & Parser Health Endpoints ---
 
 _cached_feed_audit: Optional[Dict[str, Any]] = None
@@ -2127,6 +2278,8 @@ async def analyze_log_costs(
             "status": "SUCCESS",
             "report": report.to_dict(),
         }
+    except SecOpsEngineUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Error analyzing log costs: {e}", exc_info=True)
         return {
@@ -2166,6 +2319,8 @@ async def get_ingestion_labels_and_namespaces(lookback_days: int = 7) -> Dict[st
             "status": "SUCCESS",
             "report": report.to_dict(),
         }
+    except SecOpsEngineUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Error analyzing labels and namespaces: {e}", exc_info=True)
         return {
@@ -2316,6 +2471,8 @@ async def get_mitre_coverage_endpoint(
             "status": "SUCCESS",
             "assessment": assessment.to_dict(),
         }
+    except SecOpsEngineUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Error evaluating MITRE ATT&CK coverage: {e}", exc_info=True)
         return {"status": "ERROR", "message": str(e)}
@@ -2384,6 +2541,8 @@ async def run_mitre_audit_endpoint(
             "assessment": rep_dict,
             "widget": widget,
         }
+    except SecOpsEngineUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Error running MITRE ATT&CK audit: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"MITRE audit failed: {e}")
@@ -2407,6 +2566,8 @@ async def sync_mitre_rules_endpoint(
             "status": "SUCCESS",
             "result": res,
         }
+    except SecOpsEngineUnavailableError:
+        raise
     except Exception as e:
         logger.error(f"Error synchronizing MITRE rules: {e}", exc_info=True)
         return {"status": "ERROR", "message": str(e)}
@@ -2448,19 +2609,41 @@ async def get_technique_rules_endpoint(technique_id: str) -> Dict[str, Any]:
 
 
 @app.get("/")
-async def root_view() -> FileResponse:
+async def root_view(request: Request) -> HTMLResponse:
     """Serves the Single Page App interface."""
     index_file = STATIC_DIR / "index.html"
     if not index_file.is_file():
         raise HTTPException(status_code=404, detail="Web UI assets not built yet.")
-    return FileResponse(index_file)
+    raw_html = index_file.read_text(encoding="utf-8")
+    active_token = os.environ.get(API_TOKEN_ENV_VAR, "").strip() or WEB_API_TOKEN
+    client_host = (request.client.host if request.client else "").strip().lower()
+    trust_loopback = os.environ.get(TRUST_LOOPBACK_ENV_VAR, "1").strip().lower() not in ("0", "false", "no")
+    loopback_verified = (
+        trust_loopback
+        and client_host in LOOPBACK_HOSTS
+        and _is_loopback_host_header(request)
+    )
+    inject_token = loopback_verified or _is_authenticated_api_request(request)
+    if inject_token:
+        meta_tag = f'  <meta name="secops-api-token" content="{html.escape(active_token, quote=True)}">\n'
+        raw_html = raw_html.replace("<head>\n", f"<head>\n{meta_tag}", 1)
+    resp = HTMLResponse(raw_html)
+    if inject_token:
+        resp.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=active_token,
+            httponly=True,
+            samesite="strict",
+            path="/api",
+        )
+    return resp
 
 
 @app.get("/knowledge/viz.html")
 async def knowledge_viz_view() -> HTMLResponse:
     """Serves the OKF Knowledge Graph visualizer, rebuilt whenever knowledge/*.md changes."""
-    html = await asyncio.to_thread(knowledge_graph_cache.html)
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    html_content = await asyncio.to_thread(knowledge_graph_cache.html)
+    return HTMLResponse(html_content, headers={"Cache-Control": "no-cache"})
 
 
 # Mount static assets
@@ -2471,5 +2654,9 @@ if STATIC_DIR.is_dir():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("clients.web.server:app", host="127.0.0.1", port=8080, log_level="info")
+
+    bind_host = os.environ.get("SECOPS_WEB_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    bind_port = int(os.environ.get("SECOPS_WEB_PORT", "8080"))
+    validate_web_bind_host(bind_host)
+    uvicorn.run("clients.web.server:app", host=bind_host, port=bind_port, log_level="info")
 

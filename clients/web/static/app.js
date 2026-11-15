@@ -1563,7 +1563,7 @@ function renderIdentityWidget(widget) {
   const driftBadgeBg = hasDrift ? "var(--c-warn-bg)" : "var(--c-ok-bg)";
   const driftBadgeText = hasDrift ? "var(--c-warn)" : "var(--c-ok)";
   const driftStatus = hasDrift ? "DRIFT DETECTED" : "BASELINE STABLE";
-  const projectId = widget.project_id || "sdl-preview-americas";
+  const projectId = widget.project_id || "—";
 
   let driftDetails = "";
   if (hasDrift) {
@@ -1948,8 +1948,8 @@ function renderNoiseTuningWidget(widget) {
           <span>${ICONS.shield || "🛡️"}</span> Multi-Factor Verified (Zero Blinding)
         </div>
         <div style="display:flex; gap:6px;">
-          <button class="btn-approve" style="background:var(--c-ok-solid); padding:5px 12px; font-size:11.5px; font-weight:700;" ${act("deployTuningProposal", widget.rule_id, widget.rule_name || widget.rule_id)}>
-            🚀 Approve & Deploy to Chronicle
+          <button class="btn-approve" style="background:var(--c-ok-solid); padding:5px 12px; font-size:11.5px; font-weight:700;" ${act("deployTuningProposal", widget.rule_id, widget.rule_name || widget.rule_id, widget.proposal_id || "")}>
+            🚀 Review &amp; Approve Proposal
           </button>
         </div>
       </div>
@@ -3662,49 +3662,30 @@ function tuningDeployButtons(ruleId) {
   });
 }
 
-window.deployTuningProposal = async function(ruleId, ruleName) {
-  const ok = await openActionDialog({
-    title: "Deploy noise suppression",
-    message: `This writes the exclusion shown in the diff to the live Chronicle rule "${ruleName}". Matching events will stop generating detections for this rule.`,
-    confirmLabel: "Deploy to Chronicle",
-    variant: "danger",
-  });
-  if (!ok) return;
-
-  const buttons = tuningDeployButtons(ruleId);
-  const labels = buttons.map((b) => b.innerHTML);
-  buttons.forEach((b) => { b.disabled = true; b.setAttribute("aria-busy", "true"); b.textContent = "Deploying…"; });
-  let deployed = false;
-  try {
-    const res = await fetch(`/api/tuning/deploy/${encodeURIComponent(ruleId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rule_name: ruleName }),
-    });
-    if (!res.ok) {
-      showToast("error", `Deploy failed for ${ruleName}: ${await describeHttpError(res)}`);
+window.deployTuningProposal = async function(ruleId, ruleName, proposalId) {
+  let targetProposalId = proposalId || "";
+  if (!targetProposalId) {
+    try {
+      const res = await fetch("/api/proposals?status=OPEN");
+      if (res.ok) {
+        const openProps = await res.json();
+        const match = Array.isArray(openProps)
+          ? openProps.find((p) => p && p.target_resource_id === ruleId)
+          : null;
+        if (match && match.id) {
+          targetProposalId = match.id;
+        }
+      }
+    } catch (err) {
+      showToast("error", `Could not look up open proposal for ${ruleName}: ${friendlyErrorText(err)}`);
       return;
     }
-    const result = await res.json().catch(() => ({}));
-    if (result.status === "SUCCESS") {
-      deployed = true;
-      showToast("success", `Noise suppression deployed for ${ruleName}.${result.message ? " " + result.message : ""}`);
-    } else {
-      showToast("error", `Deploy failed for ${ruleName}: ${result.message || "unknown error"}`);
-    }
-  } catch (err) {
-    showToast("error", `Deploy failed for ${ruleName}: ${friendlyErrorText(err)}`);
-  } finally {
-    buttons.forEach((b, i) => {
-      b.removeAttribute("aria-busy");
-      if (deployed) {
-        b.textContent = "✓ Deployed";
-      } else {
-        b.disabled = false;
-        b.innerHTML = labels[i];
-      }
-    });
   }
+  if (!targetProposalId) {
+    showToast("error", `No open proposal found for ${ruleName || ruleId}. Submit a tuning proposal first.`);
+    return;
+  }
+  await window.approveProposal(targetProposalId);
 };
 
 // --- Message Sending ---

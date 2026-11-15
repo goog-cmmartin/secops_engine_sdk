@@ -1439,6 +1439,28 @@
   <!-- Global Toast Notifications Container -->
   <div id="toastContainer" class="toast-container" role="status" aria-live="polite" aria-relevant="additions"></div>
 
+  <script>
+    (function () {
+      const meta = document.querySelector('meta[name="secops-api-token"]');
+      const token = meta ? meta.getAttribute('content') : '';
+      if (!token || typeof window.fetch !== 'function') return;
+      const origFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        const urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+        const isSameOriginApi = urlStr.startsWith('/api/') || urlStr.startsWith(window.location.origin + '/api/');
+        if (isSameOriginApi) {
+          const nextInit = Object.assign({}, init || {});
+          const headers = new Headers(nextInit.headers || (typeof input !== 'string' && input && input.headers ? input.headers : undefined));
+          if (!headers.has('X-SecOps-Token')) {
+            headers.set('X-SecOps-Token', token);
+          }
+          nextInit.headers = headers;
+          return origFetch(input, nextInit);
+        }
+        return origFetch(input, init);
+      };
+    })();
+  </script>
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>

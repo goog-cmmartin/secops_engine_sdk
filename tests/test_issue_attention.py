@@ -2,7 +2,10 @@
 
 import unittest
 
-from fastapi.testclient import TestClient
+try:
+    from fastapi.testclient import TestClient
+except ModuleNotFoundError:
+    TestClient = None  # type: ignore[assignment]
 
 from agents.core.issue_worker import OUTCOME_ESCALATED
 from agents.core.work_queue import OPERATOR_REQUEUED_OUTCOME
@@ -57,13 +60,17 @@ class TestOperatorRequeue(IssueWorkerTestBase):
         self.assertFalse(self.lifecycle.close_issue_manually(ISSUE_ID, "alice", "again", commit=False))
 
 
+@unittest.skipIf(TestClient is None, "fastapi not installed in active environment")
 class TestAttentionEndpoints(unittest.TestCase):
     """Overview must surface escalated issues (board column + escalations) and expose requeue/close."""
 
     def setUp(self) -> None:
         from clients.web import server
         self.server = server
-        self.client = TestClient(server.app)
+        self.client = TestClient(
+            server.app,
+            headers={"X-SecOps-Token": server.WEB_API_TOKEN},
+        )
         self.issue_id = "SOC-TEST-ATTENTION-ENDPOINTS"
         issue = _parser_issue(self.issue_id)
         issue.priority_score = 0  # lowest priority: must still survive the overview's top-N cut

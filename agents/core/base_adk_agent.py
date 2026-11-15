@@ -556,8 +556,37 @@ class BaseSecOpsAdkAgent:
             "message": f"No active task, proposal, or rule found matching identifier '{clean_id}'.",
         }
 
+    _offline_inspection_registry: Optional[Any] = None
+
+    @classmethod
+    def _resolve_inspection_registry(cls, engine_obj: Optional[Any]) -> Any:
+        reg = getattr(engine_obj, "registry", None) if engine_obj is not None else None
+        if reg is not None and reg.list_capabilities():
+            return reg
+        from engine.registry import WorkflowRegistry, registry as _default_registry
+
+        if _default_registry.list_capabilities():
+            return _default_registry
+        if cls._offline_inspection_registry is None:
+            from engine.facade import SecOpsEngine
+
+            cls._offline_inspection_registry = SecOpsEngine(
+                adapter=object(),
+                custom_registry=WorkflowRegistry(),
+            ).registry
+        return cls._offline_inspection_registry
+
     def bind_capability(self, capability: WorkflowCapability) -> None:
         """Binds an engine capability as a callable ADK 2 tool function for Gemini."""
+        from engine.taxonomy import is_tenant_read_only_capability
+
+        reg = self._resolve_inspection_registry(self.engine) if capability.uses else getattr(self.engine, "registry", None)
+        if not is_tenant_read_only_capability(capability, reg):
+            raise ValueError(
+                f"Agent {self.handle} cannot bind tenant-mutating capability "
+                f"'{capability.capability_id}' (kind={capability.kind}, side_effects={capability.side_effects}, uses={capability.uses}) "
+                f"as a direct model tool; route mutations through ProposalManager."
+            )
         tool_name = capability.mcp_tool_name or capability.capability_id.replace(".", "_")
         self._capabilities[capability.capability_id] = capability
 
@@ -569,6 +598,12 @@ class BaseSecOpsAdkAgent:
         new_sig = orig_sig.replace(parameters=clean_params, return_annotation=Dict[str, Any])
 
         def _tool_wrapper(*args: Any, **kwargs: Any) -> Any:
+            reg = getattr(self.engine, "registry", None) if self.engine is not None else None
+            if reg is None:
+                from engine.registry import registry as _default_registry
+                reg = _default_registry
+            reg.validate_agent_call(capability, *args, **kwargs)
+
             bound = new_sig.bind(*args, **kwargs)
             bound.apply_defaults()
             logger.info("Agent %s invoking live capability %s with %s", self.handle, capability.capability_id, bound.arguments)
@@ -821,6 +856,11 @@ class BaseSecOpsAdkAgent:
                 if response is not None:
                     break
 
+            if response is None and last_err is not None:
+                raise RuntimeError(
+                    f"LLM execution failed for {self.handle}: {last_err}"
+                ) from last_err
+
             tools_run_this_turn = self.executed_tool_calls[turn_start_idx:]
 
             response_text = ""
@@ -915,9 +955,9 @@ class BaseSecOpsAdkAgent:
             return agent_msg
 
         except Exception as e:
-            logger.exception("Agent %s failed during reasoning loop: %s", self.handle, e)
             err_str = str(e).lower()
             if "token count exceeds" in err_str or "maximum number of tokens" in err_str or "1048576" in err_str:
+                logger.exception("Agent %s exceeded context window: %s", self.handle, e)
                 limit_val = get_model_token_limit(target_model)
                 error_content = (
                     f"⚠️ **Context Window Budget Exceeded in `{self.handle}`**\n\n"
@@ -927,13 +967,8 @@ class BaseSecOpsAdkAgent:
                     f"- Scoped query filters have been recommended to fit within context (e.g., shorter lookback window, specific rule/log IDs, or error type filters).\n"
                     f"- The engine's safety guardrails have recorded this event in the Evidence Fabric."
                 )
-            else:
-                error_content = (
-                    f"**Execution Error in `{self.handle}`**:\n"
-                    f"> {type(e).__name__}: {e}\n\n"
-                    f"*Please check the Google SecOps tenant connectivity or prompt parameters.*"
-                )
-            return self.post_message(content=error_content, stream=stream, topic=topic)
+                return self.post_message(content=error_content, stream=stream, topic=topic)
+            raise
 
     def post_message(
         self,

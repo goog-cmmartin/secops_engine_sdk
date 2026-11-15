@@ -22,7 +22,7 @@ class DetectionTuningAgentAgent(BaseSecOpsAdkAgent):
     Eliminates alert fatigue by analyzing high-trigger YARA-L rules, isolating benign administrative activity, enforcing strict multi-factor safety guardrails, and generating verified exclusions and Gas Town HITL proposals.
     """
 
-    CAPABILITIES = ['rule.list', 'rule.get', 'rule.verify', 'dashboard.execute_query', 'curated_detections.tuning.top_noisy_rules', 'curated_detections.tuning.entity_cardinality', 'curated_detections.tuning.samples', 'curated_detections.tuning.synthesize', 'curated_detections.refinements.test', 'curated_detections.refinements.create']
+    CAPABILITIES = ['rule.list', 'rule.get', 'rule.verify', 'dashboard.execute_query', 'curated_detections.tuning.top_noisy_rules', 'curated_detections.tuning.entity_cardinality', 'curated_detections.tuning.samples', 'curated_detections.tuning.synthesize', 'curated_detections.refinements.test']
 
     def __init__(
         self,

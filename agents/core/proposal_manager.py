@@ -4,14 +4,18 @@ Manages autonomous change proposals (.proposals/open, .proposals/merged, .propos
 frontmatter serialization, unified diffs, pre-flight verification proofs, and automated merge execution.
 """
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 import json
 import logging
 import os
 from pathlib import Path
+import re
+import secrets
 import subprocess
-from typing import Any, Dict, List, Optional
+import tempfile
+from typing import Any, Dict, Iterator, List, Optional
 import yaml
 
 from agents.core.approval_policy import ApprovalPolicyError, check_approval, is_agent_actor, required_tier
@@ -193,35 +197,130 @@ class ProposalManager:
             f"- Replay Summary: {proposal.preflight.replay_summary}\n"
         )
 
-    def _parse_markdown(self, file_path: Path) -> ChangeProposal:
-        """Parses a proposal markdown file with YAML frontmatter."""
-        content = file_path.read_text(encoding="utf-8")
-        if not content.startswith("---"):
-            raise ValueError(f"Proposal file {file_path} is missing YAML frontmatter.")
+    @staticmethod
+    def _validate_proposal_id(proposal_id: str) -> str:
+        clean = str(proposal_id or "").strip()
+        if (
+            not clean
+            or clean in (".", "..")
+            or clean.startswith(".")
+            or any(c in clean for c in ("/", "\\", "\x00"))
+            or any(ord(c) < 0x20 or ord(c) == 0x7F for c in clean)
+        ):
+            raise ValueError(f"Invalid proposal ID: {proposal_id!r}")
+        return clean
 
-        parts = content.split("---", 2)
-        if len(parts) < 3:
+    @staticmethod
+    def _atomic_write_text(target_file: Path, content: str, *, exclusive: bool = False) -> None:
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        if exclusive:
+            try:
+                fd = os.open(str(target_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError as exc:
+                raise ValueError(f"Proposal file '{target_file.name}' already exists.") from exc
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+            except Exception:
+                target_file.unlink(missing_ok=True)
+                raise
+            return
+
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=f".{target_file.stem}.",
+            suffix=".tmp",
+            dir=str(target_file.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp_path, str(target_file))
+        except Exception:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+    @contextmanager
+    def _claim_proposal_lock(self, proposal_id: str) -> Iterator[None]:
+        clean_id = self._validate_proposal_id(proposal_id)
+        lock_file = self.open_dir / f".{clean_id}.lock"
+        try:
+            import fcntl as _fcntl
+        except ImportError:
+            _fcntl = None  # type: ignore[assignment]
+
+        if _fcntl is not None:
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                os.close(fd)
+                raise ValueError(f"Proposal {clean_id} is currently locked by another operation.") from exc
+            try:
+                os.ftruncate(fd, 0)
+                os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+                yield
+            finally:
+                try:
+                    lock_file.unlink(missing_ok=True)
+                finally:
+                    try:
+                        _fcntl.flock(fd, _fcntl.LOCK_UN)
+                    finally:
+                        os.close(fd)
+            return
+
+        try:
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+            os.close(fd)
+        except FileExistsError as exc:
+            raise ValueError(f"Proposal {clean_id} is currently locked by another operation.") from exc
+        try:
+            yield
+        finally:
+            lock_file.unlink(missing_ok=True)
+
+    def _parse_markdown(self, file_path: Path) -> ChangeProposal:
+        """Parses a proposal markdown file with line-anchored YAML frontmatter."""
+        content = file_path.read_text(encoding="utf-8")
+        fm_match = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", content, flags=re.DOTALL)
+        if not fm_match:
+            if not content.startswith("---"):
+                raise ValueError(f"Proposal file {file_path} is missing YAML frontmatter.")
             raise ValueError(f"Malformed proposal format in {file_path}.")
 
-        frontmatter = yaml.safe_load(parts[1])
+        frontmatter = yaml.safe_load(fm_match.group(1))
+        if not isinstance(frontmatter, dict):
+            raise ValueError(f"Proposal frontmatter in {file_path} must be a YAML mapping.")
         preflight_data = frontmatter.get("preflight", {})
         preflight = PreflightProof(**preflight_data) if isinstance(preflight_data, dict) else PreflightProof()
 
-        # Extract rationale and diff from markdown body
-        body = parts[2]
+        # Extract rationale and diff from markdown body using line-anchored section boundaries
+        body = fm_match.group(2)
         rationale = ""
         diff = ""
 
-        if "## Problem Rationale" in body:
-            rat_section = body.split("## Problem Rationale")[1]
-            if "## Proposed Unified Diff" in rat_section:
-                rationale = rat_section.split("## Proposed Unified Diff")[0].strip()
-            else:
-                rationale = rat_section.strip()
+        rat_match = re.search(
+            r"(?:^|\r?\n)## Problem Rationale\r?\n(.*?)(?=\r?\n## Proposed Unified Diff\r?\n|\r?\n## Pre-Flight Verification Proof\r?\n|\Z)",
+            body,
+            flags=re.DOTALL,
+        )
+        if rat_match:
+            rationale = rat_match.group(1).strip()
 
-        if "```diff" in body:
-            diff_section = body.split("```diff")[1]
-            diff = diff_section.split("```")[0].strip()
+        diff_match = re.search(
+            r"(?:^|\r?\n)## Proposed Unified Diff\r?\n```diff\r?\n(.*?)\r?\n```(?=\r?\n## Pre-Flight Verification Proof\r?\n|\r?\n*\Z)",
+            body,
+            flags=re.DOTALL,
+        )
+        if not diff_match:
+            diff_match = re.search(
+                r"(?:^|\r?\n)```diff\r?\n(.*?)\r?\n```(?:\r?\n|\Z)",
+                body,
+                flags=re.DOTALL,
+            )
+        if diff_match:
+            diff = diff_match.group(1).strip()
 
         status = frontmatter.get("status", "OPEN")
         action_type = frontmatter.get("action_type", "")
@@ -275,7 +374,14 @@ class ProposalManager:
         """
         if not proposal.id:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            proposal.id = f"prop-{timestamp}-{proposal.subsystem[:6]}"
+            subsys = re.sub(r"[^A-Za-z0-9_-]", "", proposal.subsystem or "gen")[:6] or "gen"
+            proposal.id = f"prop-{timestamp}-{subsys}-{secrets.token_hex(3)}"
+        else:
+            proposal.id = self._validate_proposal_id(proposal.id)
+
+        for existing_dir in (self.open_dir, self.merged_dir, self.rejected_dir):
+            if (existing_dir / f"{proposal.id}.md").exists():
+                raise ValueError(f"Proposal '{proposal.id}' already exists.")
 
         proposal.status = "OPEN"
         # Tier is always derived server-side; agents cannot self-declare a lower one.
@@ -289,28 +395,30 @@ class ProposalManager:
 
         target_file = self.open_dir / f"{proposal.id}.md"
         content = self._format_markdown(proposal)
-        target_file.write_text(content, encoding="utf-8")
+        self._atomic_write_text(target_file, content, exclusive=True)
         logger.info("Created proposal %s at %s", proposal.id, target_file)
         return proposal.id
 
     def update_proposal(self, proposal: ChangeProposal) -> None:
         """Updates an existing proposal file in place (e.g. enriching preflight proofs)."""
-        target_file = self.open_dir / f"{proposal.id}.md"
+        clean_id = self._validate_proposal_id(proposal.id)
+        target_file = self.open_dir / f"{clean_id}.md"
         if not target_file.is_file():
             for d in [self.merged_dir, self.rejected_dir]:
-                candidate = d / f"{proposal.id}.md"
+                candidate = d / f"{clean_id}.md"
                 if candidate.is_file():
                     target_file = candidate
                     break
         proposal.updated_at = datetime.now(timezone.utc).isoformat()
         content = self._format_markdown(proposal)
-        target_file.write_text(content, encoding="utf-8")
+        self._atomic_write_text(target_file, content)
         logger.info("Updated proposal %s at %s", proposal.id, target_file)
 
     def get_proposal(self, proposal_id: str) -> ChangeProposal:
         """Finds and parses a proposal from open, merged, or rejected directories."""
+        clean_id = self._validate_proposal_id(proposal_id)
         for directory in [self.open_dir, self.merged_dir, self.rejected_dir]:
-            candidate = directory / f"{proposal_id}.md"
+            candidate = directory / f"{clean_id}.md"
             if candidate.is_file():
                 return self._parse_markdown(candidate)
 
@@ -337,7 +445,7 @@ class ProposalManager:
         results = []
         for d in directories:
             for p in sorted(d.glob("*.md")):
-                if p.name == ".gitkeep":
+                if p.name.startswith("."):
                     continue
                 try:
                     proposal = self._parse_markdown(p)
@@ -373,171 +481,177 @@ class ProposalManager:
             StaleTargetError: the target changed since the proposal was created,
                 or could not be read to check.
         """
-        open_file = self.open_dir / f"{proposal_id}.md"
-        if not open_file.is_file():
-            raise ValueError(f"Proposal {proposal_id} is not in OPEN status.")
+        clean_id = self._validate_proposal_id(proposal_id)
+        with self._claim_proposal_lock(clean_id):
+            open_file = self.open_dir / f"{clean_id}.md"
+            if not open_file.is_file():
+                raise ValueError(f"Proposal {clean_id} is not in OPEN status.")
 
-        proposal = self._parse_markdown(open_file)
+            proposal = self._parse_markdown(open_file)
+            if (proposal.status or "").upper() != "OPEN":
+                raise ValueError(
+                    f"Proposal {clean_id} is not in OPEN status (found {proposal.status})."
+                )
 
-        stored_tier = proposal.required_tier
-        if proposal.issue_id and lifecycle_manager is not None:
+            stored_tier = proposal.required_tier
+            if proposal.issue_id and lifecycle_manager is not None:
+                try:
+                    issue = lifecycle_manager.work_queue.get_issue(proposal.issue_id)
+                    if issue is not None:
+                        stored_tier = issue.governance.required_authority_tier
+                except Exception as tier_err:
+                    logger.warning("Could not read linked issue tier for %s: %s", clean_id, tier_err)
+
+            # Policy gate: raises before any production mutation.
+            proposal.required_tier = check_approval(
+                author=proposal.author,
+                approver=merged_by,
+                action_type=proposal.action_type,
+                risk_level=proposal.risk_level,
+                stored_tier=stored_tier,
+                syntax_verified=bool(proposal.preflight.syntax_verified),
+                override_preflight=override_preflight,
+                override_reason=override_reason,
+            )
+            if override_preflight and not proposal.preflight.syntax_verified:
+                proposal.preflight_override_reason = (override_reason or "").strip()
+
+            # Stale-target gate: raises before any production mutation.
+            proposal.base_verified_at_merge = verify_unchanged(
+                engine, proposal.action_type, proposal.target_resource_id, proposal.base_revision
+            )
+
+            execution_res = None
+            action = (proposal.action_type or "").upper()
+            manual_apply = not has_executor(action)
+
             try:
-                issue = lifecycle_manager.work_queue.get_issue(proposal.issue_id)
-                if issue is not None:
-                    stored_tier = issue.governance.required_authority_tier
-            except Exception as tier_err:
-                logger.warning("Could not read linked issue tier for %s: %s", proposal_id, tier_err)
-
-        # Policy gate: raises before any production mutation.
-        proposal.required_tier = check_approval(
-            author=proposal.author,
-            approver=merged_by,
-            action_type=proposal.action_type,
-            risk_level=proposal.risk_level,
-            stored_tier=stored_tier,
-            syntax_verified=bool(proposal.preflight.syntax_verified),
-            override_preflight=override_preflight,
-            override_reason=override_reason,
-        )
-        if override_preflight and not proposal.preflight.syntax_verified:
-            proposal.preflight_override_reason = (override_reason or "").strip()
-
-        # Stale-target gate: raises before any production mutation.
-        proposal.base_verified_at_merge = verify_unchanged(
-            engine, proposal.action_type, proposal.target_resource_id, proposal.base_revision
-        )
-
-        execution_res = None
-        action = (proposal.action_type or "").upper()
-        manual_apply = not has_executor(action)
-
-        try:
-            # 1. Execute mutation against live Google SecOps API via SecOpsEngine
-            if action in RULE_TEXT_ACTIONS:
-                rule_id = proposal.target_resource_id
-                rule_text = proposal.mutation_payload.get("rule_text")
-                update_mask = proposal.mutation_payload.get("update_mask", "text")
-                if not rule_text:
-                    raise ValueError(f"{proposal.action_type} mutation requires 'rule_text' in mutation_payload.")
-                execution_res = engine.patch_rule(
-                    rule_id_or_name=rule_id,
-                    rule_text=rule_text,
-                    update_mask=update_mask,
-                )
-
-            elif action in RULE_DEPLOYMENT_ACTIONS:
-                rule_id = proposal.target_resource_id
-                enabled = proposal.mutation_payload.get("enabled")
-                alerting = proposal.mutation_payload.get("alerting")
-                execution_res = engine.update_rule_deployment(
-                    rule_id_or_name=rule_id,
-                    enabled=enabled,
-                    alerting=alerting,
-                )
-
-            elif action == "GENERIC_CAPABILITY":
-                cap_id = proposal.mutation_payload.get("capability_id")
-                kwargs = proposal.mutation_payload.get("kwargs", {})
-                execution_res = engine.execute(cap_id, **kwargs)
-
-            elif action == "CREATE_FINDINGS_REFINEMENT":
-                query = _refinement_query(proposal.mutation_payload)
-                if not query:
-                    raise ValueError(
-                        "CREATE_FINDINGS_REFINEMENT requires 'refinement_query' (or 'tuned_rule_text') in mutation_payload."
+                # 1. Execute mutation against live Google SecOps API via SecOpsEngine
+                if action in RULE_TEXT_ACTIONS:
+                    rule_id = proposal.target_resource_id
+                    rule_text = proposal.mutation_payload.get("rule_text")
+                    update_mask = proposal.mutation_payload.get("update_mask", "text")
+                    if not rule_text:
+                        raise ValueError(f"{proposal.action_type} mutation requires 'rule_text' in mutation_payload.")
+                    execution_res = engine.patch_rule(
+                        rule_id_or_name=rule_id,
+                        rule_text=rule_text,
+                        update_mask=update_mask,
                     )
-                if engine is None:
-                    raise ValueError("CREATE_FINDINGS_REFINEMENT requires an engine to write the refinement.")
-                rule_id = proposal.mutation_payload.get("rule_id") or proposal.target_resource_id
-                execution_res = engine.create_findings_refinement(
-                    display_name=(proposal.title or f"Exclusion for {rule_id}")[:200],
-                    query=query,
-                    curated_rule_ids=[rule_id] if rule_id else None,
+
+                elif action in RULE_DEPLOYMENT_ACTIONS:
+                    rule_id = proposal.target_resource_id
+                    enabled = proposal.mutation_payload.get("enabled")
+                    alerting = proposal.mutation_payload.get("alerting")
+                    execution_res = engine.update_rule_deployment(
+                        rule_id_or_name=rule_id,
+                        enabled=enabled,
+                        alerting=alerting,
+                    )
+
+                elif action == "GENERIC_CAPABILITY":
+                    cap_id = proposal.mutation_payload.get("capability_id")
+                    kwargs = proposal.mutation_payload.get("kwargs", {})
+                    execution_res = engine.execute(cap_id, **kwargs)
+
+                elif action == "CREATE_FINDINGS_REFINEMENT":
+                    query = _refinement_query(proposal.mutation_payload)
+                    if not query:
+                        raise ValueError(
+                            "CREATE_FINDINGS_REFINEMENT requires 'refinement_query' (or 'tuned_rule_text') in mutation_payload."
+                        )
+                    if engine is None:
+                        raise ValueError("CREATE_FINDINGS_REFINEMENT requires an engine to write the refinement.")
+                    rule_id = proposal.mutation_payload.get("rule_id") or proposal.target_resource_id
+                    execution_res = engine.create_findings_refinement(
+                        display_name=(proposal.title or f"Exclusion for {rule_id}")[:200],
+                        query=query,
+                        curated_rule_ids=[rule_id] if rule_id else None,
+                    )
+
+                else:
+                    logger.info("No executor for %s; merging %s as manual apply", action, clean_id)
+                    execution_res = {
+                        "status": MERGED_MANUAL_APPLY_REQUIRED,
+                        "action": proposal.action_type,
+                        "message": f"No automated write exists for {proposal.action_type}; apply it in SecOps and mark it applied.",
+                    }
+
+                # 2. Update proposal state
+                proposal.status = "MERGED"
+                proposal.merged_at = datetime.now(timezone.utc).isoformat()
+                proposal.merged_by = merged_by
+                proposal.approval_note = approval_note
+                proposal.updated_at = proposal.merged_at
+                if manual_apply:
+                    proposal.apply_status = APPLY_STATUS_MANUAL_REQUIRED
+                else:
+                    proposal.apply_status = APPLY_STATUS_APPLIED
+                    proposal.applied_by = merged_by
+                    proposal.applied_at = proposal.merged_at
+
+                # 3. Atomically write merged file and unlink open file
+                merged_file = self.merged_dir / f"{clean_id}.md"
+                self._atomic_write_text(merged_file, self._format_markdown(proposal))
+                open_file.unlink(missing_ok=True)
+
+                # 4. Optional Git commit
+                commit_hash = self._commit_merged_proposal(proposal)
+                if commit_hash:
+                    proposal.merge_commit = commit_hash
+                    self._atomic_write_text(merged_file, self._format_markdown(proposal))
+
+                # 5. Optional Inventory Snapshot Notification
+                snapshot_triggered = False
+                if inventory_client:
+                    try:
+                        inventory_client.trigger_snapshot(
+                            reason=f"Merged proposal {clean_id} by {merged_by}"
+                        )
+                        snapshot_triggered = True
+                    except Exception as snap_err:
+                        logger.warning("Failed triggering inventory snapshot: %s", snap_err)
+
+                # 6. Optional SOC Lifecycle Integration
+                if proposal.issue_id and lifecycle_manager:
+                    try:
+                        if manual_apply:
+                            # Nothing changed in SecOps: record the approval, keep the issue open.
+                            lifecycle_manager.decide_issue(
+                                issue_id=proposal.issue_id,
+                                decision="APPROVED",
+                                approver=merged_by,
+                                rationale=(
+                                    f"Approved {proposal.id}; no automated write for {proposal.action_type}, "
+                                    "awaiting manual apply."
+                                    + (f" Note: {approval_note}" if approval_note else "")
+                                ),
+                                commit=False,
+                            )
+                        else:
+                            self._record_applied_change(
+                                proposal, lifecycle_manager, merged_by, commit_hash, _as_dict(execution_res)
+                            )
+                    except Exception as lm_err:
+                        logger.warning("Failed recording merge in lifecycle manager: %s", lm_err)
+
+                return MergeResult(
+                    proposal_id=clean_id,
+                    success=True,
+                    status=MERGED_MANUAL_APPLY_REQUIRED if manual_apply else "MERGED",
+                    execution_result=execution_res,
+                    commit_hash=commit_hash,
+                    inventory_snapshot_triggered=snapshot_triggered,
                 )
 
-            else:
-                logger.info("No executor for %s; merging %s as manual apply", action, proposal_id)
-                execution_res = {
-                    "status": MERGED_MANUAL_APPLY_REQUIRED,
-                    "action": proposal.action_type,
-                    "message": f"No automated write exists for {proposal.action_type}; apply it in SecOps and mark it applied.",
-                }
-
-            # 2. Update proposal state
-            proposal.status = "MERGED"
-            proposal.merged_at = datetime.now(timezone.utc).isoformat()
-            proposal.merged_by = merged_by
-            proposal.approval_note = approval_note
-            proposal.updated_at = proposal.merged_at
-            if manual_apply:
-                proposal.apply_status = APPLY_STATUS_MANUAL_REQUIRED
-            else:
-                proposal.apply_status = APPLY_STATUS_APPLIED
-                proposal.applied_by = merged_by
-                proposal.applied_at = proposal.merged_at
-
-            # 3. Move file from open/ to merged/
-            merged_file = self.merged_dir / f"{proposal_id}.md"
-            merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
-            open_file.unlink(missing_ok=True)
-
-            # 4. Optional Git commit
-            commit_hash = self._commit_merged_proposal(proposal)
-            if commit_hash:
-                proposal.merge_commit = commit_hash
-                merged_file.write_text(self._format_markdown(proposal), encoding="utf-8")
-
-            # 5. Optional Inventory Snapshot Notification
-            snapshot_triggered = False
-            if inventory_client:
-                try:
-                    inventory_client.trigger_snapshot(
-                        reason=f"Merged proposal {proposal_id} by {merged_by}"
-                    )
-                    snapshot_triggered = True
-                except Exception as snap_err:
-                    logger.warning("Failed triggering inventory snapshot: %s", snap_err)
-
-            # 6. Optional SOC Lifecycle Integration
-            if proposal.issue_id and lifecycle_manager:
-                try:
-                    if manual_apply:
-                        # Nothing changed in SecOps: record the approval, keep the issue open.
-                        lifecycle_manager.decide_issue(
-                            issue_id=proposal.issue_id,
-                            decision="APPROVED",
-                            approver=merged_by,
-                            rationale=(
-                                f"Approved {proposal.id}; no automated write for {proposal.action_type}, "
-                                "awaiting manual apply."
-                                + (f" Note: {approval_note}" if approval_note else "")
-                            ),
-                            commit=False,
-                        )
-                    else:
-                        self._record_applied_change(
-                            proposal, lifecycle_manager, merged_by, commit_hash, _as_dict(execution_res)
-                        )
-                except Exception as lm_err:
-                    logger.warning("Failed recording merge in lifecycle manager: %s", lm_err)
-
-            return MergeResult(
-                proposal_id=proposal_id,
-                success=True,
-                status=MERGED_MANUAL_APPLY_REQUIRED if manual_apply else "MERGED",
-                execution_result=execution_res,
-                commit_hash=commit_hash,
-                inventory_snapshot_triggered=snapshot_triggered,
-            )
-
-        except Exception as e:
-            logger.error("Failed to merge proposal %s: %s", proposal_id, e)
-            return MergeResult(
-                proposal_id=proposal_id,
-                success=False,
-                status="FAILED",
-                error_message=str(e),
-            )
+            except Exception as e:
+                logger.error("Failed to merge proposal %s: %s", clean_id, e)
+                return MergeResult(
+                    proposal_id=clean_id,
+                    success=False,
+                    status="FAILED",
+                    error_message=str(e),
+                )
 
     def _record_applied_change(
         self,
@@ -688,18 +802,24 @@ class ProposalManager:
         lifecycle_manager: Any = None,
     ) -> ChangeProposal:
         """Rejects a proposal and moves it to rejected/ directory."""
-        open_file = self.open_dir / f"{proposal_id}.md"
-        if not open_file.is_file():
-            raise ValueError(f"Proposal {proposal_id} is not open for rejection.")
+        clean_id = self._validate_proposal_id(proposal_id)
+        with self._claim_proposal_lock(clean_id):
+            open_file = self.open_dir / f"{clean_id}.md"
+            if not open_file.is_file():
+                raise ValueError(f"Proposal {clean_id} is not open for rejection.")
 
-        proposal = self._parse_markdown(open_file)
-        proposal.status = "REJECTED"
-        proposal.rejection_reason = f"[{rejected_by}]: {reason}"
-        proposal.updated_at = datetime.now(timezone.utc).isoformat()
+            proposal = self._parse_markdown(open_file)
+            if (proposal.status or "").upper() != "OPEN":
+                raise ValueError(
+                    f"Proposal {clean_id} is not open for rejection (found {proposal.status})."
+                )
+            proposal.status = "REJECTED"
+            proposal.rejection_reason = f"[{rejected_by}]: {reason}"
+            proposal.updated_at = datetime.now(timezone.utc).isoformat()
 
-        rejected_file = self.rejected_dir / f"{proposal_id}.md"
-        rejected_file.write_text(self._format_markdown(proposal), encoding="utf-8")
-        open_file.unlink(missing_ok=True)
+            rejected_file = self.rejected_dir / f"{clean_id}.md"
+            self._atomic_write_text(rejected_file, self._format_markdown(proposal))
+            open_file.unlink(missing_ok=True)
 
         if proposal.issue_id and lifecycle_manager:
             try:

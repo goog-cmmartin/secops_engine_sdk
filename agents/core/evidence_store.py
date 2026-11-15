@@ -971,30 +971,7 @@ class FirestoreEvidenceStore(EvidenceFabricStore):
             return filtered[:limit]
 
     def generate_rule_embeddings(self, texts: List[str]) -> List[List[float]]:
-        embeddings: List[List[float]] = []
-        batch_size = 50
-
-        try:
-            from google import genai
-            client = genai.Client()
-            for i in range(0, len(texts), batch_size):
-                chunk = texts[i:i + batch_size]
-                response = client.models.embed_content(
-                    model="text-embedding-004",
-                    contents=chunk,
-                )
-                if hasattr(response, "embeddings"):
-                    for emb in response.embeddings:
-                        embeddings.append(list(getattr(emb, "values", [])))
-                else:
-                    for c in chunk:
-                        embeddings.append(_deterministic_fallback_vector(c))
-            if len(embeddings) == len(texts):
-                return embeddings
-        except Exception as e:
-            logger.info("Vertex AI embedding API unavailable (%s), using deterministic fallback vectors.", e)
-
-        return [_deterministic_fallback_vector(t) for t in texts]
+        return _embed_texts_via_genai(texts)
 
     def save_playbook_analysis(self, workflow_identifier: str, analysis_dict: Dict[str, Any]) -> None:
         from google.cloud import firestore
@@ -1332,23 +1309,39 @@ def _is_same_rule_identity(rule_id_a: str, rule_id_b: str) -> bool:
     return core_a == core_b
 
 
-def _deterministic_fallback_vector(text: str, dim: int = 768) -> List[float]:
-    """Generates a deterministic normalized 768-d float vector from input string.
+def _embed_texts_via_genai(texts: List[str], batch_size: int = 50) -> List[List[float]]:
+    """Generates live 768-d semantic embeddings via Google GenAI (text-embedding-004).
 
-    Used when live Vertex AI embedding API quota or endpoint is unavailable.
+    Raises RuntimeError if the embedding client or endpoint fails or returns an
+    incomplete batch. Never fabricates hash-based vectors.
     """
-    import hashlib
-    import math
-
-    vec = []
-    seed = (text or "empty").encode("utf-8")
-    for i in range(dim):
-        h = hashlib.sha256(seed + i.to_bytes(4, "big")).digest()
-        val = (int.from_bytes(h[:4], "big") / 2147483648.0) - 1.0
-        vec.append(val)
-
-    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
-    return [round(x / norm, 6) for x in vec]
+    if not texts:
+        return []
+    try:
+        from google import genai
+        client = genai.Client()
+        embeddings: List[List[float]] = []
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i:i + batch_size]
+            response = client.models.embed_content(
+                model="text-embedding-004",
+                contents=chunk,
+            )
+            resp_embeddings = getattr(response, "embeddings", None)
+            if not resp_embeddings or len(resp_embeddings) != len(chunk):
+                raise RuntimeError(
+                    f"Embedding response returned {len(resp_embeddings or [])} vectors for {len(chunk)} inputs."
+                )
+            for emb in resp_embeddings:
+                vals = list(getattr(emb, "values", []) or [])
+                if not vals:
+                    raise RuntimeError("Embedding response contained an empty vector.")
+                embeddings.append(vals)
+        return embeddings
+    except Exception as exc:
+        if isinstance(exc, RuntimeError) and str(exc).startswith("Rule embedding generation failed"):
+            raise
+        raise RuntimeError(f"Rule embedding generation failed: {exc}") from exc
 
 
 class LocalFileEvidenceStore(EvidenceFabricStore):
@@ -1747,7 +1740,7 @@ class LocalFileEvidenceStore(EvidenceFabricStore):
         return filtered[:limit]
 
     def generate_rule_embeddings(self, texts: List[str]) -> List[List[float]]:
-        return [_deterministic_fallback_vector(t) for t in texts]
+        return _embed_texts_via_genai(texts)
 
     def save_playbook_analysis(self, workflow_identifier: str, analysis_dict: Dict[str, Any]) -> None:
         clean_id = normalize_doc_id(workflow_identifier)

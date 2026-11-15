@@ -8,14 +8,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
 from agents.core.proposal_manager import ChangeProposal, PreflightProof, ProposalManager
 from agents.generated import create_agent_fleet
 from clients.web.chat_engine import ActiveAgentJob, AgentDispatcher, ChatMessage, ChatStore
-from clients.web.server import app, chat_store, proposal_manager, engine, fleet
 from engine.facade import SecOpsEngine
 from engine.registry import WorkflowRegistry
+
+try:
+    from fastapi.testclient import TestClient
+    from clients.web.server import WEB_API_TOKEN, app, chat_store, proposal_manager, engine, fleet
+except ModuleNotFoundError:
+    TestClient = None  # type: ignore[assignment]
+    WEB_API_TOKEN = app = chat_store = proposal_manager = engine = fleet = None  # type: ignore[assignment]
 
 
 class _InertAdapterForChatTest:
@@ -440,9 +444,10 @@ class AgentDispatcherTest(unittest.IsolatedAsyncioTestCase):
             self.dispatcher._execute_agent = orig_execute
 
 
+@unittest.skipIf(TestClient is None, "fastapi not installed in active environment")
 class FastApiServerEndpointsTest(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(app)
+        self.client = TestClient(app, headers={"X-SecOps-Token": WEB_API_TOKEN})
 
     def test_health_endpoint(self):
         res = self.client.get("/api/health")
@@ -520,16 +525,17 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         ids = [p["id"] for p in res_list.json()]
         self.assertIn(prop_id, ids)
 
-        # 3. Approve via POST /api/proposals/{id}/approve
-        res_approve = self.client.post(
-            f"/api/proposals/{prop_id}/approve",
-            json={"merged_by": "secops-analyst-test", "approval_note": "Validated against 7d replay"},
-        )
+        # 3. Approve via POST /api/proposals/{id}/approve (operator derived from authenticated session)
+        with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "secops-analyst-test"}, clear=False):
+            res_approve = self.client.post(
+                f"/api/proposals/{prop_id}/approve",
+                json={"merged_by": "spoofed-body-ignored", "approval_note": "Validated against 7d replay"},
+            )
         self.assertEqual(res_approve.status_code, 200)
         merge_data = res_approve.json()
         self.assertTrue(merge_data["success"])
 
-        # 4. Verify status is MERGED
+        # 4. Verify status is MERGED and approver came from session, not body
         saved_prop = proposal_manager.get_proposal(prop_id)
         self.assertEqual(saved_prop.status, "MERGED")
         self.assertEqual(saved_prop.merged_by, "secops-analyst-test")
@@ -556,7 +562,8 @@ class FastApiServerEndpointsTest(unittest.TestCase):
             listed = {p["id"]: p for p in self.client.get("/api/proposals").json()}
             self.assertFalse(listed[prop_id]["has_executor"])
 
-            res = self.client.post(f"/api/proposals/{prop_id}/approve", json={"merged_by": "alice@corp"})
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "alice@corp"}, clear=False):
+                res = self.client.post(f"/api/proposals/{prop_id}/approve", json={})
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json()["status"], "MERGED_MANUAL_APPLY_REQUIRED")
             detail = self.client.get(f"/api/proposals/{prop_id}").json()
@@ -565,11 +572,12 @@ class FastApiServerEndpointsTest(unittest.TestCase):
 
             self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
                                               json={"note": "short"}).status_code, 409)
-            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
-                                              json={"applied_by": "@parser-doctor",
-                                                    "note": "Applied it in the console"}).status_code, 403)
-            ok = self.client.post(f"/api/proposals/{prop_id}/mark-applied",
-                                  json={"applied_by": "bob@corp", "note": "Applied CBN patch in parser editor"})
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "@parser-doctor"}, clear=False):
+                self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                                  json={"note": "Applied it in the console"}).status_code, 403)
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "bob@corp"}, clear=False):
+                ok = self.client.post(f"/api/proposals/{prop_id}/mark-applied",
+                                      json={"note": "Applied CBN patch in parser editor"})
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["apply_status"], "MANUALLY_APPLIED")
             self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/mark-applied",
@@ -595,15 +603,17 @@ class FastApiServerEndpointsTest(unittest.TestCase):
         try:
             self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
                                               json={"reason": "Not approved yet anyway"}).status_code, 409)
-            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/approve",
-                                              json={"merged_by": "alice@corp"}).status_code, 200)
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "alice@corp"}, clear=False):
+                self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/approve",
+                                                  json={}).status_code, 200)
             self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
                                               json={"reason": "short"}).status_code, 409)
-            self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
-                                              json={"abandoned_by": "@feed-medic",
-                                                    "reason": "Agent should not do this"}).status_code, 403)
-            ok = self.client.post(f"/api/proposals/{prop_id}/abandon",
-                                  json={"abandoned_by": "bob@corp", "reason": "Feed was decommissioned instead"})
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "@feed-medic"}, clear=False):
+                self.assertEqual(self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                                  json={"reason": "Agent should not do this"}).status_code, 403)
+            with unittest.mock.patch.dict(os.environ, {"SECOPS_OPERATOR_ID": "bob@corp"}, clear=False):
+                ok = self.client.post(f"/api/proposals/{prop_id}/abandon",
+                                      json={"reason": "Feed was decommissioned instead"})
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["apply_status"], "ABANDONED")
             self.assertEqual(ok.json()["abandoned_by"], "bob@corp")

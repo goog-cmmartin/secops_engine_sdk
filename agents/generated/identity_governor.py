@@ -159,17 +159,14 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
 
     def query_inventory_identity_report(
         self,
-        inventory_base_url: str = "http://localhost:8000",
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Queries the local SecOps Inventory service for SecOps Access and Identity reports.
+        """Queries the configured SecOps Inventory service for SecOps Access and Identity reports.
 
         Args:
-            inventory_base_url: Base URL of SecOps Inventory service (defaults to http://localhost:8000).
             tenant_id: Target tenant identifier or project ID.
         """
         report = self.engine.fetch_inventory_identity_report(
-            inventory_base_url=inventory_base_url,
             tenant_id=tenant_id,
         )
 
@@ -177,7 +174,7 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
             "agent": self.handle,
             "tool": "query_inventory_identity_report",
             "capability_id": "identity.inventory.report",
-            "arguments": {"inventory_base_url": inventory_base_url, "tenant_id": tenant_id},
+            "arguments": {"tenant_id": tenant_id},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -186,18 +183,15 @@ class IdentityGovernorAgent(BaseSecOpsAdkAgent):
     def run_identity_drift_audit(
         self,
         project_id: Optional[str] = None,
-        inventory_base_url: str = "http://localhost:8000",
     ) -> Dict[str, Any]:
         """Runs a complete IAM audit snapshot, stores it in the Evidence Fabric, and computes privilege drift against prior runs.
 
         Args:
             project_id: Target GCP project ID.
-            inventory_base_url: Base URL of SecOps Inventory service.
         """
         proj = project_id or getattr(self.engine.adapter, "project_id", None)
         rep = self.engine.generate_identity_governance_report(
             project_id=proj,
-            inventory_base_url=inventory_base_url,
         )
 
         # Retrieve prior audit from Evidence Fabric

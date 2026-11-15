@@ -35,7 +35,7 @@ class SecopsDispatcherLiveTest(unittest.TestCase):
         try:
             self.engine = get_live_engine()
         except Exception:
-            self.engine = SecOpsEngine(custom_registry=WorkflowRegistry())
+            self.engine = SecOpsEngine(adapter=object(), custom_registry=WorkflowRegistry())
 
         self.agent = SecopsDispatcherAgent(
             engine=self.engine,
@@ -100,6 +100,8 @@ class SecopsDispatcherLiveTest(unittest.TestCase):
 
     def test_live_autonomous_triage_and_delegation(self):
         """Verifies live Gemini 3.8 Flash autonomous reasoning loop and task delegation."""
+        from tests.live_guard import require_live
+        require_live(self)
         has_creds = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
         if not has_creds:
             self.skipTest("No Google credentials available for live Gemini 3.8 Flash test.")

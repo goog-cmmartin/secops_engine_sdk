@@ -198,7 +198,8 @@ class AgentFleetTest(unittest.TestCase):
 
         self.assertIn("verify_rule_text", tool_names)
         self.assertIn("get_rule", tool_names)
-        self.assertIn("patch_rule", tool_names)
+        self.assertNotIn("patch_rule", tool_names)
+        self.assertNotIn("update_rule_deployment", tool_names)
         self.assertEqual(optimizer.default_stream, "detections")
         self.assertEqual(optimizer.default_topic, "rule-proposals")
 

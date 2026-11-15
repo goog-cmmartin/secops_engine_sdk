@@ -28,7 +28,7 @@ class TestEvidenceStoreHelpers(unittest.TestCase):
     """Tests utility functions for document normalization and sanitization."""
 
     def test_normalize_doc_id(self):
-        full_path = "projects/sdl-preview-americas/locations/us/instances/test/rules/ru_6cb096c8-2270-4d03-860b-3c3db443a7e4"
+        full_path = "projects/example-secops-project/locations/us/instances/test/rules/ru_6cb096c8-2270-4d03-860b-3c3db443a7e4"
         self.assertEqual(
             normalize_doc_id(full_path),
             "ru_6cb096c8-2270-4d03-860b-3c3db443a7e4",
@@ -255,10 +255,13 @@ class TestLocalFileEvidenceStore(unittest.TestCase):
 
 
 class TestLiveFirestoreEvidenceStore(unittest.TestCase):
-    """Tests live Firestore connectivity against the GCP project sdl-preview-americas."""
+    """Tests live Firestore connectivity against the configured GCP project."""
 
     @classmethod
     def setUpClass(cls):
+        from tests.live_guard import live_tests_enabled
+        if not live_tests_enabled():
+            raise unittest.SkipTest("Live Firestore test disabled; set SECOPS_LIVE_TESTS=1 to run.")
         try:
             from engine.config import _load_env_file
             _load_env_file()
@@ -269,8 +272,9 @@ class TestLiveFirestoreEvidenceStore(unittest.TestCase):
             os.getenv("GCP_PROJECT_ID")
             or os.getenv("SECOPS_PROJECT_ID")
             or os.getenv("GOOGLE_CLOUD_PROJECT")
-            or "sdl-preview-americas"
         )
+        if not project:
+            raise unittest.SkipTest("No GCP_PROJECT_ID configured for live Firestore test.")
         try:
             cls.store = FirestoreEvidenceStore(project_id=project, database_id="(default)")
             # Verify connectivity

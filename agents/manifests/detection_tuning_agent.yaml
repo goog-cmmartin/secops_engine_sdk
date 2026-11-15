@@ -37,5 +37,4 @@ capabilities:
   - "curated_detections.tuning.samples"
   - "curated_detections.tuning.synthesize"
   - "curated_detections.refinements.test"
-  - "curated_detections.refinements.create"
 hitl_required: true

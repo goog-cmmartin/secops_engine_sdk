@@ -5,11 +5,15 @@ import tempfile
 import unittest
 from unittest import mock
 
-from fastapi.testclient import TestClient
-
 from agents.core.evidence_store import LocalFileEvidenceStore
-import clients.web.server as web_server
-from clients.web.server import app, fleet
+
+try:
+    from fastapi.testclient import TestClient
+    import clients.web.server as web_server
+    from clients.web.server import app, fleet
+except ModuleNotFoundError:
+    TestClient = None  # type: ignore[assignment]
+    web_server = app = fleet = None  # type: ignore[assignment]
 
 # Explicit test fixtures. Production no longer seeds default todos, so every test
 # that needs tasks creates them in an isolated temp store (never the live store).
@@ -49,6 +53,7 @@ def _seed(store: LocalFileEvidenceStore) -> None:
         store.save_todo(todo["todo_id"], dict(todo))
 
 
+@unittest.skipIf(TestClient is None, "fastapi not installed in active environment")
 class GasTownParameterCoherenceTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -62,7 +67,10 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
         for patcher in self._patches:
             patcher.start()
 
-        self.client = TestClient(app)
+        self.client = TestClient(
+            app,
+            headers={"X-SecOps-Token": web_server.WEB_API_TOKEN},
+        )
 
     def tearDown(self):
         for patcher in reversed(self._patches):
@@ -227,6 +235,7 @@ class GasTownParameterCoherenceTest(unittest.TestCase):
                 self.assertNotIn(banned, prop_str, f"Banned term '{banned}' found in proposal: {prop}")
 
 
+@unittest.skipIf(TestClient is None, "fastapi not installed in active environment")
 class EscalationAckAndApprovalTrustTest(unittest.TestCase):
     """Group 1 (UI review): escalation acks persist; approval surfaces show no fabricated data."""
 
@@ -240,7 +249,10 @@ class EscalationAckAndApprovalTrustTest(unittest.TestCase):
         ]
         for patcher in self._patches:
             patcher.start()
-        self.client = TestClient(app)
+        self.client = TestClient(
+            app,
+            headers={"X-SecOps-Token": web_server.WEB_API_TOKEN},
+        )
 
     def tearDown(self):
         for patcher in reversed(self._patches):

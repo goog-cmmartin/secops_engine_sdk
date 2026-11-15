@@ -119,8 +119,12 @@ class ApprovalPolicyUnitTests(unittest.TestCase):
         return check_approval(**base)
 
     def test_required_tier(self):
-        self.assertEqual(required_tier("UPDATE_RULE_TEXT", "MEDIUM"), AuthorityTier.TIER_2_PEER_REVIEW.value)
+        self.assertEqual(required_tier("UPDATE_RULE_TEXT", "LOW"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
+        self.assertEqual(required_tier("UPDATE_RULE_TEXT", "MEDIUM"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
         self.assertEqual(required_tier("UPDATE_RULE_TEXT", "HIGH"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
+        self.assertEqual(required_tier("PATCH_PARSER_CBN", "LOW"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
+        self.assertEqual(required_tier("CREATE_FINDINGS_REFINEMENT", "LOW"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
+        self.assertEqual(required_tier("REMEDIATE_FEED", "MEDIUM"), AuthorityTier.TIER_2_PEER_REVIEW.value)
         self.assertEqual(required_tier("DEPLOY_RULE", "LOW"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
         self.assertEqual(required_tier("GENERIC_CAPABILITY", "LOW"), AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
 
@@ -129,10 +133,10 @@ class ApprovalPolicyUnitTests(unittest.TestCase):
         self.assertEqual(tier, AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
 
     def test_stored_tier_can_raise(self):
-        tier = self._check(stored_tier=AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
+        tier = self._check(action_type="REMEDIATE_FEED", stored_tier=AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
         self.assertEqual(tier, AuthorityTier.TIER_3_HUMAN_APPROVAL.value)
         with self.assertRaises(ApprovalPolicyError) as ctx:
-            self._check(stored_tier=AuthorityTier.TIER_3_HUMAN_APPROVAL.value, approver="@peer-agent")
+            self._check(action_type="REMEDIATE_FEED", stored_tier=AuthorityTier.TIER_3_HUMAN_APPROVAL.value, approver="@peer-agent")
         self.assertEqual(ctx.exception.code, ApprovalPolicyError.HUMAN_REQUIRED)
 
     def test_self_approval_blocked_case_and_at_insensitive(self):
@@ -141,7 +145,13 @@ class ApprovalPolicyUnitTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, ApprovalPolicyError.SELF_APPROVAL)
 
     def test_peer_agent_may_approve_tier2(self):
-        self.assertEqual(self._check(approver="@peer-agent"), AuthorityTier.TIER_2_PEER_REVIEW.value)
+        self.assertEqual(
+            self._check(action_type="REMEDIATE_FEED", approver="@peer-agent"),
+            AuthorityTier.TIER_2_PEER_REVIEW.value,
+        )
+        with self.assertRaises(ApprovalPolicyError) as ctx:
+            self._check(action_type="UPDATE_RULE_TEXT", approver="@peer-agent")
+        self.assertEqual(ctx.exception.code, ApprovalPolicyError.HUMAN_REQUIRED)
 
     def test_agent_cannot_approve_tier3(self):
         with self.assertRaises(ApprovalPolicyError) as ctx:
@@ -228,7 +238,7 @@ class ApproveAndMergeEnforcementTests(unittest.TestCase):
             id="SOC-GOV-1", type="rule_decay",
             governance=IssueGovernance(required_authority_tier=AuthorityTier.TIER_3_HUMAN_APPROVAL.value),
         ))
-        self._create("p-linked", issue_id="SOC-GOV-1")
+        self._create("p-linked", action_type="REMEDIATE_FEED", issue_id="SOC-GOV-1")
         with self.assertRaises(ApprovalPolicyError) as ctx:
             self.manager.approve_and_merge("p-linked", engine=self.engine, merged_by="@peer-agent",
                                            lifecycle_manager=self.lifecycle)

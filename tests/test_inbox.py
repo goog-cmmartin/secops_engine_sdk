@@ -6,14 +6,18 @@ import tempfile
 import unittest
 from unittest import mock
 
-from fastapi.testclient import TestClient
-
 from agents.core.lifecycle import SOCLifecycleManager
 from agents.core.materializer import IssueMaterializer
 from agents.core.proposal_manager import ChangeProposal, PreflightProof, ProposalManager
 from agents.core.work_queue import LocalWorkQueue
 from engine.domain import IssueLifecycleStatus, IssueProblem, SOCIssue
-import clients.web.server as web_server
+
+try:
+    from fastapi.testclient import TestClient
+    import clients.web.server as web_server
+except ModuleNotFoundError:
+    TestClient = None  # type: ignore[assignment]
+    web_server = None  # type: ignore[assignment]
 
 
 class _Engine:
@@ -21,6 +25,7 @@ class _Engine:
         return {"status": "ok"}
 
 
+@unittest.skipIf(TestClient is None, "fastapi not installed in active environment")
 class InboxEndpointTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -42,7 +47,10 @@ class InboxEndpointTests(unittest.TestCase):
         ]
         for p in self._patches:
             p.start()
-        self.client = TestClient(web_server.app)
+        self.client = TestClient(
+            web_server.app,
+            headers={"X-SecOps-Token": web_server.WEB_API_TOKEN},
+        )
 
     def tearDown(self):
         for p in reversed(self._patches):

@@ -349,6 +349,10 @@ from engine.workflows.case_evidence import (
     DetachCaseEvidenceWorkflow,
 )
 from engine.workflows.correlate_silent_detections import CorrelateSilentDetectionsWorkflow
+from engine.workflows.related_cases_by_entity import (
+    RelatedCasesByEntityResult,
+    RelatedCasesByEntityWorkflow,
+)
 from engine.workflows.content_pack import (
     GetContentPackDetailWorkflow,
     ListContentPackCategoriesWorkflow,
@@ -684,11 +688,8 @@ class SecOpsEngine:
         self.evidence_store = evidence_store
         self._wf_cache: Dict[str, Any] = {}
 
-        # Register default capabilities
+        # Register default capabilities on this engine instance only
         self._register_default_capabilities()
-        if custom_registry is None:
-            for cap in self.registry.list_capabilities():
-                registry.register(cap)
 
     _WORKFLOW_MAP = {
         "_search_udm_wf": lambda e: SearchUDMWorkflow(e.adapter),
@@ -709,6 +710,7 @@ class SecOpsEngine:
         "_attach_case_evidence_wf": lambda e: AttachCaseEvidenceWorkflow(e.adapter),
         "_detach_case_evidence_wf": lambda e: DetachCaseEvidenceWorkflow(e.adapter),
         "_correlate_silent_detections_wf": lambda e: CorrelateSilentDetectionsWorkflow(e.adapter),
+        "_related_cases_by_entity_wf": lambda e: RelatedCasesByEntityWorkflow(e.adapter),
         "_update_case_wf": lambda e: UpdateCaseWorkflow(e.adapter),
         "_assign_case_wf": lambda e: AssignCaseWorkflow(e.adapter),
         "_set_case_stage_wf": lambda e: SetCaseStageWorkflow(e.adapter),
@@ -1180,6 +1182,7 @@ class SecOpsEngine:
                 handler=self.add_case_comment,
                 mcp_tool_name="add_case_comment",
                 composed=False,
+                side_effects=["write_case_comment"],
                 evidence_path="evidence/case/comment",
             )
         )
@@ -1216,6 +1219,7 @@ class SecOpsEngine:
                 handler=self.update_case,
                 mcp_tool_name="update_case",
                 composed=False,
+                side_effects=["write_case"],
                 evidence_path="evidence/case/update",
             )
         )
@@ -1228,6 +1232,7 @@ class SecOpsEngine:
                 handler=self.assign_case,
                 mcp_tool_name="assign_case",
                 composed=False,
+                side_effects=["write_case"],
                 evidence_path="evidence/case/assign",
             )
         )
@@ -1240,6 +1245,7 @@ class SecOpsEngine:
                 handler=self.set_case_stage,
                 mcp_tool_name="set_case_stage",
                 composed=False,
+                side_effects=["write_case"],
                 evidence_path="evidence/case/set_stage",
             )
         )
@@ -1252,6 +1258,7 @@ class SecOpsEngine:
                 handler=self.set_case_incident,
                 mcp_tool_name="set_case_incident",
                 composed=False,
+                side_effects=["write_case"],
                 evidence_path="evidence/case/set_incident",
             )
         )
@@ -1264,6 +1271,7 @@ class SecOpsEngine:
                 handler=self.attach_case_evidence,
                 mcp_tool_name="attach_case_evidence",
                 composed=False,
+                side_effects=["write_case_evidence"],
                 evidence_path="evidence/case/evidence/attach",
             )
         )
@@ -1276,6 +1284,7 @@ class SecOpsEngine:
                 handler=self.detach_case_evidence,
                 mcp_tool_name="detach_case_evidence",
                 composed=False,
+                side_effects=["delete_case_evidence"],
                 evidence_path="evidence/case/evidence/detach",
             )
         )
@@ -1289,7 +1298,22 @@ class SecOpsEngine:
                 mcp_tool_name="correlate_silent_detections",
                 composed=True,
                 uses=("case.investigate", "search.udm", "case.evidence.attach", "case.comment"),
+                side_effects=["attaches_case_evidence", "writes_case_comment"],
                 evidence_path="evidence/case/detection/correlate",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="case.related_by_entity",
+                name="Find Related Cases by Entity",
+                description="Correlates a SOAR case's involved entities across active and historical SOAR cases.",
+                category="case",
+                handler=self.find_related_cases_by_entity,
+                mcp_tool_name="find_related_cases_by_entity",
+                composed=True,
+                uses=("case.investigate", "case.search", "case.comment"),
+                side_effects=["writes_case_comment"],
+                evidence_path="docs/WORKFLOW_EXECUTION_GUIDE.md",
             )
         )
         self.registry.register(
@@ -1301,6 +1325,7 @@ class SecOpsEngine:
                 handler=self.update_case_alert,
                 mcp_tool_name="update_case_alert",
                 composed=False,
+                side_effects=["write_case_alert"],
                 evidence_path="evidence/case/alert_update",
             )
         )
@@ -1313,6 +1338,7 @@ class SecOpsEngine:
                 handler=self.set_case_alert_priority,
                 mcp_tool_name="set_case_alert_priority",
                 composed=False,
+                side_effects=["write_case_alert"],
                 evidence_path="evidence/case/alert_set_priority",
             )
         )
@@ -1325,6 +1351,7 @@ class SecOpsEngine:
                 handler=self.create_case_alert_recommendation,
                 mcp_tool_name="create_case_alert_recommendation",
                 composed=False,
+                side_effects=["create_alert_recommendation"],
                 evidence_path="evidence/case/alert_create_recommendation",
             )
         )
@@ -1337,6 +1364,9 @@ class SecOpsEngine:
                 handler=self.fetch_case_alert_recommendation,
                 mcp_tool_name="fetch_case_alert_recommendation",
                 composed=False,
+                # Explicit: "fetch_recommendation" retrieves a single addressed recommendation resource.
+                kind="query",
+                cardinality="single",
                 evidence_path="evidence/case/alert_fetch_recommendation",
             )
         )
@@ -1350,6 +1380,7 @@ class SecOpsEngine:
                 mcp_tool_name="get_case_alert_recommendation",
                 composed=True,
                 uses=("case_alert.create_recommendation", "case_alert.fetch_recommendation"),
+                side_effects=["creates_alert_recommendation"],
                 evidence_path="evidence/case/alert_get_recommendation",
             )
         )
@@ -1362,6 +1393,7 @@ class SecOpsEngine:
                 handler=self.get_or_create_case_summary,
                 mcp_tool_name="get_or_create_case_summary",
                 composed=False,
+                side_effects=["create_case_summary"],
                 evidence_path="evidence/case/get_or_create_summary",
             )
         )
@@ -1375,6 +1407,7 @@ class SecOpsEngine:
                 mcp_tool_name="get_case_summary",
                 composed=True,
                 uses=("case.get_or_create_summary",),
+                side_effects=["creates_case_summary"],
                 evidence_path="evidence/case/get_summary",
             )
         )
@@ -1494,6 +1527,7 @@ class SecOpsEngine:
                 mcp_tool_name="orchestrate_case_triage",
                 composed=True,
                 uses=("case.search", "case.investigate", "case.get_summary"),
+                side_effects=["creates_case_summary"],
                 evidence_path="discovery/observations/03_case_triage_first_touch.md",
             )
         )
@@ -1507,6 +1541,7 @@ class SecOpsEngine:
                 mcp_tool_name="triage_case",
                 composed=True,
                 uses=("case.investigate", "case.get_summary", "case.search"),
+                side_effects=["updates_case_stage", "writes_case_comment", "creates_case_summary"],
                 evidence_path="discovery/observations/03_case_triage_first_touch.md",
             )
         )
@@ -1533,6 +1568,7 @@ class SecOpsEngine:
                 mcp_tool_name="ai_investigate_case",
                 composed=True,
                 uses=("case.investigate", "case.get_summary", "search.udm", "case.comment"),
+                side_effects=["creates_case_summary", "writes_case_comment"],
                 evidence_path="discovery/observations/03_case_triage_first_touch.md",
             )
         )
@@ -1707,6 +1743,7 @@ class SecOpsEngine:
                 handler=self.delete_integration_instance,
                 mcp_tool_name="delete_integration_instance",
                 composed=True,
+                side_effects=["delete_integration_instance"],
                 uses=("integration.instance.affected_items",),
                 evidence_path="evidence/integration/instance_delete",
             )
@@ -1939,6 +1976,7 @@ class SecOpsEngine:
                 handler=self.set_curated_ruleset_deployment,
                 mcp_tool_name="set_curated_ruleset_deployment",
                 composed=False,
+                side_effects=["write_curated_deployment"],
                 evidence_path="evidence/curated_detections/deployment_set",
             )
         )
@@ -1980,6 +2018,9 @@ class SecOpsEngine:
                 handler=self.test_findings_refinement,
                 mcp_tool_name="test_findings_refinement",
                 composed=False,
+                # Explicit: dry-run simulation against caller-supplied rule IDs and query; no state change.
+                kind="query",
+                cardinality="bounded",
                 evidence_path="evidence/curated_detections/refinements_test",
             )
         )
@@ -1992,6 +2033,7 @@ class SecOpsEngine:
                 handler=self.create_findings_refinement,
                 mcp_tool_name="create_findings_refinement",
                 composed=False,
+                side_effects=["create_findings_refinement"],
                 evidence_path="evidence/curated_detections/refinements_create",
             )
         )
@@ -2004,6 +2046,7 @@ class SecOpsEngine:
                 handler=self.delete_findings_refinement,
                 mcp_tool_name="delete_findings_refinement",
                 composed=False,
+                side_effects=["delete_findings_refinement"],
                 evidence_path="evidence/curated_detections/refinements_delete",
             )
         )
@@ -2016,6 +2059,9 @@ class SecOpsEngine:
                 handler=self.find_top_noisy_rules,
                 mcp_tool_name="find_top_noisy_rules",
                 composed=False,
+                # Explicit: aggregated ranking query bounded by top_n and lookback_days.
+                kind="query",
+                cardinality="bounded",
                 evidence_path="evidence/curated_detections/tuning_top_noisy",
             )
         )
@@ -2028,6 +2074,9 @@ class SecOpsEngine:
                 handler=self.analyze_entity_cardinality,
                 mcp_tool_name="analyze_entity_cardinality",
                 composed=False,
+                # Explicit: read-only subfield cardinality aggregation bounded by required rule_id.
+                kind="query",
+                cardinality="bounded",
                 evidence_path="evidence/curated_detections/tuning_entity_cardinality",
             )
         )
@@ -2040,6 +2089,9 @@ class SecOpsEngine:
                 handler=self.cross_reference_rule_cases,
                 mcp_tool_name="cross_reference_rule_cases",
                 composed=False,
+                # Explicit: read-only case history lookup bounded by required rule_id.
+                kind="query",
+                cardinality="bounded",
                 evidence_path="evidence/curated_detections/tuning_case_history",
             )
         )
@@ -2495,6 +2547,9 @@ class SecOpsEngine:
                 handler=self.run_parser,
                 mcp_tool_name="run_parser",
                 composed=False,
+                # Explicit: dry-run CBN parser evaluation over caller-supplied raw log bytes; side-effect free.
+                kind="query",
+                cardinality="bounded",
                 evidence_path="evidence/parser/run",
             )
         )
@@ -3313,6 +3368,7 @@ class SecOpsEngine:
                 handler=self.create_data_table,
                 mcp_tool_name="create_data_table",
                 composed=False,
+                side_effects=["create_data_table"],
                 evidence_path="evidence/data_table/create",
             )
         )
@@ -3325,6 +3381,7 @@ class SecOpsEngine:
                 handler=self.patch_data_table,
                 mcp_tool_name="patch_data_table",
                 composed=False,
+                side_effects=["write_data_table"],
                 evidence_path="evidence/data_table/patch",
             )
         )
@@ -3337,6 +3394,7 @@ class SecOpsEngine:
                 handler=self.delete_data_table,
                 mcp_tool_name="delete_data_table",
                 composed=False,
+                side_effects=["delete_data_table"],
                 evidence_path="evidence/data_table/delete",
             )
         )
@@ -3361,6 +3419,7 @@ class SecOpsEngine:
                 handler=self.add_data_table_rows,
                 mcp_tool_name="add_data_table_rows",
                 composed=False,
+                side_effects=["write_data_table_rows"],
                 evidence_path="evidence/data_table/add_rows",
             )
         )
@@ -3373,6 +3432,7 @@ class SecOpsEngine:
                 handler=self.delete_data_table_row,
                 mcp_tool_name="delete_data_table_row",
                 composed=False,
+                side_effects=["delete_data_table_rows"],
                 evidence_path="evidence/data_table/delete_row",
             )
         )
@@ -3434,6 +3494,7 @@ class SecOpsEngine:
                 handler=self.create_rule,
                 mcp_tool_name="create_rule",
                 composed=False,
+                side_effects=["create_rule"],
                 evidence_path="evidence/rule/create",
             )
         )
@@ -3446,6 +3507,7 @@ class SecOpsEngine:
                 handler=self.patch_rule,
                 mcp_tool_name="patch_rule",
                 composed=False,
+                side_effects=["write_rule"],
                 evidence_path="evidence/rule/patch",
             )
         )
@@ -3458,6 +3520,7 @@ class SecOpsEngine:
                 handler=self.delete_rule,
                 mcp_tool_name="delete_rule",
                 composed=False,
+                side_effects=["delete_rule"],
                 evidence_path="evidence/rule/delete",
             )
         )
@@ -3506,6 +3569,7 @@ class SecOpsEngine:
                 handler=self.update_rule_deployment,
                 mcp_tool_name="update_rule_deployment",
                 composed=False,
+                side_effects=["write_rule_deployment"],
                 evidence_path="evidence/rule/deployment/update",
             )
         )
@@ -3641,6 +3705,7 @@ class SecOpsEngine:
                 mcp_tool_name="sync_rule_embeddings",
                 composed=False,
                 kind="primitive",
+                side_effects=["write_embedding_cache"],
                 evidence_path="evidence/rule/embeddings_sync",
             )
         )
@@ -4628,6 +4693,35 @@ class SecOpsEngine:
             max_events=max_events,
         )
 
+    def find_related_cases_by_entity(
+        self,
+        case_id: Union[str, int],
+        lookback_days: int = 90,
+        case_status_scope: str = "ALL",
+        min_shared_entities: int = 1,
+        max_related_cases: int = 50,
+        max_entities_to_search: int = 25,
+        include_threat_actors: bool = False,
+        entity_filter: Optional[List[str]] = None,
+        entity_filter_mode: str = "AUTO",
+        post_wall_comment: bool = False,
+        secops_ui_base_url: str = "",
+    ) -> RelatedCasesByEntityResult:
+        """Correlates a SOAR case's involved entities across active and historical SOAR cases."""
+        return self._related_cases_by_entity_wf.execute(
+            case_id=_normalize_case_id(case_id),
+            lookback_days=lookback_days,
+            case_status_scope=case_status_scope,
+            min_shared_entities=min_shared_entities,
+            max_related_cases=max_related_cases,
+            max_entities_to_search=max_entities_to_search,
+            include_threat_actors=include_threat_actors,
+            entity_filter=entity_filter,
+            entity_filter_mode=entity_filter_mode,
+            post_wall_comment=post_wall_comment,
+            secops_ui_base_url=secops_ui_base_url,
+        )
+
     def add_case_alert_entity(
         self,
         case_id: Union[str, int],
@@ -5597,7 +5691,8 @@ class SecOpsEngine:
         scan_deployments: bool = True,
     ) -> CuratedDetectionHealthReport:
         """Performs a comprehensive health check and misconfiguration audit across Curated Detections."""
-        from runbooks.operations.curated_detections_health import generate_curated_detections_health_report
+        from engine.workflows.curated_detections_health import generate_curated_detections_health_report
+
         return generate_curated_detections_health_report(
             engine=self,
             days=days,
@@ -6266,7 +6361,8 @@ class SecOpsEngine:
 
     def audit_tenant_posture(self) -> Dict[str, Any]:
         """Audits complete tenant configuration posture across SIEM, SOAR, RBAC, and topography."""
-        from runbooks.operations.tenant_settings_audit import generate_tenant_settings_report
+        from engine.workflows.tenant_settings_audit import generate_tenant_settings_report
+
         return generate_tenant_settings_report(self)
 
     # --- Milestone 6.1: SOAR Settings & Case Data Configuration ---
@@ -7196,24 +7292,20 @@ class SecOpsEngine:
 
     def fetch_inventory_identity_report(
         self,
-        inventory_base_url: str = "http://localhost:8000",
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Retrieves identity access insights from the SecOps Inventory service."""
+        """Retrieves identity access insights from the configured SecOps Inventory service."""
         return self._identity_governance_wf.fetch_inventory_identity_report(
-            inventory_base_url=inventory_base_url,
             tenant_id=tenant_id,
         )
 
     def generate_identity_governance_report(
         self,
         project_id: Optional[str] = None,
-        inventory_base_url: str = "http://localhost:8000",
     ) -> IdentityGovernanceReport:
         """Generates a complete Identity Governance report combining IAM bindings, custom roles, and inventory data."""
         return self._identity_governance_wf.generate_governance_report(
             project_id=project_id,
-            inventory_base_url=inventory_base_url,
         )
 
     def audit_rule_decay(
@@ -7432,9 +7524,9 @@ class SecOpsEngine:
         self, subject_type: str, subject_id: str
     ) -> Dict[str, Any]:
         """Synthesizes cross-agent observations, status, and knowledge gaps for an entity."""
-        from agents.core.knowledge_store import get_knowledge_store  # deferred: avoids engine<->agents.core cycle
+        from engine.ports import resolve_knowledge_store
 
-        store = get_knowledge_store()
+        store = resolve_knowledge_store(required=True)
         return store.get_composite_entity(subject_type, subject_id)
 
     def sync_mitre_rules(
@@ -7473,12 +7565,11 @@ class SecOpsEngine:
 
     def get_technique_rules(self, technique_id: str) -> List[Dict[str, Any]]:
         """Retrieves all detection rules mapped to a specific MITRE ATT&CK technique."""
+        from engine.ports import resolve_evidence_store
+
         catalog = MitreCatalog.get_instance()
         clean_tid = catalog.normalize_technique_id(technique_id)
-        store = self.evidence_store
-        if store is None:
-            from agents.core.evidence_store import get_evidence_store
-            store = get_evidence_store()
+        store = resolve_evidence_store(self.evidence_store, required=True)
         rules = store.list_rule_states(limit=10000)
         matching = []
         for r in rules:
@@ -7555,6 +7646,7 @@ class SecOpsEngine:
         include_tenant_health: bool = True,
         ai_executive_summary: Optional[str] = None,
         dashboard_title: Optional[str] = None,
+        ai_summary_generator: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Optional[str]]] = None,
     ) -> Dict[str, Any]:
         """Creates or updates the Google SecOps Homepage Native Dashboard with Markdown, KPI Visualization, and Button widgets from live status, release notes, community feeds, and tenant telemetry."""
         from engine.workflows.homepage_dashboard import SyncSecOpsHomepageDashboardWorkflow
@@ -7569,5 +7661,6 @@ class SecOpsEngine:
             community_categories=community_categories,
             include_tenant_health=include_tenant_health,
             ai_executive_summary=ai_executive_summary,
+            ai_summary_generator=ai_summary_generator,
         )
 

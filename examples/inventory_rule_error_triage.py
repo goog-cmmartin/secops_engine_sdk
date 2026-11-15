@@ -26,9 +26,19 @@ from agents.rule_agent import (
 
 def run_inventory_rule_triage(
     inventory_base_url: str = "http://localhost:8000",
-    tenant_id: str = "37679061640",
+    tenant_id: str | None = None,
     top_n: int = 5,
 ) -> None:
+    resolved_tenant = (
+        tenant_id
+        or os.environ.get("SECOPS_PROJECT_NUMBER")
+        or os.environ.get("GCP_PROJECT_ID")
+    )
+    if not resolved_tenant:
+        raise ValueError(
+            "Provide tenant_id explicitly or set SECOPS_PROJECT_NUMBER / GCP_PROJECT_ID."
+        )
+    tenant_id = resolved_tenant
     print("==========================================================================")
     print("  SecOps Inventory -> ADK Workflow: Rule Execution Error Triage")
     print("==========================================================================\n")

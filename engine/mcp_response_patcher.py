@@ -9,15 +9,21 @@ that cause Gemini / Vertex AI timeouts and 500 INTERNAL:
 from typing import Any, Dict, List, Optional, Set
 
 
-def prune_deep_object(obj: Any, max_depth: int = 4, current_depth: int = 0) -> Any:
+def prune_deep_object(
+    obj: Any,
+    max_depth: int = 4,
+    current_depth: int = 0,
+    max_list_items: int = 15,
+    max_str_len: int = 1000,
+) -> Any:
     """Recursively bounds object depth and list length to prevent schema recursion blowups."""
     if obj is None:
         return None
     if isinstance(obj, (int, float, bool)):
         return obj
     if isinstance(obj, str):
-        if len(obj) > 1000:
-            return obj[:1000] + "... [truncated]"
+        if len(obj) > max_str_len:
+            return obj[:max_str_len] + "... [truncated]"
         return obj
 
     if current_depth >= max_depth:
@@ -29,10 +35,15 @@ def prune_deep_object(obj: Any, max_depth: int = 4, current_depth: int = 0) -> A
         return str(obj)
 
     if isinstance(obj, list):
-        max_items = 15
         pruned_list = [
-            prune_deep_object(item, max_depth, current_depth + 1)
-            for item in obj[:max_items]
+            prune_deep_object(
+                item,
+                max_depth=max_depth,
+                current_depth=current_depth + 1,
+                max_list_items=max_list_items,
+                max_str_len=max_str_len,
+            )
+            for item in obj[:max_list_items]
         ]
         return pruned_list
 
@@ -46,7 +57,13 @@ def prune_deep_object(obj: Any, max_depth: int = 4, current_depth: int = 0) -> A
                 continue
             if isinstance(v, list) and len(v) == 0:
                 continue
-            result[k] = prune_deep_object(v, max_depth, current_depth + 1)
+            result[k] = prune_deep_object(
+                v,
+                max_depth=max_depth,
+                current_depth=current_depth + 1,
+                max_list_items=max_list_items,
+                max_str_len=max_str_len,
+            )
         return result
 
     return str(obj)

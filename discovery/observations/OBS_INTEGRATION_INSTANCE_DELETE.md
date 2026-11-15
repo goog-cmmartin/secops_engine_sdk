@@ -3,7 +3,7 @@
 - **Date:** 2026-10-23
 - **Status:** `VERIFIED`
 - **Component:** SOAR Integrations / Instances Lifecycle
-- **Tenant:** `sdl-preview-americas` (`a556547c-1cff-43ef-a2e4-cf5b12a865df`)
+- **Tenant:** `<redacted-project-id>` (`<redacted-customer-uuid>`)
 
 ## 1. Endpoints Observed
 

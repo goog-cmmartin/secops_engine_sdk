@@ -4,8 +4,8 @@
 2026-09-06
 
 ## Environment
-- Project ID: `sdl-preview-americas` (Numeric: `37679061640`)
-- Customer ID: `a556547c-1cff-43ef-a2e4-cf5b12a865df`
+- Project ID: `<redacted-project-id>` (Numeric: `<redacted-project-number>`)
+- Customer ID: `<redacted-customer-uuid>`
 - Region: `us`
 
 ---

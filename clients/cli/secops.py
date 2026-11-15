@@ -5,6 +5,7 @@ A clean command-line consumer of the workflow engine primitives.
 """
 
 import argparse
+import json
 import os
 import signal
 import sys

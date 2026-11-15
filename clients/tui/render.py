@@ -6,7 +6,7 @@ side-effect free.
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.table import Table
 from rich.text import Text

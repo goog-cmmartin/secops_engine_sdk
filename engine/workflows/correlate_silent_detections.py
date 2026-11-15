@@ -11,6 +11,7 @@ from engine.domain import (
     CaseDetectionCorrelationResult,
     CaseEvidenceItem,
     EntityType,
+    LifecycleState,
     coerce_entity_type,
 )
 from engine.parsing import parse_timestamp
@@ -604,7 +605,11 @@ class CorrelateSilentDetectionsWorkflow:
         for attempt_idx in range(2):
             # Vendor filtering: filter alerts to only those originating from the target vendor
             target_alerts = investigation.alerts
-            if alert_vendor_filter and str(alert_vendor_filter).strip():
+            if (
+                alert_vendor_filter
+                and str(alert_vendor_filter).strip()
+                and str(alert_vendor_filter).strip().upper() not in ("ALL", "*", "ANY")
+            ):
                 v_filter = str(alert_vendor_filter).strip().lower()
                 target_alerts = [
                     a for a in investigation.alerts
@@ -702,7 +707,8 @@ class CorrelateSilentDetectionsWorkflow:
                 tid = (a.raw.get("ticketId") or "").strip()
                 if tid.startswith("de_"):
                     clean_tid = tid[3:].lower()
-                    prioritized_clauses.append((9, len(prioritized_clauses), f'(security_result.threat_id = "{clean_tid}")'))
+                    escaped_tid = clean_tid.replace("\\", "\\\\").replace('"', '\\"')
+                    prioritized_clauses.append((9, len(prioritized_clauses), f'(security_result.threat_id = "{escaped_tid}")'))
                     case_anchors.add(clean_tid.upper())
                     searched_entities.append({
                         'identifier': clean_tid,
@@ -784,7 +790,12 @@ class CorrelateSilentDetectionsWorkflow:
                         )
                         stream_detections_by_id[d_id] = d_info
 
-            session = self.search_workflow.execute(request=search_req, on_batch=_capture_stream_detections)
+            session = self.search_workflow.execute(
+                request=search_req,
+                on_batch=_capture_stream_detections,
+            )
+            if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                session.raise_for_failure()
 
             # 3. Analyze events for genuine detections, anchor corroboration, and relevant events
             detections_found: List[Dict[str, Any]] = []
@@ -801,24 +812,70 @@ class CorrelateSilentDetectionsWorkflow:
                 sec_results = ev.get('securityResult') or ev.get('security_result') or []
                 detection_objs = ev.get('detections') or []
 
-                # Check if event touches case anchors (hostname, user, IP)
+                # Check if event touches any case anchor (hostname, user, email, IP, domain, URL, file/hash, threat_id)
                 ev_anchors: Set[str] = set()
-                p = ev.get("principal") or {}
-                if isinstance(p, dict):
-                    if p.get("hostname"): ev_anchors.add(p.get("hostname").strip().upper())
-                    p_usr = p.get("user") or {}
-                    if isinstance(p_usr, dict) and p_usr.get("userid"):
-                        ev_anchors.add(p_usr.get("userid").strip().upper())
-                    for ip in p.get("ip") or []:
-                        ev_anchors.add(ip.strip().upper())
-                t = ev.get("target") or {}
-                if isinstance(t, dict):
-                    if t.get("hostname"): ev_anchors.add(t.get("hostname").strip().upper())
-                    t_usr = t.get("user") or {}
-                    if isinstance(t_usr, dict) and t_usr.get("userid"):
-                        ev_anchors.add(t_usr.get("userid").strip().upper())
-                    for ip in t.get("ip") or []:
-                        ev_anchors.add(ip.strip().upper())
+
+                def _add_ev_anchor(raw_val: Any) -> None:
+                    if raw_val and isinstance(raw_val, str) and raw_val.strip():
+                        s_val = raw_val.strip()
+                        ev_anchors.add(s_val.upper())
+                        if "\\" in s_val or "/" in s_val:
+                            base_name = s_val.replace("\\", "/").rsplit("/", 1)[-1]
+                            if base_name:
+                                ev_anchors.add(base_name.upper())
+
+                def _harvest_file_obj(f_obj: Any) -> None:
+                    if not isinstance(f_obj, dict):
+                        return
+                    for fk in ("sha256", "md5", "sha1", "fullPath", "full_path"):
+                        _add_ev_anchor(f_obj.get(fk))
+
+                def _harvest_noun(noun: Any) -> None:
+                    if not isinstance(noun, dict):
+                        return
+                    _add_ev_anchor(noun.get("hostname"))
+                    _add_ev_anchor(noun.get("url"))
+                    _add_ev_anchor(noun.get("administrativeDomain"))
+                    dom_obj = noun.get("domain")
+                    if isinstance(dom_obj, dict):
+                        _add_ev_anchor(dom_obj.get("name"))
+                    elif isinstance(dom_obj, str):
+                        _add_ev_anchor(dom_obj)
+                    for ip in noun.get("ip") or []:
+                        _add_ev_anchor(ip)
+                    usr = noun.get("user")
+                    if isinstance(usr, dict):
+                        _add_ev_anchor(usr.get("userid"))
+                        _add_ev_anchor(usr.get("userDisplayName"))
+                        for email in usr.get("emailAddresses") or []:
+                            _add_ev_anchor(email)
+                    _harvest_file_obj(noun.get("file"))
+                    proc = noun.get("process")
+                    if isinstance(proc, dict):
+                        _add_ev_anchor(proc.get("commandLine"))
+                        _harvest_file_obj(proc.get("file"))
+                        parent_proc = proc.get("parentProcess")
+                        if isinstance(parent_proc, dict):
+                            _harvest_file_obj(parent_proc.get("file"))
+
+                for noun_key in ("principal", "target", "src", "observer", "intermediary"):
+                    _harvest_noun(ev.get(noun_key))
+                for ab in ev.get("about") or []:
+                    _harvest_noun(ab)
+                net = ev.get("network")
+                if isinstance(net, dict):
+                    dns = net.get("dns")
+                    if isinstance(dns, dict):
+                        for q in dns.get("questions") or []:
+                            if isinstance(q, dict):
+                                _add_ev_anchor(q.get("name"))
+                    http = net.get("http")
+                    if isinstance(http, dict):
+                        _add_ev_anchor(http.get("referralUrl"))
+                for sec_item in sec_results:
+                    if isinstance(sec_item, dict):
+                        _add_ev_anchor(sec_item.get("threatId") or sec_item.get("threat_id"))
+                        _add_ev_anchor(sec_item.get("urlBackToProduct"))
 
                 is_corroborated = bool(ev_anchors.intersection(case_anchors))
                 has_any_detection = False
@@ -1026,6 +1083,7 @@ class CorrelateSilentDetectionsWorkflow:
 
         # 5. Post summary comment to Case Wall if requested
         comment_id: Optional[str] = None
+        comment_error: Optional[str] = None
         if post_wall_comment and (detections_found or events_found or attached_items or attached_entities):
             comment_lines = [
                 f'### [Automated Correlation] Silent Detections & Evidence',
@@ -1057,8 +1115,43 @@ class CorrelateSilentDetectionsWorkflow:
             try:
                 comment_res = self.adapter.create_case_comment(case_id=clean_case_id, comment=comment_text)
                 comment_id = comment_res.get('name', '').split('/')[-1] or 'created'
-            except Exception:
-                pass
+            except Exception as exc:
+                comment_error = f"{type(exc).__name__}: {exc}"
+
+        provenance_meta: Dict[str, Any] = {
+            "workflow": "case.detection.correlate",
+            "lookback_hours": lookback_hours,
+            "entities_count": len(searched_entities),
+            "detections_count": len(detections_found),
+            "events_count": len(events_found),
+            "attached_count": len(attached_items),
+            "attached_entities_count": len(attached_entities),
+            "correlate_detections": correlate_detections,
+            "correlate_udm_events": correlate_udm_events,
+            "attach_udm_events": attach_udm_events,
+        }
+        raw_meta: Dict[str, Any] = {
+            'events_scanned': len(session.events),
+            'total_evidence_candidates': len(evidence_to_attach),
+            'total_delta_entity_candidates': len(discovered_candidates),
+            'time_window': {
+                'start_time': start_time,
+                'end_time': end_time,
+            },
+            'case_alerts': [
+                {
+                    'alert_id': a.identifier,
+                    'display_name': a.rule_name or a.raw.get('displayName'),
+                    'rule_id': a.raw.get('sourceRuleIdentifier'),
+                    'ticket_id': a.raw.get('ticketId'),
+                    'vendor': a.vendor,
+                }
+                for a in target_alerts
+            ],
+        }
+        if comment_error:
+            provenance_meta["comment_error"] = comment_error
+            raw_meta["comment_error"] = comment_error
 
         return CaseDetectionCorrelationResult(
             case_id=clean_case_id,
@@ -1070,36 +1163,7 @@ class CorrelateSilentDetectionsWorkflow:
             attached_evidences=attached_items,
             attached_entities=attached_entities,
             comment_id=comment_id,
-            provenance={
-                "workflow": "case.detection.correlate",
-                "lookback_hours": lookback_hours,
-                "entities_count": len(searched_entities),
-                "detections_count": len(detections_found),
-                "events_count": len(events_found),
-                "attached_count": len(attached_items),
-                "attached_entities_count": len(attached_entities),
-                "correlate_detections": correlate_detections,
-                "correlate_udm_events": correlate_udm_events,
-                "attach_udm_events": attach_udm_events,
-            },
-            raw={
-                'events_scanned': len(session.events),
-                'total_evidence_candidates': len(evidence_to_attach),
-                'total_delta_entity_candidates': len(discovered_candidates),
-                'time_window': {
-                    'start_time': start_time,
-                    'end_time': end_time,
-                },
-                'case_alerts': [
-                    {
-                        'alert_id': a.identifier,
-                        'display_name': a.rule_name or a.raw.get('displayName'),
-                        'rule_id': a.raw.get('sourceRuleIdentifier'),
-                        'ticket_id': a.raw.get('ticketId'),
-                        'vendor': a.vendor,
-                    }
-                    for a in target_alerts
-                ],
-            },
+            provenance=provenance_meta,
+            raw=raw_meta,
         )
 

@@ -129,6 +129,7 @@ from engine.domain import (
     IntegrationInstance,
     IntegrationInstanceAffectedItems,
     IntegrationInstanceDeleteResult,
+    IntegrationInstanceWriteResult,
     IntegrationSearchQuery,
     IntegrationSummary,
     IntegrationType,
@@ -148,6 +149,7 @@ from engine.domain import (
     ManagedDomain,
     ManagedDomainSettings,
     MarketplaceAffectedItems,
+    MarketplaceIntegrationInstallResult,
     MarketplaceCommercialDiff,
     MarketplaceIntegrationBatch,
     MarketplaceIntegrationDetail,
@@ -168,6 +170,7 @@ from engine.domain import (
     PlaybookBatch,
     UnparsedLogDiagnostic,
     UnparsedLogsDiagnosticBatch,
+    PlaybookAttachResult,
     PlaybookCategory,
     PlaybookDetail,
     PlaybookSearchQuery,
@@ -423,12 +426,14 @@ from engine.workflows.feed import (
 )
 from engine.workflows.feed_health import AuditFeedHealthWorkflow
 from engine.workflows.integration import (
+    CreateIntegrationInstanceWorkflow,
     DeleteIntegrationInstanceWorkflow,
     FetchIntegrationInstanceAffectedItemsWorkflow,
     GetIntegrationDetailWorkflow,
     ListIntegrationInstancesWorkflow,
     ListRemoteAgentsWorkflow,
     SearchIntegrationsWorkflow,
+    UpdateIntegrationInstanceParametersWorkflow,
 )
 from engine.workflows.investigate_event import InvestigateEventWorkflow
 from engine.workflows.job import (
@@ -444,6 +449,7 @@ from engine.workflows.marketplace_integrations import (
     GetMarketplaceIntegrationAffectedItemsWorkflow,
     GetMarketplaceIntegrationDetailWorkflow,
     GetMarketplaceIntegrationDiffWorkflow,
+    InstallMarketplaceIntegrationWorkflow,
     SearchMarketplaceIntegrationsWorkflow,
 )
 from engine.workflows.parser import (
@@ -458,6 +464,7 @@ from engine.workflows.parser import (
 )
 from engine.workflows.parser_health import AuditParserHealthWorkflow
 from engine.workflows.playbook import (
+    AttachPlaybookToAlertWorkflow,
     DeletePlaybooksWorkflow,
     GetAlertPlaybookInstancesWorkflow,
     GetPlaybookWorkflow,
@@ -755,6 +762,7 @@ class SecOpsEngine:
         "_save_playbook_wf": lambda e: SavePlaybookWorkflow(e.adapter),
         "_update_playbook_widget_wf": lambda e: UpdatePlaybookWidgetWorkflow(e.adapter),
         "_delete_playbooks_wf": lambda e: DeletePlaybooksWorkflow(e.adapter),
+        "_attach_playbook_to_alert_wf": lambda e: AttachPlaybookToAlertWorkflow(e.adapter),
         "_alert_playbook_instances_wf": lambda e: GetAlertPlaybookInstancesWorkflow(e.adapter),
         "_audit_soar_playbook_health_wf": lambda e: AuditPlaybookHealthWorkflow(e),
         "_audit_playbook_decay_wf": lambda e: AuditPlaybookDecayWorkflow(e),
@@ -767,6 +775,8 @@ class SecOpsEngine:
             e.adapter,
             affected_items_workflow=e._get_integration_instance_affected_items_wf,
         ),
+        "_create_integration_instance_wf": lambda e: CreateIntegrationInstanceWorkflow(e.adapter),
+        "_update_integration_instance_wf": lambda e: UpdateIntegrationInstanceParametersWorkflow(e.adapter),
         "_list_remote_agents_wf": lambda e: ListRemoteAgentsWorkflow(e.adapter),
         "_search_jobs_wf": lambda e: SearchJobsWorkflow(e.adapter),
         "_get_job_wf": lambda e: GetJobDetailWorkflow(e.adapter),
@@ -812,6 +822,7 @@ class SecOpsEngine:
         "_get_marketplace_integration_wf": lambda e: GetMarketplaceIntegrationDetailWorkflow(e.adapter),
         "_get_marketplace_integration_diff_wf": lambda e: GetMarketplaceIntegrationDiffWorkflow(e.adapter),
         "_get_marketplace_affected_items_wf": lambda e: GetMarketplaceIntegrationAffectedItemsWorkflow(e.adapter),
+        "_install_marketplace_integration_wf": lambda e: InstallMarketplaceIntegrationWorkflow(e.adapter),
         "_search_dashboards_wf": lambda e: SearchDashboardsWorkflow(e.adapter),
         "_get_dashboard_wf": lambda e: GetDashboardDetailWorkflow(e.adapter),
         "_create_dashboard_wf": lambda e: CreateDashboardWorkflow(e.adapter),
@@ -1650,6 +1661,19 @@ class SecOpsEngine:
         )
         self.registry.register(
             WorkflowCapability(
+                capability_id="playbook.attach",
+                name="Attach SOAR Playbook to Alert",
+                description="Manually attaches and starts a playbook on one alert of a case.",
+                category="playbook",
+                handler=self.attach_playbook_to_alert,
+                mcp_tool_name="attach_playbook_to_alert",
+                composed=False,
+                side_effects=["run_playbook", "write_case_alert"],
+                evidence_path="evidence/playbook/attach",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
                 capability_id="playbook.instances",
                 name="Alert Playbook Run Instances",
                 description="Retrieves authoritative per-alert playbook run instances and the executed step DAG.",
@@ -1746,6 +1770,34 @@ class SecOpsEngine:
                 side_effects=["delete_integration_instance"],
                 uses=("integration.instance.affected_items",),
                 evidence_path="evidence/integration/instance_delete",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="integration.instance.create",
+                name="Create SOAR Integration Instance",
+                description="Creates an integration instance scoped to one SOAR environment with the integration's default parameter values.",
+                category="integration",
+                handler=self.create_integration_instance,
+                mcp_tool_name="create_integration_instance",
+                composed=False,
+                side_effects=["write_integration_instance"],
+                evidence_path="evidence/integration/instance_create",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="integration.instance.update",
+                name="Update SOAR Integration Instance Parameters",
+                description="Sets parameter values on an integration instance by reading its parameter list, merging the requested values, and writing it back.",
+                category="integration",
+                handler=self.update_integration_instance,
+                mcp_tool_name="update_integration_instance",
+                # Read-merge-write over two adapter calls. The read (single instance get)
+                # has no registered capability of its own, so there is no `uses` edge.
+                composed=True,
+                side_effects=["write_integration_instance"],
+                evidence_path="evidence/integration/instance_update",
             )
         )
         self.registry.register(
@@ -2211,6 +2263,19 @@ class SecOpsEngine:
                 mcp_tool_name="get_marketplace_integration_affected_items",
                 composed=False,
                 evidence_path="evidence/marketplace_integration/affected_items",
+            )
+        )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="marketplace_integration.install",
+                name="Install Marketplace Response Integration",
+                description="Installs a Marketplace Response Integration into the tenant without creating instances or storing credentials.",
+                category="marketplace_integration",
+                handler=self.install_marketplace_integration,
+                mcp_tool_name="install_marketplace_integration",
+                composed=False,
+                side_effects=["install_marketplace_integration"],
+                evidence_path="evidence/marketplace_integration/install",
             )
         )
         self.registry.register(
@@ -5280,6 +5345,25 @@ class SecOpsEngine:
         norm_ids = [identifiers] if isinstance(identifiers, str) else list(identifiers)
         return self.adapter.export_playbooks(norm_ids)
 
+    def attach_playbook_to_alert(
+        self,
+        case_id: Any,
+        alert_group_identifier: str,
+        alert_identifier: str,
+        playbook_name: str,
+        playbook_identifier: Optional[str] = None,
+        run_automatic: bool = True,
+    ) -> PlaybookAttachResult:
+        """Manually attaches and starts a playbook on one alert of a case."""
+        return self._attach_playbook_to_alert_wf.execute(
+            case_id=case_id,
+            alert_group_identifier=alert_group_identifier,
+            alert_identifier=alert_identifier,
+            playbook_name=playbook_name,
+            playbook_identifier=playbook_identifier,
+            run_automatic=run_automatic,
+        )
+
     def import_playbooks(
         self,
         blob_base64: str,
@@ -5412,6 +5496,34 @@ class SecOpsEngine:
             integration_id=integration_id,
             instance_id=instance_id,
             force=force,
+        )
+
+    def create_integration_instance(
+        self,
+        integration_id: str,
+        environment: str,
+        display_name: str,
+        description: Optional[str] = None,
+    ) -> IntegrationInstanceWriteResult:
+        """Creates an integration instance scoped to one SOAR environment."""
+        return self._create_integration_instance_wf.execute(
+            integration_id=integration_id,
+            environment=environment,
+            display_name=display_name,
+            description=description,
+        )
+
+    def update_integration_instance(
+        self,
+        integration_id: str,
+        instance_id: str,
+        parameter_values: Dict[str, Any],
+    ) -> IntegrationInstanceWriteResult:
+        """Sets parameter values on an integration instance, keyed by parameter display name."""
+        return self._update_integration_instance_wf.execute(
+            integration_id=integration_id,
+            instance_id=instance_id,
+            parameter_values=parameter_values,
         )
 
 
@@ -5888,6 +6000,21 @@ class SecOpsEngine:
     ) -> MarketplaceAffectedItems:
         """Retrieves downstream environment instances and playbooks affected by an integration."""
         return self._get_marketplace_affected_items_wf.execute(identifier_or_title)
+
+    def install_marketplace_integration(
+        self,
+        identifier: str,
+        version: Optional[str] = None,
+        staging: bool = False,
+        override_mapping: bool = False,
+    ) -> MarketplaceIntegrationInstallResult:
+        """Installs a Marketplace Response Integration into the tenant."""
+        return self._install_marketplace_integration_wf.execute(
+            identifier=identifier,
+            version=version,
+            staging=staging,
+            override_mapping=override_mapping,
+        )
 
     def search_dashboards(
         self,

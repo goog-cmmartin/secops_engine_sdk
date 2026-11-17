@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from engine.domain import (
     PlaybookBatch,
+    PlaybookAttachResult,
     PlaybookCategory,
     PlaybookDetail,
     PlaybookInstanceCard,
@@ -741,3 +742,54 @@ class DeletePlaybooksWorkflow:
             "raw": res,
         }
 
+
+class AttachPlaybookToAlertWorkflow:
+    """Manually attaches and starts a playbook on one alert of a case."""
+
+    def __init__(self, adapter: Optional[Any] = None):
+        if adapter is None:
+            from adapters.google_secops import GoogleSecOpsAdapter
+            adapter = GoogleSecOpsAdapter()
+        self.adapter = adapter
+
+    def execute(
+        self,
+        case_id: Any,
+        alert_group_identifier: str,
+        alert_identifier: str,
+        playbook_name: str,
+        playbook_identifier: Optional[str] = None,
+        run_automatic: bool = True,
+    ) -> PlaybookAttachResult:
+        clean_case = str(case_id if case_id is not None else "").strip()
+        clean_group = (alert_group_identifier or "").strip()
+        clean_alert = (alert_identifier or "").strip()
+        clean_name = (playbook_name or "").strip()
+        if not clean_case.isdigit():
+            raise ValueError(f"case_id must be a numeric case identifier, got {case_id!r}.")
+        if not clean_group or not clean_alert:
+            raise ValueError("Both alert_group_identifier and alert_identifier must be provided.")
+        if not clean_name:
+            raise ValueError("playbook_name must be provided.")
+
+        raw = self.adapter.attach_playbook_to_alert(
+            clean_case,
+            clean_group,
+            clean_alert,
+            clean_name,
+            playbook_identifier=playbook_identifier,
+            run_automatic=run_automatic,
+        )
+        if raw.get("payload") is not True:
+            raise RuntimeError(
+                f"Attaching playbook '{clean_name}' to case {clean_case} was not acknowledged: {raw!r}"
+            )
+        return PlaybookAttachResult(
+            case_id=clean_case,
+            alert_group_identifier=clean_group,
+            alert_identifier=clean_alert,
+            playbook_name=clean_name,
+            playbook_identifier=playbook_identifier,
+            run_automatic=bool(run_automatic),
+            raw=raw,
+        )

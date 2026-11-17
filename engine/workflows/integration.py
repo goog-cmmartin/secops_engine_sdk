@@ -7,6 +7,8 @@ from engine.domain import (
     IntegrationInstance,
     IntegrationInstanceAffectedItems,
     IntegrationInstanceDeleteResult,
+    IntegrationInstanceParameter,
+    IntegrationInstanceWriteResult,
     IntegrationSearchQuery,
     IntegrationSummary,
     IntegrationType,
@@ -411,3 +413,130 @@ class DeleteIntegrationInstanceWorkflow:
             affected_playbooks_count=len(affected.affected_playbooks),
         )
 
+
+def _map_written_instance(
+    raw: Dict[str, Any],
+    integration_id: str,
+    updated_parameters: Optional[List[str]] = None,
+) -> IntegrationInstanceWriteResult:
+    """Maps an instance write response. Parameter values are dropped so secrets never leave the adapter response."""
+    inst_ident = raw.get("identifier") or str(raw.get("name", "")).split("/")[-1]
+    if not inst_ident:
+        raise RuntimeError("Integration instance response carried no identifier.")
+    parameters = [
+        IntegrationInstanceParameter(
+            display_name=str(p.get("displayName") or p.get("propertyName") or ""),
+            property_name=str(p.get("propertyName") or p.get("displayName") or ""),
+            type=str(p.get("type") or ""),
+            is_mandatory=bool(p.get("mandatory", False)),
+            has_value=p.get("value") not in (None, ""),
+        )
+        for p in (raw.get("parameters") or [])
+        if isinstance(p, dict)
+    ]
+    instance = IntegrationInstance(
+        identifier=inst_ident,
+        integration_identifier=_extract_integration_id_from_instance(raw, default=integration_id),
+        display_name=raw.get("displayName") or inst_ident,
+        environment=raw.get("environment", "*"),
+        is_configured=bool(raw.get("configured", False)),
+        is_remote=bool(raw.get("remote", False)),
+        is_system_default=bool(raw.get("systemDefault", False)),
+        name=raw.get("name", ""),
+        raw={k: v for k, v in raw.items() if k != "parameters"},
+    )
+    return IntegrationInstanceWriteResult(
+        instance=instance,
+        parameters=parameters,
+        updated_parameters=list(updated_parameters or []),
+    )
+
+
+class CreateIntegrationInstanceWorkflow:
+    """Creates an integration instance scoped to one SOAR environment.
+
+    The instance is created with the integration's default parameter values.
+    Mandatory parameters without a default stay unset and are reported on the
+    result; set them with ``UpdateIntegrationInstanceParametersWorkflow``.
+    """
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        integration_id: str,
+        environment: str,
+        display_name: str,
+        description: Optional[str] = None,
+    ) -> IntegrationInstanceWriteResult:
+        clean_int = (integration_id or "").strip().split("/")[-1]
+        clean_env = (environment or "").strip()
+        clean_name = (display_name or "").strip()
+        if not clean_int:
+            raise ValueError("integration_id must be provided.")
+        if not clean_env:
+            raise ValueError("environment must be provided (use '*' for all environments).")
+        if not clean_name:
+            raise ValueError("display_name must be provided.")
+
+        raw = self.adapter.create_integration_instance(
+            clean_int,
+            clean_env,
+            clean_name,
+            description=description,
+        )
+        return _map_written_instance(raw, clean_int)
+
+
+class UpdateIntegrationInstanceParametersWorkflow:
+    """Sets parameter values on an integration instance (read, merge, write).
+
+    Reads the instance's current parameter list, sets the requested values by
+    parameter display name or property name, and writes the full list back.
+    An unknown parameter name fails before any write.
+    """
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        integration_id: str,
+        instance_id: str,
+        parameter_values: Dict[str, Any],
+    ) -> IntegrationInstanceWriteResult:
+        clean_int = (integration_id or "").strip().split("/")[-1]
+        clean_inst = (instance_id or "").strip().split("/")[-1]
+        if not clean_int or not clean_inst:
+            raise ValueError("Both integration_id and instance_id must be provided.")
+        if not isinstance(parameter_values, dict) or not parameter_values:
+            raise ValueError("parameter_values must be a non-empty mapping of parameter name to value.")
+
+        current = self.adapter.get_integration_instance(clean_int, clean_inst)
+        parameters = [dict(p) for p in (current.get("parameters") or []) if isinstance(p, dict)]
+        by_name: Dict[str, Dict[str, Any]] = {}
+        for p in parameters:
+            for key in (p.get("displayName"), p.get("propertyName")):
+                if key:
+                    by_name[str(key).strip().lower()] = p
+
+        unknown = [name for name in parameter_values if str(name).strip().lower() not in by_name]
+        if unknown:
+            known = sorted({str(p.get("displayName") or p.get("propertyName")) for p in parameters})
+            raise ValueError(
+                f"Unknown parameter(s) for instance '{clean_inst}' of integration '{clean_int}': "
+                f"{', '.join(sorted(str(u) for u in unknown))}. Known parameters: {', '.join(known)}."
+            )
+
+        updated: List[str] = []
+        for name, value in parameter_values.items():
+            target = by_name[str(name).strip().lower()]
+            if isinstance(value, bool):
+                target["value"] = "true" if value else "false"
+            else:
+                target["value"] = "" if value is None else str(value)
+            updated.append(str(target.get("displayName") or target.get("propertyName")))
+
+        raw = self.adapter.update_integration_instance_parameters(clean_int, clean_inst, parameters)
+        return _map_written_instance(raw, clean_int, updated_parameters=updated)

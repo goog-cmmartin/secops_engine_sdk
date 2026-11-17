@@ -1,0 +1,47 @@
+id: integration.instance.create
+version: 1.0.0
+title: Create SOAR Integration Instance
+description: >
+  Creates an integration instance scoped to one SOAR environment. The instance is created with
+  the integration's default parameter values; mandatory parameters without a default stay unset.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}/integrationInstances
+  method: POST
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+  observation: discovery/observations/OBS_INTEGRATION_INSTALL_AND_INSTANCE_WRITE.md
+
+inputs:
+  integration_id:
+    type: string
+    required: true
+    description: Identifier of the installed parent integration.
+  environment:
+    type: string
+    required: true
+    description: SOAR environment name, or '*' for all environments.
+  display_name:
+    type: string
+    required: true
+    description: Display name of the new instance.
+  description:
+    type: string
+    required: false
+    description: Optional free-text description.
+
+outputs:
+  result:
+    type: IntegrationInstanceWriteResult
+    properties:
+      instance: IntegrationInstance
+      parameters: list of IntegrationInstanceParameter (name, type, mandatory, has_value)
+      unset_mandatory_parameters: list of string
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - Parameter values are never carried on the result.
+  - The create request is never retried.
+  - Mutating capability. It declares tenant side effects, so it is never classified as tenant read-only.

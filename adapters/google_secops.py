@@ -1805,6 +1805,32 @@ class GoogleSecOpsAdapter:
             return res
         return {}
 
+    def attach_playbook_to_alert(
+        self,
+        case_id: Any,
+        alert_group_identifier: str,
+        alert_identifier: str,
+        playbook_name: str,
+        playbook_identifier: Optional[str] = None,
+        run_automatic: bool = True,
+    ) -> Dict[str, Any]:
+        """Manually attaches and starts a playbook on one alert of a case.
+
+        Wraps ``legacyPlaybooks:legacyAttachWorkflowToCase``.
+        """
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyAttachWorkflowToCase"
+        body: Dict[str, Any] = {
+            "cyberCaseId": str(case_id),
+            "alertGroupIdentifier": alert_group_identifier,
+            "alertIdentifier": alert_identifier,
+            "wfName": playbook_name,
+            "shouldRunAutomatic": bool(run_automatic),
+        }
+        if playbook_identifier:
+            body["originalWorkflowDefinitionIdentifier"] = playbook_identifier
+        res = self._request("POST", path, body=body, idempotent=False)
+        return self._expect_dict(res, "attach_playbook_to_alert")
+
     def export_playbooks(
         self,
         identifiers: List[str],
@@ -1916,6 +1942,84 @@ class GoogleSecOpsAdapter:
         if isinstance(res, dict):
             return res
         return {}
+
+    def install_marketplace_integration(
+        self,
+        identifier: str,
+        version: Optional[str] = None,
+        staging: bool = False,
+        override_mapping: bool = False,
+    ) -> Dict[str, Any]:
+        """Installs a Marketplace Response Integration into the tenant.
+
+        Wraps ``marketplaceIntegrations/{identifier}:install``. Installation is
+        tenant-wide; it creates no integration instance and stores no credentials.
+
+        The install RPC was observed to run longer than the default read timeout
+        while still completing server-side, so it uses an extended timeout and is
+        never retried.
+        """
+        clean_id = self._encode_segment(identifier, "identifier")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations/{clean_id}:install"
+        body: Dict[str, Any] = {
+            "staging": bool(staging),
+            "overrideMapping": bool(override_mapping),
+        }
+        if version:
+            body["version"] = str(version)
+        res = self._request("POST", path, body=body, timeout=300.0, idempotent=False)
+        return self._expect_dict(res, "install_marketplace_integration")
+
+    def create_integration_instance(
+        self,
+        integration_id: str,
+        environment: str,
+        display_name: str,
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Creates an integration instance scoped to one SOAR environment.
+
+        Wraps ``integrations/{integration}/integrationInstances`` (POST). The
+        response carries the full parameter list with the integration's default
+        values; set parameter values afterwards with
+        ``update_integration_instance_parameters``.
+        """
+        if not environment or not environment.strip():
+            raise ValueError("environment is required to create an integration instance")
+        clean_int = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances"
+        body: Dict[str, Any] = {
+            "environment": environment,
+            "displayName": display_name,
+        }
+        if description:
+            body["description"] = description
+        res = self._request("POST", path, body=body, idempotent=False)
+        return self._expect_dict(res, "create_integration_instance")
+
+    def update_integration_instance_parameters(
+        self,
+        integration_id: str,
+        instance_id: str,
+        parameters: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Replaces the parameter list of an integration instance.
+
+        Wraps ``integrationInstances/{instance}`` (PATCH, ``updateMask=parameters``).
+        ``parameters`` is the full list of parameter objects as returned by
+        ``get_integration_instance``, with ``value`` edited where required.
+        """
+        clean_int = urllib.parse.quote(integration_id.strip().split("/")[-1], safe="")
+        clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}"
+        res = self._request(
+            "PATCH",
+            path,
+            params={"updateMask": "parameters"},
+            body={"parameters": list(parameters)},
+            idempotent=False,
+        )
+        return self._expect_dict(res, "update_integration_instance_parameters")
 
     # =========================================================================
     # Milestone 5.5: SOAR Scheduled Jobs, Instances & Execution Logs

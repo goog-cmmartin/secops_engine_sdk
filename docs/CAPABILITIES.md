@@ -3,9 +3,9 @@
 
 # Capability Reference
 
-_Generated 2026-11-15 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
+_Generated 2026-11-17 from `engine/registry.py` via `scripts/generate_capabilities_doc.py`._
 
-**240 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
+**244 registered capabilities.** Every capability is exposed to the Python SDK (`engine.facade`) and the CLI. Each also carries a reserved MCP tool name (see the `mcp_tool (proposed)` column) for a planned MCP binding; no MCP server ships today.
 
 ## Classification legend
 
@@ -16,17 +16,17 @@ _Generated 2026-11-15 from `engine/registry.py` via `scripts/generate_capabiliti
 
 | kind | count |
 | :--- | ----: |
-| workflow | 46 |
-| primitive | 37 |
+| workflow | 47 |
+| primitive | 40 |
 | query | 157 |
-| **total** | **240** |
+| **total** | **244** |
 
 | cardinality | count |
 | :--- | ----: |
 | single | 63 |
 | bounded | 24 |
 | unbounded | 70 |
-| (n/a — workflows/primitive) | 83 |
+| (n/a — workflows/primitive) | 87 |
 
 ## Workflows
 
@@ -59,6 +59,7 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `feed.timestamp_integrity_audit` | feed | Audits log sources for ingestion latency bottlenecks (Δt ≫ 0) and NTP clock skews (Δt < 0), classifies state progression, and synthesizes executive brief. |
 | `ingestion.labels_and_namespaces.analyze` | ingestion | Performs unified hygiene audit across active ingestion labels, UDM namespaces, default untagged telemetry volume, and Data Access Scopes. |
 | `integration.instance.delete` | integration | Deletes a configured integration instance with pre-flight dependency guard. |
+| `integration.instance.update` | integration | Sets parameter values on an integration instance by reading its parameter list, merging the requested values, and writing it back. |
 | `log_cost.analyze` | log | Analyzes ingestion telemetry from Chronicle, isolates bloated log types, models costs across Standard/Enterprise/Enterprise Plus tiers, and synthesizes FinOps recommendations. |
 | `mitre.analyze_coverage` | threat_intelligence | Evaluates cached detection rules and live ingestion telemetry against MITRE ATT&CK matrix and threat profiles to determine coverage score and gaps. |
 | `mitre.generate_report` | threat_intelligence | Generates an executive Markdown report and tactical gap analysis for MITRE ATT&CK posture. |
@@ -291,11 +292,13 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `ingestion.namespaces.analyze` | query | `single` | `analyze_namespaces` | Analyzes active UDM namespaces and flags potential RFC 1918 overlapping IP collisions across network telemetry. |
 | `ingestion.rbac_alignment.audit` | query | `single` | `audit_data_rbac_alignment` | Audits Data Access Labels against active telemetry tags and namespaces, detecting unreferenced or broken scoping rules. |
 
-### integration  (6: workflow=1, query=5)
+### integration  (8: workflow=2, primitive=1, query=5)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `integration.instance.delete` | workflow | — | `delete_integration_instance` | Deletes a configured integration instance with pre-flight dependency guard. |
+| `integration.instance.update` | workflow | — | `update_integration_instance` | Sets parameter values on an integration instance by reading its parameter list, merging the requested values, and writing it back. |
+| `integration.instance.create` | primitive | — | `create_integration_instance` | Creates an integration instance scoped to one SOAR environment with the integration's default parameter values. |
 | `integration.get` | query | `single` | `get_integration` | Retrieves complete integration details, instances, remote agents, and documentation. |
 | `integration.instance.affected_items` | query | `unbounded` | `get_integration_instance_affected_items` | Resolves affected playbooks and downstream items before instance deletion. |
 | `integration.instances` | query | `unbounded` | `list_integration_instances` | Lists configured integration instances across environments or specific integrations. |
@@ -338,10 +341,11 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `log.raw_logs.search` | query | `unbounded` | `search_raw_logs` | Searches unparsed or unnormalized raw log records matching queries, log types, and time ranges. |
 | `log_cost.get_latest` | query | `single` | `get_latest_log_costs` | Retrieves the most recent log cost and FinOps analysis report from Evidence Fabric. |
 
-### marketplace_integration  (4: query=4)
+### marketplace_integration  (5: primitive=1, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
+| `marketplace_integration.install` | primitive | — | `install_marketplace_integration` | Installs a Marketplace Response Integration into the tenant without creating instances or storing credentials. |
 | `marketplace_integration.affected_items` | query | `unbounded` | `get_marketplace_integration_affected_items` | Resolves affected environment instances and active playbooks before integration modifications. |
 | `marketplace_integration.diff` | query | `single` | `get_marketplace_integration_diff` | Compares commercial upgrade differences and overrides between installed and target versions. |
 | `marketplace_integration.get` | query | `single` | `get_marketplace_integration` | Retrieves complete integration composite, actions, connectors, jobs, managers, and release notes. |
@@ -369,13 +373,14 @@ Composed, provenance-tracked operations — the orchestrated behaviors of the en
 | `parser.run` | query | `bounded` | `run_parser` | Executes a Logstash CBN parser configuration against a raw log string. |
 | `parser.search` | query | `unbounded` | `search_parsers` | Discovers and filters parsers across log types with creator and state filters. |
 
-### playbook  (9: workflow=3, primitive=2, query=4)
+### playbook  (10: workflow=3, primitive=3, query=4)
 
 | capability_id | kind | cardinality | mcp_tool (proposed) | description |
 | :--- | :--- | :--- | :--- | :--- |
 | `playbook.audit_health` | workflow | — | `audit_soar_playbook_health` | Audits SOAR playbooks and modular blocks for configuration hygiene, failure spikes, faulted actions, and queue latency using native Playbook Dashboard analytics. |
 | `playbook.decay_audit` | workflow | — | `audit_playbook_decay` | Audits SOAR playbooks and modular nested blocks for 100-pt static resilience, 30-day execution telemetry, Mermaid DAG synthesis, and Firestore persistence. |
 | `playbook.update_widget` | workflow | — | `update_playbook_widget` | Updates an embedded HTML widget inside a SOAR Playbook's ViewsTemplates and saves the playbook. |
+| `playbook.attach` | primitive | — | `attach_playbook_to_alert` | Manually attaches and starts a playbook on one alert of a case. |
 | `playbook.delete` | primitive | — | `delete_playbooks` | Deletes one or more SOAR playbooks by UUID identifier, numeric ID, or name. |
 | `playbook.save` | primitive | — | `save_playbook` | Creates or updates a SOAR playbook or block workflow definition with automatic category ID/name synchronization. |
 | `playbook.categories` | query | `unbounded` | `list_playbook_categories` | Lists all SOAR Playbook folder categories. |

@@ -212,8 +212,20 @@ secops playbook audit [--type <REGULAR|NESTED>] [--environment <ENV>] [--out <FI
 # Comprehensive SOAR Playbook Health Check with Playbook Dashboard (SOAR) telemetry
 secops playbook audit-health [--days <N>] [--out <FILE>] [--json]
 
+# Manually attach and start a playbook on one alert of a case
+secops playbook attach <PLAYBOOK_NAME> --case <CASE_ID> --alert-group <ALERT_GROUP_ID> --alert <ALERT_ID> [--identifier <PLAYBOOK_UUID>] [--manual]
+
 # List integrations
 secops integration list
+
+# Create an integration instance in one environment (use '*' for all environments)
+secops integration create-instance <INTEGRATION> --env <ENV> --name <NAME> [--description <TEXT>]
+
+# Set parameter values on an integration instance (use --set-env for secrets)
+secops integration update-instance <INTEGRATION> <INSTANCE_ID> [--set <NAME=VALUE>]... [--set-env <NAME=ENV_VAR>]...
+
+# Install a Marketplace Response Integration (tenant-wide; creates no instances)
+secops marketplace install <IDENTIFIER> [--version <VERSION>] [--staging] [--override-mapping]
 
 # Inspect background jobs
 secops job list

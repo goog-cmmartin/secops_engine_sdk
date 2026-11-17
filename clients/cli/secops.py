@@ -366,6 +366,14 @@ over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2
 
     pb_cats = playbook_sub.add_parser("categories", help="List all SOAR playbook categories/folders")
 
+    pb_attach = playbook_sub.add_parser("attach", help="Manually attach and start a playbook on one alert of a case")
+    pb_attach.add_argument("playbook", help="Playbook name exactly as shown in the playbook list")
+    pb_attach.add_argument("--case", required=True, help="Numeric case ID")
+    pb_attach.add_argument("--alert-group", required=True, help="Alert group identifier of the target alert")
+    pb_attach.add_argument("--alert", required=True, help="Alert identifier of the target alert")
+    pb_attach.add_argument("--identifier", help="Playbook UUID, to disambiguate playbooks that share a name")
+    pb_attach.add_argument("--manual", action="store_true", default=False, help="Attach without starting automatic execution")
+
     # Integration command
     int_parser = subparsers.add_parser("integration", help="Search integrations, view instances, and inspect remote agents")
     int_sub = int_parser.add_subparsers(dest="integration_action", required=True)
@@ -401,6 +409,18 @@ over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2
     int_del.add_argument("integration", help="Integration identifier (e.g. GoogleChronicle, AWSEC2)")
     int_del.add_argument("instance", help="Integration instance ID or resource name")
     int_del.add_argument("--force", "-f", action="store_true", default=False, help="Force deletion even if downstream playbooks are affected")
+
+    int_create = int_sub.add_parser("create-instance", help="Create an integration instance scoped to one environment")
+    int_create.add_argument("integration", help="Integration identifier (e.g. GoogleCloudIAM, Okta)")
+    int_create.add_argument("--env", "-e", required=True, help="Environment name, or '*' for all environments")
+    int_create.add_argument("--name", "-n", required=True, help="Display name for the new instance")
+    int_create.add_argument("--description", help="Optional description")
+
+    int_update = int_sub.add_parser("update-instance", help="Set parameter values on an integration instance")
+    int_update.add_argument("integration", help="Integration identifier (e.g. GoogleCloudIAM, Okta)")
+    int_update.add_argument("instance", help="Integration instance ID or resource name")
+    int_update.add_argument("--set", dest="set_values", action="append", default=[], metavar="NAME=VALUE", help="Set a parameter by display name (repeatable). Do not use for secrets; use --set-env.")
+    int_update.add_argument("--set-env", dest="set_env_values", action="append", default=[], metavar="NAME=ENV_VAR", help="Set a parameter from an environment variable, keeping the value off the command line (repeatable)")
 
 
     # Job command
@@ -581,6 +601,12 @@ over the allow-listed fields only. Bounds: --hours <= 168, --limit <= 2000, <= 2
 
     mp_affected = mp_sub.add_parser("affected", help="Get downstream environment instances and active playbooks affected by an integration")
     mp_affected.add_argument("identifier", help="Integration identifier or title (e.g. 'Wiz')")
+
+    mp_install = mp_sub.add_parser("install", help="Install a Marketplace Response Integration into the tenant (creates no instances)")
+    mp_install.add_argument("identifier", help="Exact integration identifier (e.g. 'GoogleCloudIAM')")
+    mp_install.add_argument("--version", help="Version to install (default: latest)")
+    mp_install.add_argument("--staging", action="store_true", default=False, help="Install as a staging integration")
+    mp_install.add_argument("--override-mapping", action="store_true", default=False, help="Override the ontology mapping if the integration is already installed")
 
     # Dashboards command
     dash_parser = subparsers.add_parser("dashboard", help="Explore native dashboards, inspect chart widgets, and execute statistical telemetry queries")
@@ -3183,6 +3209,27 @@ def run_playbook_cli(args):
                 json.dump(report, f, indent=2, default=str)
             print(f"[+] SOAR Playbook health report written to: {args.out}")
 
+    elif args.playbook_action == "attach":
+        print(f"\n[CLI] Attaching playbook '{args.playbook}' to case {args.case}...")
+        try:
+            result = engine.attach_playbook_to_alert(
+                case_id=args.case,
+                alert_group_identifier=args.alert_group,
+                alert_identifier=args.alert,
+                playbook_name=args.playbook,
+                playbook_identifier=args.identifier,
+                run_automatic=not args.manual,
+            )
+            print(f"\n[✓] Playbook attached.")
+            print(f"    Case      : {result.case_id}")
+            print(f"    Alert     : {result.alert_identifier}")
+            print(f"    Playbook  : {result.playbook_name}")
+            print(f"    Automatic : {result.run_automatic}")
+            print()
+        except Exception as e:
+            print(f"Error attaching playbook: {e}", file=sys.stderr)
+            sys.exit(1)
+
 
 def run_integration_cli(args):
     engine = SecOpsEngine()
@@ -3334,6 +3381,67 @@ def run_integration_cli(args):
         except Exception as e:
             print(f"Error deleting integration instance: {e}", file=sys.stderr)
             sys.exit(1)
+
+    elif args.integration_action == "create-instance":
+        print(f"\n[CLI] Creating instance '{args.name}' of {args.integration} in environment '{args.env}'...")
+        try:
+            result = engine.create_integration_instance(
+                integration_id=args.integration,
+                environment=args.env,
+                display_name=args.name,
+                description=args.description,
+            )
+            _print_integration_instance_write_result(result)
+        except Exception as e:
+            print(f"Error creating integration instance: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.integration_action == "update-instance":
+        values = {}
+        try:
+            for pair in args.set_values:
+                name, sep, value = pair.partition("=")
+                if not sep or not name.strip():
+                    raise ValueError(f"--set expects NAME=VALUE, got '{pair}'.")
+                values[name.strip()] = value
+            for pair in args.set_env_values:
+                name, sep, env_var = pair.partition("=")
+                if not sep or not name.strip() or not env_var.strip():
+                    raise ValueError(f"--set-env expects NAME=ENV_VAR, got '{pair}'.")
+                if env_var.strip() not in os.environ:
+                    raise ValueError(f"Environment variable '{env_var.strip()}' is not set.")
+                values[name.strip()] = os.environ[env_var.strip()]
+            if not values:
+                raise ValueError("Provide at least one --set or --set-env.")
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"\n[CLI] Updating {len(values)} parameter(s) on instance {args.instance} ({args.integration})...")
+        try:
+            result = engine.update_integration_instance(
+                integration_id=args.integration,
+                instance_id=args.instance,
+                parameter_values=values,
+            )
+            _print_integration_instance_write_result(result)
+        except Exception as e:
+            print(f"Error updating integration instance: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def _print_integration_instance_write_result(result):
+    """Prints an instance write result. Parameter values are never printed."""
+    inst = result.instance
+    print(f"\n[✓] Instance '{inst.display_name}' ({inst.integration_identifier})")
+    print(f"    Identifier  : {inst.identifier}")
+    print(f"    Environment : {inst.environment}")
+    print(f"    Configured  : {inst.is_configured}")
+    if result.updated_parameters:
+        print(f"    Updated     : {', '.join(result.updated_parameters)}")
+    unset = result.unset_mandatory_parameters
+    if unset:
+        print(f"    Mandatory parameters still unset: {', '.join(unset)}")
+    print()
 
 
 def run_job_cli(args):
@@ -4220,6 +4328,23 @@ def run_marketplace_cli(args):
 
         except Exception as e:
             print(f"Error fetching affected items: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.mp_action == "install":
+        print(f"\n[CLI] Installing Marketplace Response Integration '{args.identifier}'...")
+        try:
+            result = engine.install_marketplace_integration(
+                identifier=args.identifier,
+                version=args.version,
+                staging=args.staging,
+                override_mapping=args.override_mapping,
+            )
+            print(f"\n[✓] Installed {result.identifier} version {result.version or 'unknown'}"
+                  f"{' (staging)' if result.staging else ''}.")
+            print("    No integration instance was created. Use 'secops integration create-instance' next.")
+            print()
+        except Exception as e:
+            print(f"Error installing marketplace integration: {e}", file=sys.stderr)
             sys.exit(1)
 
 

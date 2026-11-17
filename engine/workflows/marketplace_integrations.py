@@ -20,6 +20,7 @@ from engine.domain import (
     AffectedDownstreamInstance,
     AffectedDownstreamPlaybook,
     MarketplaceAffectedItems,
+    MarketplaceIntegrationInstallResult,
     MarketplaceCommercialDiff,
     MarketplaceIntegrationBatch,
     MarketplaceIntegrationDetail,
@@ -278,3 +279,43 @@ class GetMarketplaceIntegrationAffectedItemsWorkflow:
 
         raw_affected = self.adapter.get_integration_affected_items(resolved_id)
         return _map_affected_items(raw_affected, resolved_id)
+
+
+class InstallMarketplaceIntegrationWorkflow:
+    """Installs a Marketplace Response Integration into the tenant.
+
+    Installation is tenant-wide. It creates no integration instance and stores
+    no credentials; create instances per environment afterwards.
+    """
+
+    def __init__(self, adapter: Any):
+        self.adapter = adapter
+
+    def execute(
+        self,
+        identifier: str,
+        version: Optional[str] = None,
+        staging: bool = False,
+        override_mapping: bool = False,
+    ) -> MarketplaceIntegrationInstallResult:
+        clean_id = (identifier or "").strip().split("/")[-1]
+        if not clean_id:
+            raise ValueError("identifier must be provided.")
+
+        raw = self.adapter.install_marketplace_integration(
+            clean_id,
+            version=version,
+            staging=staging,
+            override_mapping=override_mapping,
+        )
+        installed_id = raw.get("identifier")
+        if not installed_id:
+            raise RuntimeError(
+                f"Install of marketplace integration '{clean_id}' returned no identifier: {raw!r}"
+            )
+        return MarketplaceIntegrationInstallResult(
+            identifier=str(installed_id),
+            version=str(raw.get("version") or ""),
+            staging=bool(staging),
+            raw=raw,
+        )

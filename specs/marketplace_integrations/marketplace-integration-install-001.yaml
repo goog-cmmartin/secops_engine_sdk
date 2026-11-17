@@ -1,0 +1,49 @@
+id: marketplace_integration.install
+version: 1.0.0
+title: Install Marketplace Response Integration
+description: >
+  Installs a Marketplace Response Integration into the tenant. Installation is tenant-wide,
+  creates no integration instance, and stores no credentials.
+category: marketplace_integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/marketplaceIntegrations/{integration}:install
+  method: POST
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+  observation: discovery/observations/OBS_INTEGRATION_INSTALL_AND_INSTANCE_WRITE.md
+
+inputs:
+  identifier:
+    type: string
+    required: true
+    description: Exact marketplace integration identifier (for example GoogleCloudIAM).
+  version:
+    type: string
+    required: false
+    description: Version to install. The latest version is installed when omitted.
+  staging:
+    type: boolean
+    required: false
+    default: false
+    description: Install as a staging integration instead of production.
+  override_mapping:
+    type: boolean
+    required: false
+    default: false
+    description: Override the ontology mapping if the integration is already installed.
+
+outputs:
+  result:
+    type: MarketplaceIntegrationInstallResult
+    properties:
+      identifier: string
+      version: string
+      staging: boolean
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - The install request is never retried; a client timeout is surfaced as an explicit error.
+  - A response without an integration identifier is an explicit failure.
+  - Mutating capability. It declares tenant side effects, so it is never classified as tenant read-only.

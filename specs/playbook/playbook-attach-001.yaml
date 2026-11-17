@@ -1,0 +1,58 @@
+id: playbook.attach
+version: 1.0.0
+title: Attach SOAR Playbook to Alert
+description: >
+  Manually attaches and starts a playbook on one alert of a case.
+category: playbook
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/legacyPlaybooks:legacyAttachWorkflowToCase
+  method: POST
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+  observation: discovery/observations/OBS_PLAYBOOK_ATTACH_AND_CREATE.md
+
+inputs:
+  case_id:
+    type: string
+    required: true
+    description: Numeric case identifier.
+  alert_group_identifier:
+    type: string
+    required: true
+    description: Alert group identifier of the target alert.
+  alert_identifier:
+    type: string
+    required: true
+    description: Alert identifier of the target alert.
+  playbook_name:
+    type: string
+    required: true
+    description: Playbook name exactly as stored.
+  playbook_identifier:
+    type: string
+    required: false
+    description: Playbook UUID, sent as the original workflow definition identifier.
+  run_automatic:
+    type: boolean
+    required: false
+    default: true
+    description: Whether the attached playbook starts executing automatically.
+
+outputs:
+  result:
+    type: PlaybookAttachResult
+    properties:
+      case_id: string
+      alert_group_identifier: string
+      alert_identifier: string
+      playbook_name: string
+      playbook_identifier: string
+      run_automatic: boolean
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - A response that does not acknowledge the attach (payload true) is an explicit failure.
+  - The attach request is never retried.
+  - Mutating capability. It declares tenant side effects, so it is never classified as tenant read-only.

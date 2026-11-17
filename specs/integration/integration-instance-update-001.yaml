@@ -1,0 +1,46 @@
+id: integration.instance.update
+version: 1.0.0
+title: Update SOAR Integration Instance Parameters
+description: >
+  Sets parameter values on an integration instance. Reads the instance's parameter list, merges
+  the requested values by parameter display name or property name, and writes the list back.
+category: integration
+status: VERIFIED
+provenance:
+  api_path: /v1alpha/projects/{project}/locations/{location}/instances/{instance}/integrations/{integration}/integrationInstances/{integrationInstance}
+  method: PATCH
+  query: updateMask=parameters
+  auth: ADC Bearer Token
+  cache_policy: LIVE_DYNAMIC
+  observation: discovery/observations/OBS_INTEGRATION_INSTALL_AND_INSTANCE_WRITE.md
+
+inputs:
+  integration_id:
+    type: string
+    required: true
+    description: Identifier of the parent integration.
+  instance_id:
+    type: string
+    required: true
+    description: Identifier or resource name of the instance.
+  parameter_values:
+    type: object
+    required: true
+    description: Mapping of parameter display name (or property name) to the value to set.
+
+outputs:
+  result:
+    type: IntegrationInstanceWriteResult
+    properties:
+      instance: IntegrationInstance
+      parameters: list of IntegrationInstanceParameter (name, type, mandatory, has_value)
+      updated_parameters: list of string
+      unset_mandatory_parameters: list of string
+
+invariants:
+  - Strict origin of production data from live Google SecOps endpoints.
+  - Zero mock or synthetic data structures.
+  - An unknown parameter name fails before any write.
+  - Only the parameters update mask is used; other instance fields are not modified.
+  - Parameter values are never carried on the result.
+  - Mutating capability. It declares tenant side effects, so it is never classified as tenant read-only.

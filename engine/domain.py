@@ -1877,6 +1877,18 @@ def coerce_playbook_type(val: Union[PlaybookType, str, None]) -> Optional[Playbo
 
 
 @dataclass
+class PlaybookAttachResult:
+    """Result of manually attaching a playbook to one alert of a case."""
+    case_id: str
+    alert_group_identifier: str
+    alert_identifier: str
+    playbook_name: str
+    playbook_identifier: Optional[str] = None
+    run_automatic: bool = True
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class PlaybookCategory:
     """SOAR Playbook category/folder taxonomy."""
     id: str
@@ -2227,6 +2239,28 @@ class IntegrationInstanceDeleteResult:
     affected_playbooks_count: int = 0
     deleted_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+
+@dataclass
+class IntegrationInstanceParameter:
+    """One configuration parameter of an integration instance. Values are never carried here."""
+    display_name: str
+    property_name: str
+    type: str
+    is_mandatory: bool
+    has_value: bool
+
+
+@dataclass
+class IntegrationInstanceWriteResult:
+    """Result of creating an integration instance or updating its parameters."""
+    instance: IntegrationInstance
+    parameters: List[IntegrationInstanceParameter] = field(default_factory=list)
+    updated_parameters: List[str] = field(default_factory=list)
+
+    @property
+    def unset_mandatory_parameters(self) -> List[str]:
+        return [p.display_name for p in self.parameters if p.is_mandatory and not p.has_value]
 
 
 @dataclass
@@ -2786,6 +2820,15 @@ class MarketplaceAffectedItems:
     integration_identifier: str
     affected_instances: List[AffectedDownstreamInstance] = field(default_factory=list)
     affected_playbooks: List[AffectedDownstreamPlaybook] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MarketplaceIntegrationInstallResult:
+    """Result of installing a Marketplace Response Integration into the tenant."""
+    identifier: str
+    version: str
+    staging: bool = False
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
